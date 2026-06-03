@@ -1,8 +1,14 @@
 import dotenv from "dotenv";
 import express from "express";
 import { createClient } from "@supabase/supabase-js";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
+// Vercel Node Functions import this file from the repository root, while local
+// admin API development runs it from apps/admin. Load both locations without
+// override so Vercel dashboard env vars always win and local apps/admin/.env
+// still works for root-level import checks.
 dotenv.config();
+dotenv.config({ path: fileURLToPath(new URL("../.env", import.meta.url)), override: false });
 
 const PORT = Number(process.env.ADMIN_API_PORT || 8788);
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -10,7 +16,7 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY;
 
 if (!SUPABASE_URL || (!SUPABASE_SERVICE_ROLE_KEY && !SUPABASE_PUBLISHABLE_KEY)) {
-  throw new Error("Missing SUPABASE_URL and a usable Supabase API key in wmshr-admin/.env");
+  throw new Error("Missing SUPABASE_URL and a usable Supabase API key in apps/admin/.env or Vercel environment variables");
 }
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY || SUPABASE_PUBLISHABLE_KEY, {
@@ -3490,10 +3496,14 @@ app.patch("/api/admin/employees/:id/status", async (req, res) => {
   }
 });
 
-// Vercel 的 Node Function 会直接复用 Express app 作为请求处理器；
-// 本地开发仍保留 app.listen，避免破坏现有 `npm run dev:admin:api` 的运行方式。
-// 如果后续调整部署入口，请同时检查根目录 `api/[...path].js` 和 `vercel.json`。
-if (!process.env.VERCEL) {
+const isDirectRun = process.argv[1]
+  ? import.meta.url === pathToFileURL(process.argv[1]).href
+  : false;
+
+// Vercel 的 Node Function 和根目录验证脚本都会 import 这个文件；只有直接
+// 执行 `node server/index.js` 时才启动监听，避免 serverless 入口被本地
+// app.listen 长连接卡住。若部署入口调整，请同时检查根目录 `api/[...path].js` 和 `vercel.json`。
+if (isDirectRun) {
   app.listen(PORT, () => {
     console.log(`wmshr-admin API running on http://127.0.0.1:${PORT}`);
   });
