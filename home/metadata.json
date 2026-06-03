@@ -1,0 +1,6 @@
+{
+  "name": "Dutylix",
+  "description": "Unified platform for overseas enterprise employee attendance, automated payroll, and global compliance management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

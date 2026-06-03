@@ -1,0 +1,3280 @@
+import dotenv from "dotenv";
+import express from "express";
+import { createClient } from "@supabase/supabase-js";
+
+dotenv.config();
+
+const PORT = Number(process.env.ADMIN_API_PORT || 8788);
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY;
+
+if (!SUPABASE_URL || (!SUPABASE_SERVICE_ROLE_KEY && !SUPABASE_PUBLISHABLE_KEY)) {
+  throw new Error("Missing SUPABASE_URL and a usable Supabase API key in wmshr-admin/.env");
+}
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY || SUPABASE_PUBLISHABLE_KEY, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false
+  }
+});
+
+function getAccessToken(req) {
+  const authorization = req.headers.authorization;
+  if (!authorization || !authorization.startsWith("Bearer ")) {
+    return null;
+  }
+
+  return authorization.slice("Bearer ".length).trim();
+}
+
+async function requireGoogleAuth(req, res, next) {
+  const accessToken = getAccessToken(req);
+  if (!accessToken) {
+    return res.status(401).json({ error: "未登录，请先使用 Google 账号登录" });
+  }
+
+  const { data, error } = await supabase.auth.getUser(accessToken);
+  if (error || !data.user) {
+    return res.status(401).json({ error: "登录状态已失效，请重新登录" });
+  }
+
+  const providers = data.user.app_metadata?.providers || [];
+  const provider = data.user.app_metadata?.provider;
+  const isGoogleUser = provider === "google" || providers.includes("google");
+
+  if (!isGoogleUser) {
+    return res.status(403).json({ error: "当前后台仅允许 Google 登录用户访问" });
+  }
+
+  req.authUser = data.user;
+  next();
+}
+
+const app = express();
+app.use(express.json({ limit: "5mb" }));
+
+function mapEmployeeRow(row, ruleMap = new Map()) {
+  return {
+    id: Number(row.id),
+    employeeNo: row.employee_no,
+    name: row.name,
+    gender: row.gender,
+    country: row.country,
+    phone: row.phone,
+    role: row.role,
+    dept: row.dept,
+    joinDate: row.join_date,
+    status: row.status,
+    attendanceRuleId: Number(row.attendance_rule_id),
+    attendanceRuleName: row.attendance_rule_name || ruleMap.get(Number(row.attendance_rule_id)) || null,
+    salaryType: row.salary_type,
+    hourlyRate: row.hourly_rate === null ? null : Number(row.hourly_rate),
+    fixedSalary: row.fixed_salary === null ? null : Number(row.fixed_salary),
+    currency: row.currency,
+    photo: row.photo,
+    isDeleted: row.is_deleted
+  };
+}
+
+function escapeLikeKeyword(value) {
+  return value.replace(/[%_,]/g, (char) => `\\${char}`);
+}
+
+function mapHistoryRow(row, ruleMap = new Map()) {
+  return {
+    id: Number(row.id),
+    employeeId: Number(row.employee_id),
+    attendanceRuleId: Number(row.attendance_rule_id),
+    attendanceRuleName: row.attendance_rule_name || ruleMap.get(Number(row.attendance_rule_id)) || null,
+    effectiveStartDate: row.effective_start_date,
+    effectiveEndDate: row.effective_end_date,
+    createdAt: row.created_at,
+    createdBy: row.created_by
+  };
+}
+
+function mapAttendanceRuleRow(row, relatedEmployeeCount = 0) {
+  return {
+    id: Number(row.id),
+    name: row.name,
+    isActive: row.is_active,
+    effectiveStartDate: row.effective_start_date,
+    effectiveEndDate: row.effective_end_date,
+    startShift: row.start_shift,
+    endShift: row.end_shift,
+    breakStart: row.break_start,
+    breakEnd: row.break_end,
+    standardHours: Number(row.standard_hours),
+    overtimeEnabled: row.overtime_enabled,
+    otHourlyFee: Number(row.ot_hourly_fee),
+    overtimeMinUnitHours: Number(row.overtime_min_unit_hours),
+    overtimeRounding: row.overtime_rounding,
+    relatedEmployeeCount,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function normalizeAttendanceRulePayload(body) {
+  return {
+    name: String(body.name || "").trim(),
+    is_active: Boolean(body.isActive),
+    effective_start_date: body.effectiveStartDate,
+    effective_end_date: body.effectiveEndDate || null,
+    start_shift: body.startShift,
+    end_shift: body.endShift,
+    break_start: body.breakStart,
+    break_end: body.breakEnd,
+    standard_hours: Number(body.standardHours),
+    overtime_enabled: Boolean(body.overtimeEnabled),
+    ot_hourly_fee: body.otHourlyFee === null || body.otHourlyFee === "" ? 0 : Number(body.otHourlyFee),
+    overtime_min_unit_hours: 0.5,
+    overtime_rounding: "floor_to_half_hour",
+    updated_at: new Date().toISOString()
+  };
+}
+
+function validateAttendanceRulePayload(payload) {
+  if (!payload.name) {
+    return "规则名称不能为空";
+  }
+
+  if (!payload.effective_start_date) {
+    return "生效开始日期不能为空";
+  }
+
+  if (payload.effective_end_date && payload.effective_end_date < payload.effective_start_date) {
+    return "生效结束日期不能早于生效开始日期";
+  }
+
+  if (!payload.start_shift || !payload.end_shift || !payload.break_start || !payload.break_end) {
+    return "请完整填写班次和休息时间";
+  }
+
+  if (!Number.isFinite(payload.standard_hours) || payload.standard_hours <= 0) {
+    return "标准工时必须大于 0";
+  }
+
+  if (!Number.isFinite(payload.ot_hourly_fee) || payload.ot_hourly_fee < 0) {
+    return "加班费标准必须大于等于 0";
+  }
+
+  return null;
+}
+
+function addOwnerPayload(payload, ownerUserId) {
+  return {
+    ...payload,
+    owner_user_id: ownerUserId
+  };
+}
+
+function getPreviousDate(date) {
+  const value = new Date(`${date}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() - 1);
+  return value.toISOString().slice(0, 10);
+}
+
+function generateEmployeeNo() {
+  return `EMP${Date.now().toString().slice(-8)}${String(Math.floor(Math.random() * 90) + 10)}`;
+}
+
+async function fetchRuleMap(ids, ownerUserId) {
+  if (!ids.length) {
+    return new Map();
+  }
+
+  const { data, error } = await supabase
+    .from("attendance_rules")
+    .select("id, name")
+    .eq("owner_user_id", ownerUserId)
+    .in("id", ids);
+
+  if (error) {
+    throw error;
+  }
+
+  return new Map(data.map((rule) => [Number(rule.id), rule.name]));
+}
+
+async function fetchAttendanceRuleCounts(ownerUserId) {
+  const [historyResult, employeeResult] = await Promise.all([
+    supabase
+      .from("employee_attendance_rule_history")
+      .select("attendance_rule_id, employee_id")
+      .eq("owner_user_id", ownerUserId),
+    supabase
+      .from("employees")
+      .select("attendance_rule_id, id")
+      .eq("owner_user_id", ownerUserId)
+  ]);
+
+  if (historyResult.error) {
+    throw historyResult.error;
+  }
+
+  if (employeeResult.error) {
+    throw employeeResult.error;
+  }
+
+  const countMap = new Map();
+
+  for (const row of historyResult.data) {
+    const ruleId = Number(row.attendance_rule_id);
+    const employeeId = Number(row.employee_id);
+    if (!countMap.has(ruleId)) {
+      countMap.set(ruleId, new Set());
+    }
+    countMap.get(ruleId).add(employeeId);
+  }
+
+  for (const row of employeeResult.data) {
+    const ruleId = Number(row.attendance_rule_id);
+    const employeeId = Number(row.id);
+    if (!countMap.has(ruleId)) {
+      countMap.set(ruleId, new Set());
+    }
+    countMap.get(ruleId).add(employeeId);
+  }
+
+  return new Map(Array.from(countMap.entries()).map(([ruleId, employeeIds]) => [ruleId, employeeIds.size]));
+}
+
+async function fetchAttendanceRuleDetail(ruleId, ownerUserId) {
+  const [{ data: row, error }, counts] = await Promise.all([
+    supabase
+      .from("attendance_rules")
+      .select("*")
+      .eq("owner_user_id", ownerUserId)
+      .eq("id", ruleId)
+      .single(),
+    fetchAttendanceRuleCounts(ownerUserId)
+  ]);
+
+  if (error) {
+    throw error;
+  }
+
+  return {
+    rule: mapAttendanceRuleRow(row, counts.get(Number(row.id)) || 0)
+  };
+}
+
+async function fetchEmployeeDetail(employeeId, ownerUserId) {
+  const { data: employeeRow, error: employeeError } = await supabase
+    .from("employees")
+    .select("*")
+    .eq("owner_user_id", ownerUserId)
+    .eq("id", employeeId)
+    .single();
+
+  if (employeeError) {
+    throw employeeError;
+  }
+
+  const { data: historyRows, error: historyError } = await supabase
+    .from("employee_attendance_rule_history")
+    .select("*")
+    .eq("owner_user_id", ownerUserId)
+    .eq("employee_id", employeeId)
+    .order("effective_start_date", { ascending: false });
+
+  if (historyError) {
+    throw historyError;
+  }
+
+  const ruleIds = Array.from(new Set([
+    Number(employeeRow.attendance_rule_id),
+    ...historyRows.map((row) => Number(row.attendance_rule_id))
+  ]));
+  const ruleMap = await fetchRuleMap(ruleIds, ownerUserId);
+
+  return {
+    employee: mapEmployeeRow(employeeRow, ruleMap),
+    ruleHistory: historyRows.map((row) => mapHistoryRow(row, ruleMap))
+  };
+}
+
+function toDateKey(value) {
+  return typeof value === "string" ? value.slice(0, 10) : value;
+}
+
+function parseTimeToHours(value) {
+  if (!value) {
+    return null;
+  }
+
+  const match = /^(\d{2}):(\d{2})(?::\d{2})?$/.exec(value);
+  if (!match) {
+    return null;
+  }
+
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+
+  if (hours > 23 || minutes > 59) {
+    return null;
+  }
+
+  return hours + minutes / 60;
+}
+
+function roundToTwo(value) {
+  return Math.round(value * 100) / 100;
+}
+
+function enumerateMonthDates(yearMonth) {
+  const [year, month] = yearMonth.split("-").map(Number);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const dates = [];
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    dates.push(`${yearMonth}-${String(day).padStart(2, "0")}`);
+  }
+  return dates;
+}
+
+function getMonthRange(yearMonth) {
+  const dates = enumerateMonthDates(yearMonth);
+  return {
+    periodStartDate: dates[0],
+    periodEndDate: dates[dates.length - 1]
+  };
+}
+
+function mapAttendanceRecordRow(row) {
+  return {
+    id: Number(row.id),
+    employeeId: Number(row.employee_id),
+    date: row.date,
+    inTime: row.in_time ? row.in_time.slice(0, 5) : null,
+    outTime: row.out_time ? row.out_time.slice(0, 5) : null,
+    type: row.type,
+    note: row.note || "",
+    source: row.source
+  };
+}
+
+function mapAttendanceCalculationRow(row, employeeMap = new Map()) {
+  const employee = employeeMap.get(Number(row.employee_id));
+  return {
+    id: Number(row.id),
+    employeeId: Number(row.employee_id),
+    employeeNo: employee?.employee_no || undefined,
+    employeeName: employee?.name || `员工 #${row.employee_id}`,
+    attendanceRecordId: row.attendance_record_id === null ? null : Number(row.attendance_record_id),
+    date: row.date,
+    attendanceRuleId: row.attendance_rule_id === null ? null : Number(row.attendance_rule_id),
+    attendanceRuleName: row.attendance_rule_name || undefined,
+    rawInTime: row.raw_in_time ? row.raw_in_time.slice(0, 5) : null,
+    rawOutTime: row.raw_out_time ? row.raw_out_time.slice(0, 5) : null,
+    rawHours: Number(row.raw_hours),
+    breakDeductionHours: Number(row.break_deduction_hours),
+    validHours: Number(row.valid_hours),
+    standardHours: Number(row.standard_hours),
+    overtimeRawHours: Number(row.overtime_raw_hours),
+    overtimePayHours: Number(row.overtime_pay_hours),
+    status: row.status,
+    hasException: row.has_exception,
+    exceptionReason: row.exception_reason,
+    note: row.note || "",
+    source: row.source || null,
+    calculatedAt: row.calculated_at
+  };
+}
+
+function mapAttendanceSummaryRow(row, employeeMap = new Map()) {
+  const employee = employeeMap.get(Number(row.employee_id));
+  return {
+    id: Number(row.id),
+    employeeId: Number(row.employee_id),
+    employeeNo: employee?.employee_no || undefined,
+    employeeName: employee?.name || `员工 #${row.employee_id}`,
+    yearMonth: row.year_month,
+    periodStartDate: row.period_start_date,
+    periodEndDate: row.period_end_date,
+    totalRawHours: Number(row.total_raw_hours),
+    totalBreakDeductionHours: Number(row.total_break_deduction_hours),
+    totalValidHours: Number(row.total_valid_hours),
+    totalStandardHours: Number(row.total_standard_hours),
+    totalOvertimeRawHours: Number(row.total_overtime_raw_hours),
+    totalOvertimePayHours: Number(row.total_overtime_pay_hours),
+    recordCount: Number(row.record_count),
+    exceptionCount: Number(row.exception_count),
+    absentCount: Number(row.absent_count),
+    leaveCount: Number(row.leave_count),
+    manualAdjustedCount: Number(row.manual_adjusted_count),
+    canGeneratePayroll: row.can_generate_payroll,
+    blockedReason: row.blocked_reason,
+    calculatedAt: row.calculated_at
+  };
+}
+
+function mapSalaryProfileRow(row) {
+  return {
+    id: Number(row.id),
+    employeeId: Number(row.employee_id),
+    salaryType: row.salary_type,
+    fixedSalary: row.fixed_salary === null ? null : Number(row.fixed_salary),
+    hourlyRate: row.hourly_rate === null ? null : Number(row.hourly_rate),
+    currency: row.currency,
+    isActive: row.is_active,
+    effectiveStartDate: row.effective_start_date,
+    effectiveEndDate: row.effective_end_date,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function mapSalaryAdjustmentItemRow(row) {
+  return {
+    id: Number(row.id),
+    employeeId: Number(row.employee_id),
+    yearMonth: row.year_month,
+    type: row.type,
+    name: row.name,
+    amount: Number(row.amount),
+    note: row.note || "",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function mapPayrollResultRow(row, employeeMap = new Map()) {
+  const employee = employeeMap.get(Number(row.employee_id));
+  return {
+    id: Number(row.id),
+    employeeId: Number(row.employee_id),
+    employeeNo: employee?.employee_no || undefined,
+    employeeName: employee?.name || `员工 #${row.employee_id}`,
+    yearMonth: row.year_month,
+    salaryType: row.salary_type,
+    fixedSalary: row.fixed_salary === null ? null : Number(row.fixed_salary),
+    hourlyRate: row.hourly_rate === null ? null : Number(row.hourly_rate),
+    currency: row.currency,
+    validHours: Number(row.valid_hours),
+    standardHours: Number(row.standard_hours),
+    hourlyPay: Number(row.hourly_pay),
+    overtimePayHours: Number(row.overtime_pay_hours),
+    overtimePay: Number(row.overtime_pay),
+    allowanceTotal: Number(row.allowance_total),
+    deductionTotal: Number(row.deduction_total),
+    otherTotal: Number(row.other_total),
+    grossPay: Number(row.gross_pay),
+    totalDeduction: Number(row.total_deduction),
+    netPay: Number(row.net_pay),
+    calculationStatus: row.calculation_status,
+    reviewStatus: row.review_status,
+    blockedReason: row.blocked_reason,
+    calculatedAt: row.calculated_at,
+    confirmedAt: row.confirmed_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function buildAttendanceResultPayload({
+  ownerUserId,
+  employeeId,
+  date,
+  record = null,
+  rule = null,
+  status,
+  hasException,
+  exceptionReason,
+  rawHours = 0,
+  breakDeductionHours = 0,
+  validHours = 0,
+  standardHours = 0,
+  overtimeRawHours = 0,
+  overtimePayHours = 0
+}) {
+  return {
+    owner_user_id: ownerUserId,
+    employee_id: employeeId,
+    attendance_record_id: record ? Number(record.id) : null,
+    date,
+    attendance_rule_id: rule ? Number(rule.id) : null,
+    attendance_rule_name: rule ? rule.name : null,
+    raw_in_time: record?.in_time || null,
+    raw_out_time: record?.out_time || null,
+    raw_hours: roundToTwo(rawHours),
+    break_deduction_hours: roundToTwo(breakDeductionHours),
+    valid_hours: roundToTwo(validHours),
+    standard_hours: roundToTwo(standardHours),
+    overtime_raw_hours: roundToTwo(overtimeRawHours),
+    overtime_pay_hours: roundToTwo(overtimePayHours),
+    status,
+    has_exception: hasException,
+    exception_reason: exceptionReason,
+    note: record?.note || "",
+    source: record?.source || null,
+    calculated_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+}
+
+function calculateOverlapHours(start, end, breakStart, breakEnd) {
+  let adjustedEnd = end;
+  if (adjustedEnd < start) {
+    adjustedEnd += 24;
+  }
+
+  let adjustedBreakEnd = breakEnd;
+  if (adjustedBreakEnd < breakStart) {
+    adjustedBreakEnd += 24;
+  }
+
+  let overlapStart = Math.max(start, breakStart);
+  let overlapEnd = Math.min(adjustedEnd, adjustedBreakEnd);
+  if (overlapStart < overlapEnd) {
+    return overlapEnd - overlapStart;
+  }
+
+  overlapStart = Math.max(start, breakStart + 24);
+  overlapEnd = Math.min(adjustedEnd + 24, adjustedBreakEnd + 24);
+  if (overlapStart < overlapEnd) {
+    return overlapEnd - overlapStart;
+  }
+
+  return 0;
+}
+
+function getMonthEndDate(yearMonth) {
+  return getMonthRange(yearMonth).periodEndDate;
+}
+
+function getMonthStartDate(yearMonth) {
+  return getMonthRange(yearMonth).periodStartDate;
+}
+
+function sumBy(rows, predicate) {
+  return roundToTwo(rows.filter(predicate).reduce((sum, row) => sum + Number(row.amount), 0));
+}
+
+function normalizeSalaryAdjustmentPayload(body) {
+  return {
+    employee_id: Number(body.employeeId),
+    year_month: String(body.yearMonth || ""),
+    type: String(body.type || ""),
+    name: String(body.name || "").trim(),
+    amount: Number(body.amount),
+    note: String(body.note || "").trim()
+  };
+}
+
+function validateSalaryAdjustmentPayload(payload) {
+  if (!payload.employee_id) {
+    return "employeeId 必填";
+  }
+  if (!/^\d{4}-\d{2}$/.test(payload.year_month)) {
+    return "yearMonth 必须为 YYYY-MM";
+  }
+  if (!["allowance", "deduction", "other"].includes(payload.type)) {
+    return "type 必须为 allowance、deduction 或 other";
+  }
+  if (!payload.name) {
+    return "名称不能为空";
+  }
+  if (Number.isNaN(payload.amount) || payload.amount < 0) {
+    return "金额必须大于等于 0";
+  }
+  return null;
+}
+
+async function getSalaryAdjustmentLockError(ownerUserId, employeeId, yearMonth) {
+  const { data, error } = await supabase
+    .from("monthly_payroll_results")
+    .select("id, calculation_status, review_status")
+    .eq("owner_user_id", ownerUserId)
+    .eq("employee_id", Number(employeeId))
+    .eq("year_month", yearMonth)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  if (data.calculation_status === "confirmed") {
+    return "该薪酬结果已确认，不能修改一次性薪资项";
+  }
+
+  if (data.review_status === "approved") {
+    return "该薪酬结果已核对通过，不能修改一次性薪资项";
+  }
+
+  return null;
+}
+
+function getPayrollResultLockError(result) {
+  if (!result) {
+    return null;
+  }
+
+  if (result.calculation_status === "confirmed") {
+    return "已确认的薪酬结果不允许重新计算";
+  }
+
+  if (result.review_status === "approved") {
+    return "已核对通过的薪酬结果不允许重新计算，请先驳回后再重算";
+  }
+
+  return null;
+}
+
+function getTodayDateKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function isInactiveEmployeeStatus(status) {
+  return status === "disabled" || status === "resigned";
+}
+
+function shouldCalculateEmployeeDate(employee, date) {
+  const joinDate = employee?.join_date ? toDateKey(employee.join_date) : null;
+  const today = getTodayDateKey();
+
+  if (joinDate && date < joinDate) {
+    return false;
+  }
+
+  if (date > today) {
+    return false;
+  }
+
+  return true;
+}
+
+async function fetchCalculationContext(yearMonth, ownerUserId) {
+  const { periodStartDate, periodEndDate } = getMonthRange(yearMonth);
+  const [employeesResult, recordsResult, historyResult, rulesResult, calculationsResult, summariesResult] = await Promise.all([
+    supabase.from("employees").select("*").eq("owner_user_id", ownerUserId).order("id", { ascending: true }),
+    supabase.from("attendance_records").select("*").eq("owner_user_id", ownerUserId).gte("date", periodStartDate).lte("date", periodEndDate),
+    supabase.from("employee_attendance_rule_history").select("*").eq("owner_user_id", ownerUserId).order("effective_start_date", { ascending: true }),
+    supabase.from("attendance_rules").select("*").eq("owner_user_id", ownerUserId),
+    supabase.from("attendance_calculation_results").select("*").eq("owner_user_id", ownerUserId).gte("date", periodStartDate).lte("date", periodEndDate),
+    supabase.from("monthly_attendance_summaries").select("*").eq("owner_user_id", ownerUserId).eq("year_month", yearMonth)
+  ]);
+
+  for (const result of [employeesResult, recordsResult, historyResult, rulesResult, calculationsResult, summariesResult]) {
+    if (result.error) {
+      throw result.error;
+    }
+  }
+
+  const employees = employeesResult.data;
+  const employeeMap = new Map(employees.map((row) => [Number(row.id), row]));
+  const recordMap = new Map(recordsResult.data.map((row) => [`${row.employee_id}:${toDateKey(row.date)}`, row]));
+  const ruleMap = new Map(rulesResult.data.map((row) => [Number(row.id), row]));
+  const historyMap = new Map();
+
+  for (const row of historyResult.data) {
+    const employeeId = Number(row.employee_id);
+    if (!historyMap.has(employeeId)) {
+      historyMap.set(employeeId, []);
+    }
+    historyMap.get(employeeId).push(row);
+  }
+
+  const calculationMap = new Map(calculationsResult.data.map((row) => [`${row.employee_id}:${toDateKey(row.date)}`, row]));
+  const summaryMap = new Map(summariesResult.data.map((row) => [Number(row.employee_id), row]));
+
+  return {
+    employees,
+    employeeMap,
+    recordMap,
+    ruleMap,
+    historyMap,
+    calculationMap,
+    summaryMap
+  };
+}
+
+function resolveRuleForDate(historyRows, ruleMap, date) {
+  if (!historyRows?.length) {
+    return { rule: null, exceptionReason: "ATTENDANCE_RULE_NOT_FOUND" };
+  }
+
+  const matchingHistory = historyRows.find((row) => {
+    const start = toDateKey(row.effective_start_date);
+    const end = row.effective_end_date ? toDateKey(row.effective_end_date) : null;
+    return date >= start && (!end || date <= end);
+  });
+
+  if (!matchingHistory) {
+    return { rule: null, exceptionReason: "ATTENDANCE_RULE_NOT_FOUND" };
+  }
+
+  const rule = ruleMap.get(Number(matchingHistory.attendance_rule_id));
+  if (!rule) {
+    return { rule: null, exceptionReason: "ATTENDANCE_RULE_NOT_FOUND" };
+  }
+
+  const ruleStart = toDateKey(rule.effective_start_date);
+  const ruleEnd = rule.effective_end_date ? toDateKey(rule.effective_end_date) : null;
+  if (date < ruleStart || (ruleEnd && date > ruleEnd)) {
+    return { rule: null, exceptionReason: "ATTENDANCE_RULE_EXPIRED" };
+  }
+
+  return { rule, exceptionReason: null };
+}
+
+function calculateDailyAttendanceRow(employee, record, rule, date, ownerUserId) {
+  if (!rule) {
+    return buildAttendanceResultPayload({
+      ownerUserId,
+      employeeId: Number(employee.id),
+      date,
+      record,
+      rule: null,
+      status: "exception",
+      hasException: true,
+      exceptionReason: "ATTENDANCE_RULE_NOT_FOUND"
+    });
+  }
+
+  if (!record) {
+    return buildAttendanceResultPayload({
+      ownerUserId,
+      employeeId: Number(employee.id),
+      date,
+      record: null,
+      rule,
+      status: "absent",
+      hasException: false,
+      exceptionReason: null,
+      standardHours: Number(rule.standard_hours)
+    });
+  }
+
+  if (record.type === "leave") {
+    return buildAttendanceResultPayload({
+      ownerUserId,
+      employeeId: Number(employee.id),
+      date,
+      record,
+      rule,
+      status: "leave",
+      hasException: false,
+      exceptionReason: null,
+      standardHours: Number(rule.standard_hours)
+    });
+  }
+
+  if (record.type === "absent") {
+    return buildAttendanceResultPayload({
+      ownerUserId,
+      employeeId: Number(employee.id),
+      date,
+      record,
+      rule,
+      status: "absent",
+      hasException: false,
+      exceptionReason: null,
+      standardHours: Number(rule.standard_hours)
+    });
+  }
+
+  if (!record.in_time) {
+    return buildAttendanceResultPayload({
+      ownerUserId,
+      employeeId: Number(employee.id),
+      date,
+      record,
+      rule,
+      status: "exception",
+      hasException: true,
+      exceptionReason: "IN_TIME_MISSING",
+      standardHours: Number(rule.standard_hours)
+    });
+  }
+
+  if (!record.out_time) {
+    return buildAttendanceResultPayload({
+      ownerUserId,
+      employeeId: Number(employee.id),
+      date,
+      record,
+      rule,
+      status: "exception",
+      hasException: true,
+      exceptionReason: "OUT_TIME_MISSING",
+      standardHours: Number(rule.standard_hours)
+    });
+  }
+
+  const inHours = parseTimeToHours(record.in_time);
+  const outHours = parseTimeToHours(record.out_time);
+  const breakStart = parseTimeToHours(rule.break_start);
+  const breakEnd = parseTimeToHours(rule.break_end);
+
+  if (inHours === null || outHours === null || breakStart === null || breakEnd === null) {
+    return buildAttendanceResultPayload({
+      ownerUserId,
+      employeeId: Number(employee.id),
+      date,
+      record,
+      rule,
+      status: "exception",
+      hasException: true,
+      exceptionReason: "TIME_FORMAT_INVALID",
+      standardHours: Number(rule.standard_hours)
+    });
+  }
+
+  let adjustedOutHours = outHours;
+  if (adjustedOutHours < inHours) {
+    adjustedOutHours += 24;
+  }
+
+  const rawHours = adjustedOutHours - inHours;
+  const breakDeductionHours = calculateOverlapHours(inHours, adjustedOutHours, breakStart, breakEnd);
+  const validHours = Math.max(0, rawHours - breakDeductionHours);
+  const standardHours = Number(rule.standard_hours);
+  const overtimeRawHours = Math.max(0, validHours - standardHours);
+  const overtimePayHours = rule.overtime_enabled
+    ? Math.floor(overtimeRawHours / Number(rule.overtime_min_unit_hours)) * Number(rule.overtime_min_unit_hours)
+    : 0;
+
+  return buildAttendanceResultPayload({
+    ownerUserId,
+    employeeId: Number(employee.id),
+    date,
+    record,
+    rule,
+    status: record.source === "manual" ? "manual_adjusted" : "normal",
+    hasException: false,
+    exceptionReason: null,
+    rawHours,
+    breakDeductionHours,
+    validHours,
+    standardHours,
+    overtimeRawHours,
+    overtimePayHours
+  });
+}
+
+async function upsertAttendanceCalculation(payload) {
+  const existing = await supabase
+    .from("attendance_calculation_results")
+    .select("id")
+    .eq("owner_user_id", payload.owner_user_id)
+    .eq("employee_id", payload.employee_id)
+    .eq("date", payload.date)
+    .maybeSingle();
+
+  if (existing.error) {
+    throw existing.error;
+  }
+
+  if (existing.data?.id) {
+    const { data, error } = await supabase
+      .from("attendance_calculation_results")
+      .update(payload)
+      .eq("id", existing.data.id)
+      .select("*")
+      .single();
+    if (error) {
+      throw error;
+    }
+    return data;
+  }
+
+  const { data, error } = await supabase
+    .from("attendance_calculation_results")
+    .insert({
+      ...payload,
+      created_at: new Date().toISOString()
+    })
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+async function upsertMonthlySummary(payload) {
+  const existing = await supabase
+    .from("monthly_attendance_summaries")
+    .select("id")
+    .eq("owner_user_id", payload.owner_user_id)
+    .eq("employee_id", payload.employee_id)
+    .eq("year_month", payload.year_month)
+    .maybeSingle();
+
+  if (existing.error) {
+    throw existing.error;
+  }
+
+  if (existing.data?.id) {
+    const { data, error } = await supabase
+      .from("monthly_attendance_summaries")
+      .update(payload)
+      .eq("id", existing.data.id)
+      .select("*")
+      .single();
+    if (error) {
+      throw error;
+    }
+    return data;
+  }
+
+  const { data, error } = await supabase
+    .from("monthly_attendance_summaries")
+    .insert({
+      ...payload,
+      created_at: new Date().toISOString()
+    })
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+async function recalculateDailyAttendance(employeeId, date, ownerUserId, context = null) {
+  const effectiveContext = context || await fetchCalculationContext(date.slice(0, 7), ownerUserId);
+  const employee = effectiveContext.employeeMap.get(Number(employeeId));
+
+  if (!employee) {
+    throw new Error("EMPLOYEE_NOT_FOUND");
+  }
+
+  const record = effectiveContext.recordMap.get(`${employeeId}:${date}`) || null;
+  const { rule, exceptionReason } = resolveRuleForDate(effectiveContext.historyMap.get(Number(employeeId)), effectiveContext.ruleMap, date);
+  let payload;
+
+  if (!rule && exceptionReason) {
+    payload = buildAttendanceResultPayload({
+      ownerUserId,
+      employeeId: Number(employeeId),
+      date,
+      record,
+      rule: null,
+      status: "exception",
+      hasException: true,
+      exceptionReason
+    });
+  } else {
+    payload = calculateDailyAttendanceRow(employee, record, rule, date, ownerUserId);
+  }
+
+  const row = await upsertAttendanceCalculation(payload);
+  effectiveContext.calculationMap.set(`${employeeId}:${date}`, row);
+  return mapAttendanceCalculationRow(row, effectiveContext.employeeMap);
+}
+
+async function recalculateMonthlyAttendance(yearMonth, ownerUserId, targetEmployeeId = null) {
+  const context = await fetchCalculationContext(yearMonth, ownerUserId);
+  const employees = targetEmployeeId
+    ? context.employees.filter((row) => Number(row.id) === Number(targetEmployeeId))
+    : context.employees.filter((row) => !isInactiveEmployeeStatus(row.status));
+  const dates = enumerateMonthDates(yearMonth);
+
+  for (const employee of employees) {
+    const applicableDates = dates.filter((date) => shouldCalculateEmployeeDate(employee, date));
+    const skippedDates = dates.filter((date) => !shouldCalculateEmployeeDate(employee, date));
+
+    if (skippedDates.length > 0) {
+      const { error: deleteError } = await supabase
+        .from("attendance_calculation_results")
+        .delete()
+        .eq("owner_user_id", ownerUserId)
+        .eq("employee_id", Number(employee.id))
+        .in("date", skippedDates);
+
+      if (deleteError) {
+        throw deleteError;
+      }
+
+      skippedDates.forEach((date) => {
+        context.calculationMap.delete(`${employee.id}:${date}`);
+      });
+    }
+
+    for (const date of applicableDates) {
+      await recalculateDailyAttendance(Number(employee.id), date, ownerUserId, context);
+    }
+  }
+
+  const summaries = [];
+  const { periodStartDate, periodEndDate } = getMonthRange(yearMonth);
+  for (const employee of employees) {
+    const employeeId = Number(employee.id);
+    const rows = dates
+      .filter((date) => shouldCalculateEmployeeDate(employee, date))
+      .map((date) => context.calculationMap.get(`${employeeId}:${date}`))
+      .filter(Boolean);
+
+    const summaryPayload = {
+      owner_user_id: ownerUserId,
+      employee_id: employeeId,
+      year_month: yearMonth,
+      period_start_date: periodStartDate,
+      period_end_date: periodEndDate,
+      total_raw_hours: roundToTwo(rows.reduce((sum, row) => sum + Number(row.raw_hours), 0)),
+      total_break_deduction_hours: roundToTwo(rows.reduce((sum, row) => sum + Number(row.break_deduction_hours), 0)),
+      total_valid_hours: roundToTwo(rows.reduce((sum, row) => sum + Number(row.valid_hours), 0)),
+      total_standard_hours: roundToTwo(rows.reduce((sum, row) => sum + Number(row.standard_hours), 0)),
+      total_overtime_raw_hours: roundToTwo(rows.reduce((sum, row) => sum + Number(row.overtime_raw_hours), 0)),
+      total_overtime_pay_hours: roundToTwo(rows.reduce((sum, row) => sum + Number(row.overtime_pay_hours), 0)),
+      record_count: rows.filter((row) => row.attendance_record_id !== null).length,
+      exception_count: rows.filter((row) => row.has_exception).length,
+      absent_count: rows.filter((row) => row.status === "absent").length,
+      leave_count: rows.filter((row) => row.status === "leave").length,
+      manual_adjusted_count: rows.filter((row) => row.status === "manual_adjusted").length,
+      can_generate_payroll: rows.every((row) => !row.has_exception),
+      blocked_reason: rows.every((row) => !row.has_exception) ? null : "存在未处理异常考勤记录",
+      calculated_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    const summaryRow = await upsertMonthlySummary(summaryPayload);
+    context.summaryMap.set(employeeId, summaryRow);
+    summaries.push(mapAttendanceSummaryRow(summaryRow, context.employeeMap));
+  }
+
+  return summaries;
+}
+
+function normalizeSalaryAmount(value) {
+  return value === null || value === undefined || value === "" ? null : Number(value);
+}
+
+function buildSalaryProfilePayload(employee, ownerUserId, effectiveStartDate) {
+  return {
+    owner_user_id: ownerUserId,
+    employee_id: Number(employee.id),
+    salary_type: employee.salary_type,
+    fixed_salary: normalizeSalaryAmount(employee.fixed_salary),
+    hourly_rate: normalizeSalaryAmount(employee.hourly_rate),
+    currency: employee.currency,
+    is_active: true,
+    effective_start_date: effectiveStartDate,
+    effective_end_date: null,
+    updated_at: new Date().toISOString()
+  };
+}
+
+function isSameSalaryProfile(profile, payload) {
+  return (
+    profile.salary_type === payload.salary_type &&
+    normalizeSalaryAmount(profile.fixed_salary) === normalizeSalaryAmount(payload.fixed_salary) &&
+    normalizeSalaryAmount(profile.hourly_rate) === normalizeSalaryAmount(payload.hourly_rate) &&
+    profile.currency === payload.currency
+  );
+}
+
+async function fetchSalaryProfileForMonth(employeeId, yearMonth, ownerUserId) {
+  const monthStartDate = getMonthStartDate(yearMonth);
+  const monthEndDate = getMonthEndDate(yearMonth);
+  const { data, error } = await supabase
+    .from("salary_profiles")
+    .select("*")
+    .eq("owner_user_id", ownerUserId)
+    .eq("employee_id", Number(employeeId))
+    .lte("effective_start_date", monthEndDate)
+    .order("effective_start_date", { ascending: false })
+    .order("id", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return (data || []).find((profile) => !profile.effective_end_date || toDateKey(profile.effective_end_date) >= monthStartDate) || null;
+}
+
+async function ensureSalaryProfileForEmployee(employee, ownerUserId, requestedEffectiveStartDate = null) {
+  const effectiveStartDate = requestedEffectiveStartDate || employee.join_date || getTodayDateKey();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveStartDate)) {
+    throw new Error("薪资生效日期格式必须为 YYYY-MM-DD");
+  }
+
+  const payload = buildSalaryProfilePayload(employee, ownerUserId, effectiveStartDate);
+
+  const existing = await supabase
+    .from("salary_profiles")
+    .select("*")
+    .eq("owner_user_id", ownerUserId)
+    .eq("employee_id", Number(employee.id))
+    .eq("is_active", true)
+    .is("effective_end_date", null)
+    .order("effective_start_date", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existing.error) {
+    throw existing.error;
+  }
+
+  const activeProfile = existing.data || null;
+  if (!activeProfile) {
+    const { data, error } = await supabase
+      .from("salary_profiles")
+      .insert({
+        ...payload,
+        created_at: new Date().toISOString()
+      })
+      .select("*")
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    return data;
+  }
+
+  if (isSameSalaryProfile(activeProfile, payload)) {
+    return activeProfile;
+  }
+
+  const activeStartDate = activeProfile.effective_start_date ? toDateKey(activeProfile.effective_start_date) : null;
+  if (activeStartDate && effectiveStartDate < activeStartDate) {
+    throw new Error("薪资生效日期不能早于当前薪资档案开始日期");
+  }
+
+  if (activeStartDate === effectiveStartDate) {
+    const { data, error } = await supabase
+      .from("salary_profiles")
+      .update(payload)
+      .eq("owner_user_id", ownerUserId)
+      .eq("id", Number(activeProfile.id))
+      .select("*")
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    return data;
+  }
+
+  const previousEndDate = getPreviousDate(effectiveStartDate);
+  const { error: closeError } = await supabase
+    .from("salary_profiles")
+    .update({
+      is_active: false,
+      effective_end_date: previousEndDate,
+      updated_at: new Date().toISOString()
+    })
+    .eq("owner_user_id", ownerUserId)
+    .eq("employee_id", Number(employee.id))
+    .eq("is_active", true)
+    .is("effective_end_date", null);
+
+  if (closeError) {
+    throw closeError;
+  }
+
+  const { data, error } = await supabase
+    .from("salary_profiles")
+    .insert({
+      ...payload,
+      created_at: new Date().toISOString()
+    })
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+function getNonNegativePayrollAmount(value) {
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount > 0 ? amount : 0;
+}
+
+function buildPayrollSalaryConfig(employee, salaryProfile) {
+  const salaryType = (salaryProfile?.salary_type || employee.salary_type) === "fixed" ? "fixed" : "hourly";
+  const fixedSalary = salaryType === "fixed"
+    ? getNonNegativePayrollAmount(salaryProfile?.fixed_salary ?? employee.fixed_salary)
+    : null;
+  const hourlyRate = salaryType === "hourly"
+    ? getNonNegativePayrollAmount(salaryProfile?.hourly_rate ?? employee.hourly_rate)
+    : null;
+
+  return {
+    salaryType,
+    fixedSalary,
+    hourlyRate,
+    currency: salaryProfile?.currency || employee.currency || "THB"
+  };
+}
+
+async function getPayrollSourceContext(employeeId, yearMonth, ownerUserId) {
+  const monthEndDate = getMonthEndDate(yearMonth);
+
+  const [employeeResult, summaryRowsResult, adjustmentItemsResult, dailyCalculationsResult, rulesResult, existingResult] = await Promise.all([
+    supabase.from("employees").select("*").eq("owner_user_id", ownerUserId).eq("id", Number(employeeId)).maybeSingle(),
+    supabase.from("monthly_attendance_summaries").select("*").eq("owner_user_id", ownerUserId).eq("employee_id", Number(employeeId)).eq("year_month", yearMonth).limit(1),
+    supabase.from("salary_adjustment_items").select("*").eq("owner_user_id", ownerUserId).eq("employee_id", Number(employeeId)).eq("year_month", yearMonth).order("created_at", { ascending: false }),
+    supabase.from("attendance_calculation_results").select("attendance_rule_id, overtime_pay_hours").eq("owner_user_id", ownerUserId).eq("employee_id", Number(employeeId)).gte("date", `${yearMonth}-01`).lte("date", monthEndDate),
+    supabase.from("attendance_rules").select("id, ot_hourly_fee").eq("owner_user_id", ownerUserId),
+    supabase.from("monthly_payroll_results").select("*").eq("owner_user_id", ownerUserId).eq("employee_id", Number(employeeId)).eq("year_month", yearMonth).maybeSingle()
+  ]);
+
+  for (const result of [employeeResult, summaryRowsResult, adjustmentItemsResult, dailyCalculationsResult, rulesResult, existingResult]) {
+    if (result.error) {
+      throw result.error;
+    }
+  }
+
+  if (!employeeResult.data) {
+    throw new Error("EMPLOYEE_NOT_FOUND");
+  }
+
+  const employee = employeeResult.data;
+  let salaryProfile = await fetchSalaryProfileForMonth(employeeId, yearMonth, ownerUserId);
+  if (!salaryProfile) {
+    const ensuredProfile = await ensureSalaryProfileForEmployee(employee, ownerUserId, employee.join_date || getTodayDateKey());
+    const monthStartDate = getMonthStartDate(yearMonth);
+    const monthEndDateForProfile = getMonthEndDate(yearMonth);
+    const profileStartDate = ensuredProfile.effective_start_date ? toDateKey(ensuredProfile.effective_start_date) : null;
+    const profileEndDate = ensuredProfile.effective_end_date ? toDateKey(ensuredProfile.effective_end_date) : null;
+    salaryProfile = profileStartDate && profileStartDate <= monthEndDateForProfile && (!profileEndDate || profileEndDate >= monthStartDate)
+      ? ensuredProfile
+      : null;
+  }
+  const attendanceSummary = summaryRowsResult.data?.[0] || null;
+  const adjustmentItems = adjustmentItemsResult.data || [];
+  const existingPayrollResult = existingResult.data || null;
+  const ruleFeeMap = new Map((rulesResult.data || []).map((row) => [Number(row.id), Number(row.ot_hourly_fee)]));
+
+  return {
+    employee,
+    salaryProfile,
+    attendanceSummary,
+    adjustmentItems,
+    dailyCalculations: dailyCalculationsResult.data || [],
+    ruleFeeMap,
+    existingPayrollResult
+  };
+}
+
+async function upsertMonthlyPayrollResult(payload) {
+  const existing = await supabase
+    .from("monthly_payroll_results")
+    .select("id")
+    .eq("owner_user_id", payload.owner_user_id)
+    .eq("employee_id", payload.employee_id)
+    .eq("year_month", payload.year_month)
+    .maybeSingle();
+
+  if (existing.error) {
+    throw existing.error;
+  }
+
+  if (existing.data?.id) {
+    const { data, error } = await supabase
+      .from("monthly_payroll_results")
+      .update(payload)
+      .eq("id", Number(existing.data.id))
+      .select("*")
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    return data;
+  }
+
+  const { data, error } = await supabase
+    .from("monthly_payroll_results")
+    .insert({
+      ...payload,
+      created_at: new Date().toISOString()
+    })
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+async function calculateMonthlyPayroll(employeeId, yearMonth, ownerUserId, { skipExisting = false, forceRecalculate = false } = {}) {
+  await recalculateMonthlyAttendance(yearMonth, ownerUserId, Number(employeeId));
+
+  const context = await getPayrollSourceContext(employeeId, yearMonth, ownerUserId);
+  const { employee, salaryProfile, attendanceSummary, adjustmentItems, dailyCalculations, ruleFeeMap, existingPayrollResult } = context;
+
+  if (skipExisting && existingPayrollResult) {
+    return {
+      row: existingPayrollResult,
+      skipped: true
+    };
+  }
+
+  const lockError = getPayrollResultLockError(existingPayrollResult);
+  if (lockError) {
+    throw new Error(lockError);
+  }
+
+  const employeeMap = new Map([[Number(employee.id), employee]]);
+  const salaryConfig = buildPayrollSalaryConfig(employee, salaryProfile);
+
+  const allowanceTotal = sumBy(adjustmentItems, (item) => item.type === "allowance");
+  const deductionTotal = sumBy(adjustmentItems, (item) => item.type === "deduction");
+  const otherTotal = sumBy(adjustmentItems, (item) => item.type === "other");
+  const validHours = Number(attendanceSummary?.total_valid_hours || 0);
+  const standardHours = Number(attendanceSummary?.total_standard_hours || 0);
+  const overtimePayHours = Number(attendanceSummary?.total_overtime_pay_hours || 0);
+  const hourlyRate = salaryConfig.hourlyRate;
+  const fixedSalary = salaryConfig.fixedSalary;
+  const standardPaidHours = Math.max(0, validHours - overtimePayHours);
+  const hourlyPay = salaryConfig.salaryType === "hourly" ? roundToTwo(standardPaidHours * Number(hourlyRate || 0)) : 0;
+  const basePay = salaryConfig.salaryType === "fixed" ? Number(fixedSalary || 0) : hourlyPay;
+  const overtimePay = attendanceSummary ? roundToTwo(dailyCalculations.reduce((sum, row) => {
+    const fee = row.attendance_rule_id ? Number(ruleFeeMap.get(Number(row.attendance_rule_id)) || 0) : 0;
+    return sum + Number(row.overtime_pay_hours || 0) * fee;
+  }, 0)) : 0;
+  const grossPay = roundToTwo(basePay + overtimePay + allowanceTotal + otherTotal);
+  const totalDeduction = deductionTotal;
+  const netPay = roundToTwo(grossPay - totalDeduction);
+
+  const row = await upsertMonthlyPayrollResult({
+    employee_id: Number(employee.id),
+    owner_user_id: ownerUserId,
+    year_month: yearMonth,
+    salary_type: salaryConfig.salaryType,
+    fixed_salary: fixedSalary,
+    hourly_rate: hourlyRate,
+    currency: salaryConfig.currency,
+    valid_hours: roundToTwo(validHours),
+    standard_hours: roundToTwo(standardHours),
+    hourly_pay: roundToTwo(hourlyPay),
+    overtime_pay_hours: roundToTwo(overtimePayHours),
+    overtime_pay: overtimePay,
+    allowance_total: allowanceTotal,
+    deduction_total: deductionTotal,
+    other_total: otherTotal,
+    gross_pay: grossPay,
+    total_deduction: totalDeduction,
+    net_pay: netPay,
+    calculation_status: "calculated",
+    review_status: forceRecalculate || existingPayrollResult ? "pending" : (existingPayrollResult?.review_status || "pending"),
+    blocked_reason: null,
+    calculated_at: new Date().toISOString(),
+    confirmed_at: existingPayrollResult?.calculation_status === "confirmed" ? existingPayrollResult.confirmed_at : null,
+    updated_at: new Date().toISOString()
+  });
+
+  return {
+    row,
+    mapped: mapPayrollResultRow(row, employeeMap),
+    skipped: false
+  };
+}
+
+async function fetchPayrollResultDetail(resultId, ownerUserId) {
+  const { data: row, error } = await supabase
+    .from("monthly_payroll_results")
+    .select("*")
+    .eq("owner_user_id", ownerUserId)
+    .eq("id", Number(resultId))
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  const [employeeResult, summaryResult, adjustmentItemsResult] = await Promise.all([
+    supabase.from("employees").select("*").eq("owner_user_id", ownerUserId).eq("id", Number(row.employee_id)).maybeSingle(),
+    supabase.from("monthly_attendance_summaries").select("*").eq("owner_user_id", ownerUserId).eq("employee_id", Number(row.employee_id)).eq("year_month", row.year_month).maybeSingle(),
+    supabase.from("salary_adjustment_items").select("*").eq("owner_user_id", ownerUserId).eq("employee_id", Number(row.employee_id)).eq("year_month", row.year_month).order("created_at", { ascending: false })
+  ]);
+
+  if (employeeResult.error) throw employeeResult.error;
+  if (summaryResult.error) throw summaryResult.error;
+  if (adjustmentItemsResult.error) throw adjustmentItemsResult.error;
+
+  const employeeMap = employeeResult.data ? new Map([[Number(employeeResult.data.id), employeeResult.data]]) : new Map();
+  const salaryProfile = await fetchSalaryProfileForMonth(Number(row.employee_id), row.year_month, ownerUserId);
+  return {
+    result: mapPayrollResultRow(row, employeeMap),
+    employee: employeeResult.data ? mapEmployeeRow(employeeResult.data) : null,
+    salaryProfile: salaryProfile ? mapSalaryProfileRow(salaryProfile) : null,
+    attendanceSummary: summaryResult.data ? mapAttendanceSummaryRow(summaryResult.data, employeeMap) : null,
+    adjustmentItems: (adjustmentItemsResult.data || []).map(mapSalaryAdjustmentItemRow)
+  };
+}
+
+function normalizeEmployeePayload(body, authUser) {
+  return {
+    name: body.name,
+    gender: body.gender,
+    country: body.country,
+    phone: body.phone,
+    role: body.role,
+    dept: body.dept,
+    joinDate: body.joinDate,
+    status: body.status,
+    attendanceRuleId: Number(body.attendanceRuleId),
+    ruleEffectiveStartDate: body.ruleEffectiveStartDate,
+    salaryType: body.salaryType,
+    hourlyRate: body.hourlyRate === null || body.hourlyRate === "" ? null : Number(body.hourlyRate),
+    fixedSalary: body.fixedSalary === null || body.fixedSalary === "" ? null : Number(body.fixedSalary),
+    salaryEffectiveStartDate: body.salaryEffectiveStartDate || body.joinDate,
+    currency: body.currency,
+    photo: body.photo || null,
+    createdBy: authUser?.email || null
+  };
+}
+
+async function createEmployeeRecord(payload, authUser) {
+  const ownerUserId = authUser.id;
+  const employeeInsert = {
+    owner_user_id: ownerUserId,
+    employee_no: generateEmployeeNo(),
+    name: payload.name,
+    gender: payload.gender,
+    country: payload.country,
+    phone: payload.phone,
+    role: payload.role,
+    dept: payload.dept,
+    join_date: payload.joinDate,
+    status: payload.status,
+    attendance_rule_id: payload.attendanceRuleId,
+    salary_type: payload.salaryType,
+    hourly_rate: payload.hourlyRate,
+    fixed_salary: payload.fixedSalary,
+    currency: payload.currency,
+    photo: payload.photo,
+    is_deleted: false
+  };
+
+  const { data: employeeRow, error: employeeError } = await supabase
+    .from("employees")
+    .insert(employeeInsert)
+    .select("*")
+    .single();
+
+  if (employeeError) {
+    throw employeeError;
+  }
+
+  const historyInsert = {
+    owner_user_id: ownerUserId,
+    employee_id: Number(employeeRow.id),
+    attendance_rule_id: payload.attendanceRuleId,
+    effective_start_date: payload.ruleEffectiveStartDate,
+    effective_end_date: null,
+    created_by: payload.createdBy || authUser.email || null,
+    created_at: new Date().toISOString()
+  };
+
+  const { error: historyError } = await supabase
+    .from("employee_attendance_rule_history")
+    .insert(historyInsert);
+
+  if (historyError) {
+    throw historyError;
+  }
+
+  await ensureSalaryProfileForEmployee(employeeRow, ownerUserId, payload.salaryEffectiveStartDate || payload.joinDate);
+  return Number(employeeRow.id);
+}
+
+async function updateEmployeeRecord(employeeId, payload, authUser) {
+  const ownerUserId = authUser.id;
+  const { data: existingEmployee, error: existingError } = await supabase
+    .from("employees")
+    .select("*")
+    .eq("owner_user_id", ownerUserId)
+    .eq("id", employeeId)
+    .single();
+
+  if (existingError) {
+    throw existingError;
+  }
+
+  const updatePayload = {
+    name: payload.name,
+    gender: payload.gender,
+    country: payload.country,
+    phone: payload.phone,
+    role: payload.role,
+    dept: payload.dept,
+    join_date: payload.joinDate,
+    status: payload.status,
+    attendance_rule_id: payload.attendanceRuleId,
+    salary_type: payload.salaryType,
+    hourly_rate: payload.hourlyRate,
+    fixed_salary: payload.fixedSalary,
+    currency: payload.currency,
+    photo: payload.photo
+  };
+
+  const { data: employeeRow, error: updateError } = await supabase
+    .from("employees")
+    .update(updatePayload)
+    .eq("owner_user_id", ownerUserId)
+    .eq("id", employeeId)
+    .select("*")
+    .single();
+
+  if (updateError) {
+    throw updateError;
+  }
+
+  const ruleChanged = Number(existingEmployee.attendance_rule_id) !== Number(payload.attendanceRuleId);
+  if (ruleChanged) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(payload.ruleEffectiveStartDate)) {
+      throw new Error("规则生效日期格式必须为 YYYY-MM-DD");
+    }
+
+    const { data: currentHistory, error: currentHistoryError } = await supabase
+      .from("employee_attendance_rule_history")
+      .select("*")
+      .eq("owner_user_id", ownerUserId)
+      .eq("employee_id", employeeId)
+      .is("effective_end_date", null)
+      .order("effective_start_date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (currentHistoryError) {
+      throw currentHistoryError;
+    }
+
+    const currentStartDate = currentHistory?.effective_start_date ? toDateKey(currentHistory.effective_start_date) : null;
+    if (currentStartDate && payload.ruleEffectiveStartDate < currentStartDate) {
+      throw new Error("规则生效日期不能早于当前规则历史开始日期");
+    }
+
+    if (currentHistory && currentStartDate === payload.ruleEffectiveStartDate) {
+      const { error: updateHistoryError } = await supabase
+        .from("employee_attendance_rule_history")
+        .update({
+          attendance_rule_id: payload.attendanceRuleId,
+          created_by: payload.createdBy || authUser.email || null
+        })
+        .eq("owner_user_id", ownerUserId)
+        .eq("id", Number(currentHistory.id));
+
+      if (updateHistoryError) {
+        throw updateHistoryError;
+      }
+    } else {
+      if (currentHistory) {
+        const previousEndDate = getPreviousDate(payload.ruleEffectiveStartDate);
+        const { error: closeHistoryError } = await supabase
+          .from("employee_attendance_rule_history")
+          .update({ effective_end_date: previousEndDate })
+          .eq("owner_user_id", ownerUserId)
+          .eq("employee_id", employeeId)
+          .is("effective_end_date", null);
+
+        if (closeHistoryError) {
+          throw closeHistoryError;
+        }
+      }
+
+      const { error: insertHistoryError } = await supabase
+        .from("employee_attendance_rule_history")
+        .insert({
+          owner_user_id: ownerUserId,
+          employee_id: employeeId,
+          attendance_rule_id: payload.attendanceRuleId,
+          effective_start_date: payload.ruleEffectiveStartDate,
+          effective_end_date: null,
+          created_by: payload.createdBy || authUser.email || null,
+          created_at: new Date().toISOString()
+        });
+
+      if (insertHistoryError) {
+        throw insertHistoryError;
+      }
+    }
+  }
+
+  await ensureSalaryProfileForEmployee(employeeRow, ownerUserId, payload.salaryEffectiveStartDate || payload.joinDate);
+  return Number(employeeRow.id);
+}
+
+async function setEmployeeStatusRecord(employeeId, targetStatus, ownerUserId) {
+  const { data, error } = await supabase
+    .from("employees")
+    .update({
+      status: targetStatus,
+      is_deleted: false
+    })
+    .eq("owner_user_id", ownerUserId)
+    .eq("id", employeeId)
+    .select("id")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return Number(data.id);
+}
+
+async function bootstrapWorkspaceData(ownerUserId, authUser) {
+  const existingEmployeesResult = await supabase
+    .from("employees")
+    .select("id", { count: "exact", head: true })
+    .eq("owner_user_id", ownerUserId);
+
+  if (existingEmployeesResult.error) {
+    throw existingEmployeesResult.error;
+  }
+
+  const existingRulesResult = await supabase
+    .from("attendance_rules")
+    .select("id", { count: "exact", head: true })
+    .eq("owner_user_id", ownerUserId);
+
+  if (existingRulesResult.error) {
+    throw existingRulesResult.error;
+  }
+
+  if ((existingEmployeesResult.count || 0) > 0 || (existingRulesResult.count || 0) > 0) {
+    return {
+      created: false,
+      yearMonth: getTodayDateKey().slice(0, 7),
+      employeesCreated: 0,
+      rulesCreated: 0,
+      message: "当前账号已有后台数据，已跳过初始化"
+    };
+  }
+
+  const yearMonth = getTodayDateKey().slice(0, 7);
+  const dates = enumerateMonthDates(yearMonth).filter((date) => date <= getTodayDateKey()).slice(0, 3);
+
+  const { data: rules, error: ruleError } = await supabase
+    .from("attendance_rules")
+    .insert([
+      addOwnerPayload({
+        name: "白班仓储规则",
+        is_active: true,
+        effective_start_date: `${yearMonth}-01`,
+        effective_end_date: null,
+        start_shift: "08:30",
+        end_shift: "17:30",
+        break_start: "12:00",
+        break_end: "13:00",
+        standard_hours: 8,
+        overtime_enabled: true,
+        ot_hourly_fee: 75,
+        overtime_min_unit_hours: 0.5,
+        overtime_rounding: "floor_to_half_hour",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }, ownerUserId),
+      addOwnerPayload({
+        name: "晚班拣货规则",
+        is_active: true,
+        effective_start_date: `${yearMonth}-01`,
+        effective_end_date: null,
+        start_shift: "13:00",
+        end_shift: "22:00",
+        break_start: "18:00",
+        break_end: "19:00",
+        standard_hours: 8,
+        overtime_enabled: true,
+        ot_hourly_fee: 90,
+        overtime_min_unit_hours: 0.5,
+        overtime_rounding: "floor_to_half_hour",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }, ownerUserId)
+    ])
+    .select("*");
+
+  if (ruleError) {
+    throw ruleError;
+  }
+
+  const [dayRule, nightRule] = rules;
+  const employeePayloads = [
+    {
+      name: "演示员工 A",
+      gender: "female",
+      country: "TH",
+      phone: "0800000001",
+      role: "拣货员",
+      dept: "A 区",
+      joinDate: `${yearMonth}-01`,
+      status: "active",
+      attendanceRuleId: Number(dayRule.id),
+      ruleEffectiveStartDate: `${yearMonth}-01`,
+      salaryType: "hourly",
+      hourlyRate: 320,
+      fixedSalary: null,
+      currency: "THB",
+      photo: null,
+      createdBy: authUser.email || null
+    },
+    {
+      name: "演示员工 B",
+      gender: "male",
+      country: "MM",
+      phone: "0800000002",
+      role: "组长",
+      dept: "B 区",
+      joinDate: `${yearMonth}-01`,
+      status: "active",
+      attendanceRuleId: Number(nightRule.id),
+      ruleEffectiveStartDate: `${yearMonth}-01`,
+      salaryType: "fixed",
+      hourlyRate: null,
+      fixedSalary: 18500,
+      currency: "THB",
+      photo: null,
+      createdBy: authUser.email || null
+    }
+  ];
+
+  const employeeIds = [];
+  for (const payload of employeePayloads) {
+    const employeeId = await createEmployeeRecord(payload, authUser);
+    employeeIds.push(employeeId);
+  }
+
+  const [employeeAId, employeeBId] = employeeIds;
+  const attendanceSeed = [];
+  if (dates[0]) {
+    attendanceSeed.push(
+      addOwnerPayload({
+        employee_id: employeeAId,
+        date: dates[0],
+        in_time: "08:25",
+        out_time: "18:10",
+        type: "normal",
+        source: "device",
+        note: "初始化示例-正常加班",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }, ownerUserId),
+      addOwnerPayload({
+        employee_id: employeeBId,
+        date: dates[0],
+        in_time: "13:00",
+        out_time: "22:00",
+        type: "normal",
+        source: "device",
+        note: "初始化示例-正常班次",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }, ownerUserId)
+    );
+  }
+  if (dates[1]) {
+    attendanceSeed.push(
+      addOwnerPayload({
+        employee_id: employeeAId,
+        date: dates[1],
+        in_time: "08:40",
+        out_time: null,
+        type: "normal",
+        source: "device",
+        note: "初始化示例-异常缺下班卡",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }, ownerUserId),
+      addOwnerPayload({
+        employee_id: employeeBId,
+        date: dates[1],
+        in_time: null,
+        out_time: null,
+        type: "leave",
+        source: "manual",
+        note: "初始化示例-请假",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }, ownerUserId)
+    );
+  }
+  if (dates[2]) {
+    attendanceSeed.push(
+      addOwnerPayload({
+        employee_id: employeeAId,
+        date: dates[2],
+        in_time: "08:30",
+        out_time: "17:35",
+        type: "normal",
+        source: "device",
+        note: "初始化示例-标准工时",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }, ownerUserId)
+    );
+  }
+
+  if (attendanceSeed.length > 0) {
+    const { error: attendanceError } = await supabase
+      .from("attendance_records")
+      .insert(attendanceSeed);
+
+    if (attendanceError) {
+      throw attendanceError;
+    }
+  }
+
+  const { error: adjustmentError } = await supabase
+    .from("salary_adjustment_items")
+    .insert([
+      addOwnerPayload({
+        employee_id: employeeAId,
+        year_month: yearMonth,
+        type: "allowance",
+        name: "餐补",
+        amount: 350,
+        note: "初始化示例",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }, ownerUserId),
+      addOwnerPayload({
+        employee_id: employeeBId,
+        year_month: yearMonth,
+        type: "other",
+        name: "绩效奖金",
+        amount: 500,
+        note: "初始化示例",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }, ownerUserId)
+    ]);
+
+  if (adjustmentError) {
+    throw adjustmentError;
+  }
+
+  await recalculateMonthlyAttendance(yearMonth, ownerUserId);
+  for (const employeeId of employeeIds) {
+    await calculateMonthlyPayroll(employeeId, yearMonth, ownerUserId, { forceRecalculate: true });
+  }
+
+  return {
+    created: true,
+    yearMonth,
+    employeesCreated: employeeIds.length,
+    rulesCreated: rules.length,
+    message: "已为当前账号创建默认规则、示例员工、考勤和薪酬演示数据"
+  };
+}
+
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true });
+});
+
+app.use("/api/admin", requireGoogleAuth);
+
+app.post("/api/admin/workspace/bootstrap", async (req, res) => {
+  try {
+    const result = await bootstrapWorkspaceData(req.authUser.id, req.authUser);
+    res.json(result);
+  } catch (error) {
+    console.error("Bootstrap workspace failed", error);
+    res.status(500).json({ error: error.message || "初始化后台失败" });
+  }
+});
+
+app.get("/api/admin/dashboard", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || ""))
+      ? String(req.query.date)
+      : getTodayDateKey();
+    const yearMonth = /^\d{4}-\d{2}$/.test(String(req.query.yearMonth || ""))
+      ? String(req.query.yearMonth)
+      : date.slice(0, 7);
+
+    const [employeesResult, todayCalculationsResult, summariesResult, rulesResult, payrollResult] = await Promise.all([
+      supabase
+        .from("employees")
+        .select("*")
+        .eq("owner_user_id", ownerUserId),
+      supabase
+        .from("attendance_calculation_results")
+        .select("*")
+        .eq("owner_user_id", ownerUserId)
+        .eq("date", date),
+      supabase
+        .from("monthly_attendance_summaries")
+        .select("*")
+        .eq("owner_user_id", ownerUserId)
+        .eq("year_month", yearMonth),
+      supabase
+        .from("attendance_rules")
+        .select("*")
+        .eq("owner_user_id", ownerUserId)
+        .eq("is_active", true)
+        .order("effective_start_date", { ascending: false }),
+      supabase
+        .from("monthly_payroll_results")
+        .select("gross_pay,total_deduction,net_pay,currency")
+        .eq("owner_user_id", ownerUserId)
+        .eq("year_month", yearMonth)
+    ]);
+
+    for (const result of [employeesResult, todayCalculationsResult, summariesResult, rulesResult, payrollResult]) {
+      if (result.error) {
+        throw result.error;
+      }
+    }
+
+    const employees = employeesResult.data || [];
+    const employeeMap = new Map(employees.map((row) => [Number(row.id), row]));
+    const ruleFeeMap = new Map((rulesResult.data || []).map((row) => [Number(row.id), Number(row.ot_hourly_fee || 0)]));
+    const todayCalculations = todayCalculationsResult.data || [];
+    const summaries = summariesResult.data || [];
+    const payrollRows = payrollResult.data || [];
+    const activeStatuses = new Set(["active", "probation", "on_leave"]);
+    const activeEmployeeCount = employees.filter((row) => activeStatuses.has(row.status)).length;
+    const todayExceptionCount = todayCalculations.filter((row) => row.has_exception).length;
+    const todayRecordCount = todayCalculations.length;
+    const todayOvertimePay = roundToTwo(todayCalculations.reduce((sum, row) => {
+      const fee = row.attendance_rule_id ? Number(ruleFeeMap.get(Number(row.attendance_rule_id)) || 0) : 0;
+      return sum + Number(row.overtime_pay_hours || 0) * fee;
+    }, 0));
+    const currency = payrollRows[0]?.currency || employees[0]?.currency || "THB";
+    const monthlyPayrollGrossPay = roundToTwo(payrollRows.reduce((sum, row) => sum + Number(row.gross_pay || 0), 0));
+    const monthlyPayrollDeduction = roundToTwo(payrollRows.reduce((sum, row) => sum + Number(row.total_deduction || 0), 0));
+    const monthlyPayrollNetPay = roundToTwo(payrollRows.reduce((sum, row) => sum + Number(row.net_pay || 0), 0));
+
+    const employeeStats = summaries
+      .map((row) => {
+        const employee = employeeMap.get(Number(row.employee_id));
+        return {
+          employeeId: Number(row.employee_id),
+          employeeNo: employee?.employee_no || undefined,
+          employeeName: employee?.name || `员工 #${row.employee_id}`,
+          validHours: Number(row.total_valid_hours || 0),
+          overtimePayHours: Number(row.total_overtime_pay_hours || 0),
+          exceptionCount: Number(row.exception_count || 0)
+        };
+      })
+      .sort((a, b) => b.validHours - a.validHours)
+      .slice(0, 6);
+
+    res.json({
+      date,
+      yearMonth,
+      activeEmployeeCount,
+      activeRuleCount: (rulesResult.data || []).length,
+      todayOvertimePay,
+      todayRecordCount,
+      todayExceptionCount,
+      todayExceptionRate: todayRecordCount > 0 ? roundToTwo((todayExceptionCount / todayRecordCount) * 100) : 0,
+      monthlyPayrollGrossPay,
+      monthlyPayrollDeduction,
+      monthlyPayrollNetPay,
+      monthlyValidHours: roundToTwo(summaries.reduce((sum, row) => sum + Number(row.total_valid_hours || 0), 0)),
+      monthlyOvertimePayHours: roundToTwo(summaries.reduce((sum, row) => sum + Number(row.total_overtime_pay_hours || 0), 0)),
+      monthlyExceptionCount: summaries.reduce((sum, row) => sum + Number(row.exception_count || 0), 0),
+      currency,
+      employeeStats
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "数据看板加载失败" });
+  }
+});
+
+app.get("/api/admin/attendance-rules/options", async (_req, res) => {
+  try {
+    const ownerUserId = _req.authUser.id;
+    const today = new Date().toISOString().slice(0, 10);
+    const { data, error } = await supabase
+      .from("attendance_rules")
+      .select("id, name, is_active, effective_start_date, effective_end_date")
+      .eq("owner_user_id", ownerUserId)
+      .eq("is_active", true)
+      .order("effective_start_date", { ascending: true });
+
+    if (error) {
+      throw error;
+    }
+
+    res.json(data
+      .filter((row) => row.effective_start_date <= today && (!row.effective_end_date || row.effective_end_date >= today))
+      .map((row) => ({
+        id: Number(row.id),
+        name: row.name,
+        isActive: row.is_active,
+        effectiveStartDate: row.effective_start_date,
+        effectiveEndDate: row.effective_end_date
+      })));
+  } catch (error) {
+    res.status(500).json({ error: error.message || "考勤规则加载失败" });
+  }
+});
+
+app.get("/api/admin/attendance-rules", async (_req, res) => {
+  try {
+    const ownerUserId = _req.authUser.id;
+    const [{ data, error }, relatedCounts] = await Promise.all([
+      supabase
+        .from("attendance_rules")
+        .select("*")
+        .eq("owner_user_id", ownerUserId)
+        .order("id", { ascending: true }),
+      fetchAttendanceRuleCounts(ownerUserId)
+    ]);
+
+    if (error) {
+      throw error;
+    }
+
+    res.json(data.map((row) => mapAttendanceRuleRow(row, relatedCounts.get(Number(row.id)) || 0)));
+  } catch (error) {
+    res.status(500).json({ error: error.message || "考勤规则列表加载失败" });
+  }
+});
+
+app.get("/api/admin/attendance-rules/:id", async (req, res) => {
+  try {
+    const detail = await fetchAttendanceRuleDetail(Number(req.params.id), req.authUser.id);
+    res.json(detail);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "考勤规则详情加载失败" });
+  }
+});
+
+app.post("/api/admin/attendance-rules", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const payload = normalizeAttendanceRulePayload(req.body);
+    const validationError = validateAttendanceRulePayload(payload);
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
+    }
+
+    const { data, error } = await supabase
+      .from("attendance_rules")
+      .insert(addOwnerPayload({
+        ...payload,
+        created_at: new Date().toISOString()
+      }, ownerUserId))
+      .select("*")
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    res.status(201).json({
+      rule: mapAttendanceRuleRow(data, 0)
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "创建考勤规则失败" });
+  }
+});
+
+app.put("/api/admin/attendance-rules/:id", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const ruleId = Number(req.params.id);
+    const payload = normalizeAttendanceRulePayload(req.body);
+    const validationError = validateAttendanceRulePayload(payload);
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
+    }
+
+    const { data, error } = await supabase
+      .from("attendance_rules")
+      .update(payload)
+      .eq("owner_user_id", ownerUserId)
+      .eq("id", ruleId)
+      .select("*")
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    const relatedCounts = await fetchAttendanceRuleCounts(ownerUserId);
+    res.json({
+      rule: mapAttendanceRuleRow(data, relatedCounts.get(ruleId) || 0)
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "更新考勤规则失败" });
+  }
+});
+
+app.patch("/api/admin/attendance-rules/:id/enable", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const ruleId = Number(req.params.id);
+    const { data, error } = await supabase
+      .from("attendance_rules")
+      .update({
+        is_active: true,
+        updated_at: new Date().toISOString()
+      })
+      .eq("owner_user_id", ownerUserId)
+      .eq("id", ruleId)
+      .select("*")
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    const relatedCounts = await fetchAttendanceRuleCounts(ownerUserId);
+    res.json({
+      rule: mapAttendanceRuleRow(data, relatedCounts.get(ruleId) || 0)
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "启用考勤规则失败" });
+  }
+});
+
+app.patch("/api/admin/attendance-rules/:id/disable", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const ruleId = Number(req.params.id);
+    const { data, error } = await supabase
+      .from("attendance_rules")
+      .update({
+        is_active: false,
+        updated_at: new Date().toISOString()
+      })
+      .eq("owner_user_id", ownerUserId)
+      .eq("id", ruleId)
+      .select("*")
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    const relatedCounts = await fetchAttendanceRuleCounts(ownerUserId);
+    res.json({
+      rule: mapAttendanceRuleRow(data, relatedCounts.get(ruleId) || 0)
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "停用考勤规则失败" });
+  }
+});
+
+app.get("/api/admin/attendance-rules/:id/related-employees", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const ruleId = Number(req.params.id);
+    const currentOnly = req.query.currentOnly === "true";
+
+    const [{ data: historyRows, error: historyError }, { data: employeeRows, error: employeeError }] = await Promise.all([
+      supabase
+        .from("employee_attendance_rule_history")
+        .select("*")
+        .eq("owner_user_id", ownerUserId)
+        .eq("attendance_rule_id", ruleId)
+        .order("effective_start_date", { ascending: false }),
+      supabase
+        .from("employees")
+        .select("id, employee_no, name, dept, role, status, attendance_rule_id")
+        .eq("owner_user_id", ownerUserId)
+    ]);
+
+    if (historyError) {
+      throw historyError;
+    }
+
+    if (employeeError) {
+      throw employeeError;
+    }
+
+    const employeeMap = new Map(employeeRows.map((row) => [Number(row.id), row]));
+    const relatedRows = historyRows
+      .map((row) => {
+        const employee = employeeMap.get(Number(row.employee_id));
+        if (!employee) {
+          return null;
+        }
+
+        const isCurrentRelation = row.effective_end_date === null && Number(employee.attendance_rule_id) === ruleId;
+        return {
+          id: Number(employee.id),
+          employeeNo: employee.employee_no,
+          name: employee.name,
+          dept: employee.dept,
+          role: employee.role,
+          status: employee.status,
+          relationStartDate: row.effective_start_date,
+          relationEndDate: row.effective_end_date,
+          isCurrentRelation
+        };
+      })
+      .filter(Boolean)
+      .filter((row) => (currentOnly ? row.isCurrentRelation : true));
+
+    res.json(relatedRows);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "关联员工加载失败" });
+  }
+});
+
+app.get("/api/admin/attendance-calculations", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const yearMonth = String(req.query.yearMonth || "");
+    if (!/^\d{4}-\d{2}$/.test(yearMonth)) {
+      return res.status(400).json({ error: "yearMonth 必须为 YYYY-MM" });
+    }
+
+    const date = String(req.query.date || "");
+    if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: "date 必须为 YYYY-MM-DD" });
+    }
+
+    const { periodStartDate, periodEndDate } = getMonthRange(yearMonth);
+    let calculationQuery = supabase
+      .from("attendance_calculation_results")
+      .select("*")
+      .eq("owner_user_id", ownerUserId)
+      .order("date", { ascending: false })
+      .order("employee_id", { ascending: true });
+
+    if (date) {
+      calculationQuery = calculationQuery.eq("date", date);
+    } else {
+      calculationQuery = calculationQuery
+        .gte("date", periodStartDate)
+        .lte("date", periodEndDate);
+    }
+
+    const calculationsResult = await calculationQuery;
+    const employeesResult = await supabase
+      .from("employees")
+      .select("*")
+      .eq("owner_user_id", ownerUserId);
+
+    if (calculationsResult.error) {
+      throw calculationsResult.error;
+    }
+    if (employeesResult.error) {
+      throw employeesResult.error;
+    }
+
+    const employeeMap = new Map(employeesResult.data.map((row) => [Number(row.id), row]));
+    const employeeId = req.query.employeeId ? Number(req.query.employeeId) : null;
+    const keyword = String(req.query.keyword || "").trim().toLowerCase();
+    const status = String(req.query.status || "all");
+    const hasException = String(req.query.hasException || "all");
+
+    const rows = calculationsResult.data
+      .map((row) => mapAttendanceCalculationRow(row, employeeMap))
+      .filter((row) => {
+        const employee = employeeMap.get(row.employeeId);
+        if (!employee || !shouldCalculateEmployeeDate(employee, row.date)) {
+          return false;
+        }
+        if (employeeId && row.employeeId !== employeeId) {
+          return false;
+        }
+        if (keyword) {
+          const haystack = [
+            row.employeeName,
+            row.employeeNo,
+            row.attendanceRuleName || "",
+            employee.name,
+            employee.employee_no || ""
+          ].join(" ").toLowerCase();
+          if (!haystack.includes(keyword)) {
+            return false;
+          }
+        }
+        if (status !== "all" && row.status !== status) {
+          return false;
+        }
+        if (hasException === "true" && !row.hasException) {
+          return false;
+        }
+        if (hasException === "false" && row.hasException) {
+          return false;
+        }
+        return true;
+      });
+
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "考勤计算结果加载失败" });
+  }
+});
+
+app.get("/api/admin/attendance-calculations/:id", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const { data: row, error } = await supabase
+      .from("attendance_calculation_results")
+      .select("*")
+      .eq("owner_user_id", ownerUserId)
+      .eq("id", Number(req.params.id))
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    const [employeeResult, recordResult, ruleResult] = await Promise.all([
+      supabase.from("employees").select("*").eq("owner_user_id", ownerUserId).eq("id", Number(row.employee_id)).maybeSingle(),
+      row.attendance_record_id
+        ? supabase.from("attendance_records").select("*").eq("owner_user_id", ownerUserId).eq("id", Number(row.attendance_record_id)).maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+      row.attendance_rule_id
+        ? supabase.from("attendance_rules").select("*").eq("owner_user_id", ownerUserId).eq("id", Number(row.attendance_rule_id)).maybeSingle()
+        : Promise.resolve({ data: null, error: null })
+    ]);
+
+    if (employeeResult.error) throw employeeResult.error;
+    if (recordResult.error) throw recordResult.error;
+    if (ruleResult.error) throw ruleResult.error;
+
+    const employeeMap = employeeResult.data ? new Map([[Number(employeeResult.data.id), employeeResult.data]]) : new Map();
+
+    res.json({
+      result: mapAttendanceCalculationRow(row, employeeMap),
+      employee: employeeResult.data ? mapEmployeeRow(employeeResult.data) : null,
+      record: recordResult.data ? mapAttendanceRecordRow(recordResult.data) : null,
+      rule: ruleResult.data ? mapAttendanceRuleRow(ruleResult.data) : null
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "考勤计算详情加载失败" });
+  }
+});
+
+app.post("/api/admin/attendance-records", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const employeeId = Number(req.body.employeeId);
+    const date = String(req.body.date || "");
+
+    if (!employeeId || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: "employeeId 和 date 必填且格式正确" });
+    }
+
+    const { data: employee, error: employeeError } = await supabase
+      .from("employees")
+      .select("id")
+      .eq("owner_user_id", ownerUserId)
+      .eq("id", employeeId)
+      .maybeSingle();
+
+    if (employeeError) {
+      throw employeeError;
+    }
+    if (!employee) {
+      return res.status(404).json({ error: "员工不存在" });
+    }
+
+    const payload = {
+      owner_user_id: ownerUserId,
+      employee_id: employeeId,
+      date,
+      type: req.body.type || "normal",
+      in_time: req.body.inTime || null,
+      out_time: req.body.outTime || null,
+      note: req.body.note || "",
+      source: "manual",
+      updated_at: new Date().toISOString()
+    };
+
+    const { data: existingRecord, error: existingError } = await supabase
+      .from("attendance_records")
+      .select("*")
+      .eq("owner_user_id", ownerUserId)
+      .eq("employee_id", employeeId)
+      .eq("date", date)
+      .order("id", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingError) {
+      throw existingError;
+    }
+
+    if (existingRecord) {
+      const { error: updateError } = await supabase
+        .from("attendance_records")
+        .update(payload)
+        .eq("owner_user_id", ownerUserId)
+        .eq("id", Number(existingRecord.id));
+
+      if (updateError) {
+        throw updateError;
+      }
+    } else {
+      const { error: insertError } = await supabase
+        .from("attendance_records")
+        .insert({
+          ...payload,
+          created_at: new Date().toISOString()
+        });
+
+      if (insertError) {
+        throw insertError;
+      }
+    }
+
+    const result = await recalculateDailyAttendance(employeeId, date, ownerUserId);
+    await recalculateMonthlyAttendance(date.slice(0, 7), ownerUserId, employeeId);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "补卡记录保存失败" });
+  }
+});
+
+app.put("/api/admin/attendance-records/:id", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const recordId = Number(req.params.id);
+    const { data: existingRecord, error: existingError } = await supabase
+      .from("attendance_records")
+      .select("*")
+      .eq("owner_user_id", ownerUserId)
+      .eq("id", recordId)
+      .maybeSingle();
+
+    if (existingError) {
+      throw existingError;
+    }
+    if (!existingRecord) {
+      return res.status(404).json({ error: "原始考勤记录不存在" });
+    }
+
+    const previousDate = toDateKey(existingRecord.date);
+    const payload = {
+      date: req.body.date,
+      type: req.body.type,
+      in_time: req.body.inTime || null,
+      out_time: req.body.outTime || null,
+      note: req.body.note || "",
+      source: "manual",
+      updated_at: new Date().toISOString()
+    };
+
+    const { data: updatedRecord, error } = await supabase
+      .from("attendance_records")
+      .update(payload)
+      .eq("owner_user_id", ownerUserId)
+      .eq("id", recordId)
+      .select("*")
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    const employeeId = Number(updatedRecord.employee_id);
+    const nextDate = toDateKey(updatedRecord.date);
+    const affectedMonths = new Set([previousDate.slice(0, 7), nextDate.slice(0, 7)]);
+
+    if (previousDate !== nextDate) {
+      await recalculateDailyAttendance(employeeId, previousDate, ownerUserId);
+    }
+    const result = await recalculateDailyAttendance(employeeId, nextDate, ownerUserId);
+
+    for (const yearMonth of affectedMonths) {
+      await recalculateMonthlyAttendance(yearMonth, ownerUserId, employeeId);
+    }
+
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "考勤记录调整失败" });
+  }
+});
+
+app.post("/api/admin/attendance-calculations/recalculate-daily", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const employeeId = Number(req.body.employeeId);
+    const date = String(req.body.date || "");
+    if (!employeeId || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: "employeeId 和 date 必填且格式正确" });
+    }
+
+    const result = await recalculateDailyAttendance(employeeId, date, ownerUserId);
+    await recalculateMonthlyAttendance(date.slice(0, 7), ownerUserId, employeeId);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "单日重算失败" });
+  }
+});
+
+app.post("/api/admin/attendance-calculations/recalculate-batch", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const items = Array.isArray(req.body.items) ? req.body.items : [];
+    const failures = [];
+    let successCount = 0;
+
+    for (const item of items) {
+      try {
+        await recalculateDailyAttendance(Number(item.employeeId), String(item.date), ownerUserId);
+        await recalculateMonthlyAttendance(String(item.date).slice(0, 7), ownerUserId, Number(item.employeeId));
+        successCount += 1;
+      } catch (error) {
+        failures.push({
+          employeeId: Number(item.employeeId),
+          date: String(item.date),
+          error: error.message || "重算失败"
+        });
+      }
+    }
+
+    res.json({
+      successCount,
+      failureCount: failures.length,
+      failures
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "批量重算失败" });
+  }
+});
+
+app.post("/api/admin/attendance-calculations/recalculate-monthly", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const yearMonth = String(req.body.yearMonth || "");
+    const employeeId = req.body.employeeId ? Number(req.body.employeeId) : null;
+    if (!/^\d{4}-\d{2}$/.test(yearMonth)) {
+      return res.status(400).json({ error: "yearMonth 必须为 YYYY-MM" });
+    }
+
+    const summaries = await recalculateMonthlyAttendance(yearMonth, ownerUserId, employeeId);
+    res.json(summaries);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "月度重算失败" });
+  }
+});
+
+app.get("/api/admin/attendance-summaries", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const yearMonth = String(req.query.yearMonth || "");
+    if (!/^\d{4}-\d{2}$/.test(yearMonth)) {
+      return res.status(400).json({ error: "yearMonth 必须为 YYYY-MM" });
+    }
+
+    const [summaryResult, employeesResult] = await Promise.all([
+      supabase
+        .from("monthly_attendance_summaries")
+        .select("*")
+        .eq("owner_user_id", ownerUserId)
+        .eq("year_month", yearMonth)
+        .order("employee_id", { ascending: true }),
+      supabase
+        .from("employees")
+        .select("*")
+        .eq("owner_user_id", ownerUserId)
+    ]);
+
+    if (summaryResult.error) {
+      throw summaryResult.error;
+    }
+    if (employeesResult.error) {
+      throw employeesResult.error;
+    }
+
+    const employeeMap = new Map(employeesResult.data.map((row) => [Number(row.id), row]));
+    const summaries = summaryResult.data.map((row) => mapAttendanceSummaryRow(row, employeeMap));
+    const employeeId = req.query.employeeId ? Number(req.query.employeeId) : null;
+    const keyword = String(req.query.keyword || "").trim().toLowerCase();
+    const canGeneratePayroll = String(req.query.canGeneratePayroll || "all");
+    const filtered = summaries.filter((row) => {
+      if (employeeId && row.employeeId !== employeeId) {
+        return false;
+      }
+      if (keyword) {
+        const haystack = [
+          row.employeeName,
+          row.employeeNo || ""
+        ].join(" ").toLowerCase();
+        if (!haystack.includes(keyword)) {
+          return false;
+        }
+      }
+      if (canGeneratePayroll === "true" && !row.canGeneratePayroll) {
+        return false;
+      }
+      if (canGeneratePayroll === "false" && row.canGeneratePayroll) {
+        return false;
+      }
+      return true;
+    });
+
+    res.json(filtered);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "月度汇总加载失败" });
+  }
+});
+
+app.get("/api/admin/payroll-results", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const yearMonth = String(req.query.yearMonth || "");
+    if (!/^\d{4}-\d{2}$/.test(yearMonth)) {
+      return res.status(400).json({ error: "yearMonth 必须为 YYYY-MM" });
+    }
+
+    const payrollResult = await supabase
+      .from("monthly_payroll_results")
+      .select("*")
+      .eq("owner_user_id", ownerUserId)
+      .eq("year_month", yearMonth)
+      .order("id", { ascending: true });
+    const employeesResult = await supabase
+      .from("employees")
+      .select("*")
+      .eq("owner_user_id", ownerUserId);
+
+    if (payrollResult.error) {
+      throw payrollResult.error;
+    }
+    if (employeesResult.error) {
+      throw employeesResult.error;
+    }
+
+    const employeeMap = new Map(employeesResult.data.map((row) => [Number(row.id), row]));
+    const employeeId = req.query.employeeId ? Number(req.query.employeeId) : null;
+    const keyword = String(req.query.keyword || "").trim().toLowerCase();
+    const salaryType = String(req.query.salaryType || "all");
+    const calculationStatus = String(req.query.calculationStatus || "all");
+    const reviewStatus = String(req.query.reviewStatus || "all");
+
+    const rows = payrollResult.data
+      .map((row) => mapPayrollResultRow(row, employeeMap))
+      .filter((row) => {
+        if (employeeId && row.employeeId !== employeeId) {
+          return false;
+        }
+        if (keyword) {
+          const employee = employeeMap.get(row.employeeId);
+          const haystack = [
+            row.employeeName,
+            row.employeeNo || "",
+            employee?.name || "",
+            employee?.employee_no || ""
+          ].join(" ").toLowerCase();
+          if (!haystack.includes(keyword)) {
+            return false;
+          }
+        }
+        if (salaryType !== "all" && row.salaryType !== salaryType) {
+          return false;
+        }
+        if (calculationStatus !== "all" && row.calculationStatus !== calculationStatus) {
+          return false;
+        }
+        if (reviewStatus !== "all" && row.reviewStatus !== reviewStatus) {
+          return false;
+        }
+        return true;
+      });
+
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "薪酬结果加载失败" });
+  }
+});
+
+app.get("/api/admin/payroll-results/:id", async (req, res) => {
+  try {
+    const detail = await fetchPayrollResultDetail(Number(req.params.id), req.authUser.id);
+    res.json(detail);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "薪酬结果详情加载失败" });
+  }
+});
+
+app.post("/api/admin/payroll-results/generate-one", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const employeeId = Number(req.body.employeeId);
+    const yearMonth = String(req.body.yearMonth || "");
+    if (!employeeId || !/^\d{4}-\d{2}$/.test(yearMonth)) {
+      return res.status(400).json({ error: "employeeId 和 yearMonth 必填且格式正确" });
+    }
+
+    const result = await calculateMonthlyPayroll(employeeId, yearMonth, ownerUserId);
+    const employeeMap = new Map([[Number(result.row.employee_id), { id: result.row.employee_id, employee_no: "", name: `员工 #${result.row.employee_id}` }]]);
+    res.json(result.mapped || mapPayrollResultRow(result.row, employeeMap));
+  } catch (error) {
+    res.status(500).json({ error: error.message || "生成单个员工薪酬失败" });
+  }
+});
+
+app.post("/api/admin/payroll-results/generate-monthly", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const yearMonth = String(req.body.yearMonth || "");
+    if (!/^\d{4}-\d{2}$/.test(yearMonth)) {
+      return res.status(400).json({ error: "yearMonth 必须为 YYYY-MM" });
+    }
+
+    const requestedIds = Array.isArray(req.body.employeeIds) ? req.body.employeeIds.map((item) => Number(item)).filter(Boolean) : null;
+    const employeesResult = await supabase
+      .from("employees")
+      .select("*")
+      .eq("owner_user_id", ownerUserId)
+      .eq("is_deleted", false)
+      .order("id", { ascending: true });
+
+    if (employeesResult.error) {
+      throw employeesResult.error;
+    }
+
+    const targetEmployees = employeesResult.data.filter((row) => {
+      if (requestedIds?.length) {
+        return requestedIds.includes(Number(row.id));
+      }
+      return !isInactiveEmployeeStatus(row.status);
+    });
+
+    let successCount = 0;
+    let skippedCount = 0;
+    const failures = [];
+
+    for (const employee of targetEmployees) {
+      try {
+        const result = await calculateMonthlyPayroll(Number(employee.id), yearMonth, ownerUserId, { skipExisting: true });
+        if (result.skipped) {
+          skippedCount += 1;
+        } else {
+          successCount += 1;
+        }
+      } catch (error) {
+        failures.push({
+          employeeId: Number(employee.id),
+          error: error.message || "生成失败"
+        });
+      }
+    }
+
+    res.json({
+      successCount,
+      skippedCount,
+      failureCount: failures.length,
+      failures
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "批量生成薪酬失败" });
+  }
+});
+
+app.post("/api/admin/payroll-results/recalculate-one", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const employeeId = Number(req.body.employeeId);
+    const yearMonth = String(req.body.yearMonth || "");
+    if (!employeeId || !/^\d{4}-\d{2}$/.test(yearMonth)) {
+      return res.status(400).json({ error: "employeeId 和 yearMonth 必填且格式正确" });
+    }
+
+    const result = await calculateMonthlyPayroll(employeeId, yearMonth, ownerUserId, { forceRecalculate: true });
+    const employeeMap = new Map([[Number(result.row.employee_id), { id: result.row.employee_id, employee_no: "", name: `员工 #${result.row.employee_id}` }]]);
+    res.json(result.mapped || mapPayrollResultRow(result.row, employeeMap));
+  } catch (error) {
+    res.status(500).json({ error: error.message || "重新计算单个员工薪酬失败" });
+  }
+});
+
+app.post("/api/admin/payroll-results/recalculate-monthly", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const yearMonth = String(req.body.yearMonth || "");
+    if (!/^\d{4}-\d{2}$/.test(yearMonth)) {
+      return res.status(400).json({ error: "yearMonth 必须为 YYYY-MM" });
+    }
+
+    const requestedIds = Array.isArray(req.body.employeeIds) ? req.body.employeeIds.map((item) => Number(item)).filter(Boolean) : null;
+    const employeesResult = await supabase
+      .from("employees")
+      .select("*")
+      .eq("owner_user_id", ownerUserId)
+      .eq("is_deleted", false)
+      .order("id", { ascending: true });
+
+    if (employeesResult.error) {
+      throw employeesResult.error;
+    }
+
+    const targetEmployees = employeesResult.data.filter((row) => {
+      if (requestedIds?.length) {
+        return requestedIds.includes(Number(row.id));
+      }
+      return !isInactiveEmployeeStatus(row.status);
+    });
+
+    let successCount = 0;
+    const failures = [];
+
+    for (const employee of targetEmployees) {
+      try {
+        await calculateMonthlyPayroll(Number(employee.id), yearMonth, ownerUserId, { forceRecalculate: true });
+        successCount += 1;
+      } catch (error) {
+        failures.push({
+          employeeId: Number(employee.id),
+          error: error.message || "重算失败"
+        });
+      }
+    }
+
+    res.json({
+      successCount,
+      skippedCount: 0,
+      failureCount: failures.length,
+      failures
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "批量重算薪酬失败" });
+  }
+});
+
+app.get("/api/admin/salary-adjustment-items", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const employeeId = Number(req.query.employeeId);
+    const yearMonth = String(req.query.yearMonth || "");
+    const type = String(req.query.type || "all");
+    if (!employeeId || !/^\d{4}-\d{2}$/.test(yearMonth)) {
+      return res.status(400).json({ error: "employeeId 和 yearMonth 必填且格式正确" });
+    }
+
+    const { data, error } = await supabase
+      .from("salary_adjustment_items")
+      .select("*")
+      .eq("owner_user_id", ownerUserId)
+      .eq("employee_id", employeeId)
+      .eq("year_month", yearMonth)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      throw error;
+    }
+
+    res.json(data
+      .filter((row) => type === "all" ? true : row.type === type)
+      .map(mapSalaryAdjustmentItemRow));
+  } catch (error) {
+    res.status(500).json({ error: error.message || "一次性薪资项加载失败" });
+  }
+});
+
+app.post("/api/admin/salary-adjustment-items", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const payload = normalizeSalaryAdjustmentPayload(req.body);
+    const validationError = validateSalaryAdjustmentPayload(payload);
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
+    }
+
+    const lockError = await getSalaryAdjustmentLockError(ownerUserId, payload.employee_id, payload.year_month);
+    if (lockError) {
+      return res.status(409).json({ error: lockError });
+    }
+
+    const { data, error } = await supabase
+      .from("salary_adjustment_items")
+      .insert({
+        owner_user_id: ownerUserId,
+        ...payload,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .select("*")
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    res.status(201).json(mapSalaryAdjustmentItemRow(data));
+  } catch (error) {
+    res.status(500).json({ error: error.message || "新增一次性薪资项失败" });
+  }
+});
+
+app.put("/api/admin/salary-adjustment-items/:id", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const payload = normalizeSalaryAdjustmentPayload(req.body);
+    const validationError = validateSalaryAdjustmentPayload(payload);
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
+    }
+
+    const { data: existingItem, error: existingItemError } = await supabase
+      .from("salary_adjustment_items")
+      .select("*")
+      .eq("owner_user_id", ownerUserId)
+      .eq("id", Number(req.params.id))
+      .maybeSingle();
+
+    if (existingItemError) {
+      throw existingItemError;
+    }
+    if (!existingItem) {
+      return res.status(404).json({ error: "一次性薪资项不存在" });
+    }
+
+    const currentLockError = await getSalaryAdjustmentLockError(ownerUserId, existingItem.employee_id, existingItem.year_month);
+    if (currentLockError) {
+      return res.status(409).json({ error: currentLockError });
+    }
+
+    const targetLockError = await getSalaryAdjustmentLockError(ownerUserId, payload.employee_id, payload.year_month);
+    if (targetLockError) {
+      return res.status(409).json({ error: targetLockError });
+    }
+
+    const { data, error } = await supabase
+      .from("salary_adjustment_items")
+      .update({
+        ...payload,
+        updated_at: new Date().toISOString()
+      })
+      .eq("owner_user_id", ownerUserId)
+      .eq("id", Number(req.params.id))
+      .select("*")
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    res.json(mapSalaryAdjustmentItemRow(data));
+  } catch (error) {
+    res.status(500).json({ error: error.message || "更新一次性薪资项失败" });
+  }
+});
+
+app.delete("/api/admin/salary-adjustment-items/:id", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const { data: existingItem, error: existingItemError } = await supabase
+      .from("salary_adjustment_items")
+      .select("*")
+      .eq("owner_user_id", ownerUserId)
+      .eq("id", Number(req.params.id))
+      .maybeSingle();
+
+    if (existingItemError) {
+      throw existingItemError;
+    }
+    if (!existingItem) {
+      return res.status(404).json({ error: "一次性薪资项不存在" });
+    }
+
+    const lockError = await getSalaryAdjustmentLockError(ownerUserId, existingItem.employee_id, existingItem.year_month);
+    if (lockError) {
+      return res.status(409).json({ error: lockError });
+    }
+
+    const { error } = await supabase
+      .from("salary_adjustment_items")
+      .delete()
+      .eq("owner_user_id", ownerUserId)
+      .eq("id", Number(req.params.id));
+
+    if (error) {
+      throw error;
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "删除一次性薪资项失败" });
+  }
+});
+
+app.patch("/api/admin/payroll-results/:id/approve", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const { data: existing, error: existingError } = await supabase
+      .from("monthly_payroll_results")
+      .select("*")
+      .eq("owner_user_id", ownerUserId)
+      .eq("id", Number(req.params.id))
+      .single();
+
+    if (existingError) {
+      throw existingError;
+    }
+
+    if (existing.calculation_status === "blocked") {
+      return res.status(400).json({ error: "历史异常薪酬状态，请先重新计算" });
+    }
+    if (existing.calculation_status === "confirmed") {
+      return res.status(400).json({ error: "已确认的薪酬结果不能重复核对" });
+    }
+
+    const { data, error } = await supabase
+      .from("monthly_payroll_results")
+      .update({
+        review_status: "approved",
+        updated_at: new Date().toISOString()
+      })
+      .eq("owner_user_id", ownerUserId)
+      .eq("id", Number(req.params.id))
+      .select("*")
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    const employeeResult = await supabase.from("employees").select("*").eq("owner_user_id", ownerUserId).eq("id", Number(data.employee_id)).maybeSingle();
+    if (employeeResult.error) throw employeeResult.error;
+    const employeeMap = employeeResult.data ? new Map([[Number(employeeResult.data.id), employeeResult.data]]) : new Map();
+    res.json(mapPayrollResultRow(data, employeeMap));
+  } catch (error) {
+    res.status(500).json({ error: error.message || "标记核对通过失败" });
+  }
+});
+
+app.patch("/api/admin/payroll-results/:id/reject", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const { data: existing, error: existingError } = await supabase
+      .from("monthly_payroll_results")
+      .select("*")
+      .eq("owner_user_id", ownerUserId)
+      .eq("id", Number(req.params.id))
+      .single();
+
+    if (existingError) {
+      throw existingError;
+    }
+
+    if (existing.calculation_status === "confirmed") {
+      return res.status(400).json({ error: "已确认的薪酬结果不能驳回" });
+    }
+
+    const { data, error } = await supabase
+      .from("monthly_payroll_results")
+      .update({
+        review_status: "rejected",
+        updated_at: new Date().toISOString()
+      })
+      .eq("owner_user_id", ownerUserId)
+      .eq("id", Number(req.params.id))
+      .select("*")
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    const employeeResult = await supabase.from("employees").select("*").eq("owner_user_id", ownerUserId).eq("id", Number(data.employee_id)).maybeSingle();
+    if (employeeResult.error) throw employeeResult.error;
+    const employeeMap = employeeResult.data ? new Map([[Number(employeeResult.data.id), employeeResult.data]]) : new Map();
+    res.json(mapPayrollResultRow(data, employeeMap));
+  } catch (error) {
+    res.status(500).json({ error: error.message || "驳回薪酬结果失败" });
+  }
+});
+
+app.patch("/api/admin/payroll-results/:id/confirm", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const { data: existing, error: existingError } = await supabase
+      .from("monthly_payroll_results")
+      .select("*")
+      .eq("owner_user_id", ownerUserId)
+      .eq("id", Number(req.params.id))
+      .single();
+
+    if (existingError) {
+      throw existingError;
+    }
+
+    if (existing.calculation_status === "blocked") {
+      return res.status(400).json({ error: "历史异常薪酬状态，请先重新计算" });
+    }
+    if (existing.calculation_status === "confirmed") {
+      return res.status(400).json({ error: "该薪酬结果已确认，无需重复确认" });
+    }
+    if (existing.review_status !== "approved") {
+      return res.status(400).json({ error: "未核对通过的薪酬结果不能确认" });
+    }
+
+    const { data, error } = await supabase
+      .from("monthly_payroll_results")
+      .update({
+        calculation_status: "confirmed",
+        confirmed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .eq("owner_user_id", ownerUserId)
+      .eq("id", Number(req.params.id))
+      .select("*")
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    const employeeResult = await supabase.from("employees").select("*").eq("owner_user_id", ownerUserId).eq("id", Number(data.employee_id)).maybeSingle();
+    if (employeeResult.error) throw employeeResult.error;
+    const employeeMap = employeeResult.data ? new Map([[Number(employeeResult.data.id), employeeResult.data]]) : new Map();
+    res.json(mapPayrollResultRow(data, employeeMap));
+  } catch (error) {
+    res.status(500).json({ error: error.message || "确认薪酬结果失败" });
+  }
+});
+
+app.get("/api/admin/employees", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const includeInactive = req.query.includeInactive === "true";
+    const keyword = String(req.query.keyword || "").trim().toLowerCase();
+    const status = String(req.query.status || "all");
+    const country = String(req.query.country || "all");
+    const salaryType = String(req.query.salaryType || "all");
+    const attendanceRuleId = String(req.query.attendanceRuleId || "all");
+    const role = String(req.query.role || "all");
+    const usePagination = req.query.page !== undefined || req.query.pageSize !== undefined;
+    const page = Math.max(1, Number.parseInt(String(req.query.page || "1"), 10) || 1);
+    const pageSize = Math.min(50, Math.max(10, Number.parseInt(String(req.query.pageSize || "24"), 10) || 24));
+    const offset = (page - 1) * pageSize;
+
+    let employeeQuery = supabase
+      .from("employees")
+      .select("*", { count: "exact" })
+      .eq("owner_user_id", ownerUserId)
+      .order("id", { ascending: true });
+
+    if (!includeInactive && status === "all") {
+      employeeQuery = employeeQuery.not("status", "in", '("disabled","resigned")');
+    }
+
+    if (status !== "all") {
+      employeeQuery = employeeQuery.eq("status", status);
+    }
+
+    if (country !== "all") {
+      employeeQuery = employeeQuery.eq("country", country);
+    }
+
+    if (salaryType !== "all") {
+      employeeQuery = employeeQuery.eq("salary_type", salaryType);
+    }
+
+    if (attendanceRuleId !== "all") {
+      employeeQuery = employeeQuery.eq("attendance_rule_id", Number(attendanceRuleId));
+    }
+
+    if (role !== "all") {
+      employeeQuery = employeeQuery.eq("role", role);
+    }
+
+    if (keyword) {
+      const escapedKeyword = escapeLikeKeyword(keyword);
+      employeeQuery = employeeQuery.or([
+        `name.ilike.%${escapedKeyword}%`,
+        `employee_no.ilike.%${escapedKeyword}%`,
+        `phone.ilike.%${escapedKeyword}%`,
+        `role.ilike.%${escapedKeyword}%`,
+        `dept.ilike.%${escapedKeyword}%`
+      ].join(","));
+    }
+
+    const [employeeResult, roleOptionsResult] = await Promise.all([
+      usePagination ? employeeQuery.range(offset, offset + pageSize - 1) : employeeQuery,
+      supabase
+        .from("employees")
+        .select("role")
+        .eq("owner_user_id", ownerUserId)
+        .order("role", { ascending: true })
+    ]);
+
+    if (employeeResult.error) {
+      throw employeeResult.error;
+    }
+    if (roleOptionsResult.error) {
+      throw roleOptionsResult.error;
+    }
+
+    const rows = employeeResult.data || [];
+    const ruleMap = await fetchRuleMap(Array.from(new Set(rows.map((row) => Number(row.attendance_rule_id)))), ownerUserId);
+    const roleOptions = Array.from(new Set((roleOptionsResult.data || [])
+      .map((row) => String(row.role || "").trim())
+      .filter(Boolean)));
+
+    if (!usePagination) {
+      res.json(rows.map((row) => mapEmployeeRow(row, ruleMap)));
+      return;
+    }
+
+    res.json({
+      items: rows.map((row) => mapEmployeeRow(row, ruleMap)),
+      total: employeeResult.count || 0,
+      page,
+      pageSize,
+      hasMore: offset + rows.length < (employeeResult.count || 0),
+      roleOptions
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "员工列表加载失败" });
+  }
+});
+
+app.get("/api/admin/employees/:id", async (req, res) => {
+  try {
+    const detail = await fetchEmployeeDetail(Number(req.params.id), req.authUser.id);
+    res.json(detail);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "员工详情加载失败" });
+  }
+});
+
+app.post("/api/admin/employees", async (req, res) => {
+  try {
+    const payload = normalizeEmployeePayload(req.body, req.authUser);
+    const employeeId = await createEmployeeRecord(payload, req.authUser);
+    const detail = await fetchEmployeeDetail(Number(employeeId), req.authUser.id);
+    res.status(201).json(detail);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "新增员工失败" });
+  }
+});
+
+app.put("/api/admin/employees/:id", async (req, res) => {
+  try {
+    const payload = normalizeEmployeePayload(req.body, req.authUser);
+    const employeeId = await updateEmployeeRecord(Number(req.params.id), payload, req.authUser);
+    const detail = await fetchEmployeeDetail(Number(employeeId), req.authUser.id);
+    res.json(detail);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "更新员工失败" });
+  }
+});
+
+app.patch("/api/admin/employees/:id/status", async (req, res) => {
+  try {
+    const { targetStatus } = req.body;
+    const employeeId = await setEmployeeStatusRecord(Number(req.params.id), targetStatus, req.authUser.id);
+    const detail = await fetchEmployeeDetail(Number(employeeId), req.authUser.id);
+    res.json(detail);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "更新员工状态失败" });
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`wmshr-admin API running on http://127.0.0.1:${PORT}`);
+});
