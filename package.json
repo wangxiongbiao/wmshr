@@ -1,0 +1,19 @@
+{
+  "name": "wmshr",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:home": "npm --workspace @wmshr/home run dev",
+    "dev:admin": "npm --workspace @wmshr/admin run dev",
+    "dev:admin:api": "npm --workspace @wmshr/admin run dev:api",
+    "dev:mobile": "npm --workspace @wmshr/mobile run start",
+    "build:admin": "npm --workspace @wmshr/admin run build",
+    "build:home": "npm --workspace @wmshr/home run build",
+    "lint": "npm run lint --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present"
+  }
+}

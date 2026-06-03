@@ -2,6 +2,7 @@ node_modules/
 dist/
 build/
 coverage/
+.vite/
 
 .env
 .env.*
@@ -21,3 +22,4 @@ supabase/.temp/
 
 .codex-tmp/
 .git-backups/
+.vercel
