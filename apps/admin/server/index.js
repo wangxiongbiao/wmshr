@@ -161,6 +161,38 @@ async function upsertWorkspaceBootstrapState(ownerUserId, authUser, payload) {
   }
 }
 
+async function fetchWorkspaceDataCounts(ownerUserId) {
+  // 初始化状态表只代表“检查/初始化流程跑过”，不能单独证明员工和规则真实存在；
+  // 一键初始化前必须核对真实业务表，避免状态残留但后台为空时继续被误判为已初始化。
+  const [employeesResult, rulesResult] = await Promise.all([
+    supabase
+      .from("employees")
+      .select("id", { count: "exact", head: true })
+      .eq("owner_user_id", ownerUserId),
+    supabase
+      .from("attendance_rules")
+      .select("id", { count: "exact", head: true })
+      .eq("owner_user_id", ownerUserId)
+  ]);
+
+  if (employeesResult.error) {
+    throw employeesResult.error;
+  }
+  if (rulesResult.error) {
+    throw rulesResult.error;
+  }
+
+  return {
+    employeesCount: employeesResult.count || 0,
+    rulesCount: rulesResult.count || 0
+  };
+}
+
+function hasWorkspaceData(counts) {
+  // 员工或考勤规则任一存在即视为已有业务数据，防止初始化重复写入演示数据。
+  return counts.employeesCount > 0 || counts.rulesCount > 0;
+}
+
 function mapEmployeeRow(row, ruleMap = new Map()) {
   return {
     id: Number(row.id),
@@ -1515,8 +1547,12 @@ async function setEmployeeStatusRecord(employeeId, targetStatus, ownerUserId) {
 }
 
 async function bootstrapWorkspaceData(ownerUserId, authUser) {
-  const bootstrapState = await fetchWorkspaceBootstrapState(ownerUserId);
-  if (bootstrapState) {
+  const [bootstrapState, workspaceCounts] = await Promise.all([
+    fetchWorkspaceBootstrapState(ownerUserId),
+    fetchWorkspaceDataCounts(ownerUserId)
+  ]);
+
+  if (bootstrapState && hasWorkspaceData(workspaceCounts)) {
     return {
       created: false,
       yearMonth: getTodayDateKey().slice(0, 7),
@@ -1524,29 +1560,11 @@ async function bootstrapWorkspaceData(ownerUserId, authUser) {
       rulesCreated: 0,
       message: bootstrapState.created_demo_data
         ? "当前 Google 账号的演示数据已初始化过"
-        : "当前 Google 账号已完成初始化检查"
+        : "当前 Google 账号已有后台数据，已跳过初始化"
     };
   }
 
-  const existingEmployeesResult = await supabase
-    .from("employees")
-    .select("id", { count: "exact", head: true })
-    .eq("owner_user_id", ownerUserId);
-
-  if (existingEmployeesResult.error) {
-    throw existingEmployeesResult.error;
-  }
-
-  const existingRulesResult = await supabase
-    .from("attendance_rules")
-    .select("id", { count: "exact", head: true })
-    .eq("owner_user_id", ownerUserId);
-
-  if (existingRulesResult.error) {
-    throw existingRulesResult.error;
-  }
-
-  if ((existingEmployeesResult.count || 0) > 0 || (existingRulesResult.count || 0) > 0) {
+  if (!bootstrapState && hasWorkspaceData(workspaceCounts)) {
     await upsertWorkspaceBootstrapState(ownerUserId, authUser, {
       bootstrapSource: "existing_data",
       createdDemoData: false
@@ -1559,6 +1577,9 @@ async function bootstrapWorkspaceData(ownerUserId, authUser) {
       message: "当前账号已有后台数据，已跳过初始化"
     };
   }
+
+  // 如果状态表已有记录但员工和规则都为空，说明之前只写入了初始化状态或数据被清空；
+  // 此时继续创建演示数据，保证“一键初始化”以真实业务表是否为空作为最终判定。
 
   const yearMonth = getTodayDateKey().slice(0, 7);
   const dates = enumerateMonthDates(yearMonth).filter((date) => date <= getTodayDateKey()).slice(0, 3);
@@ -1623,6 +1644,8 @@ async function bootstrapWorkspaceData(ownerUserId, authUser) {
       salaryType: "hourly",
       hourlyRate: 320,
       fixedSalary: null,
+      attendanceBonus: 0,
+      socialSecurity: 0,
       currency: "THB",
       photo: null,
       createdBy: authUser.email || null
@@ -1641,6 +1664,8 @@ async function bootstrapWorkspaceData(ownerUserId, authUser) {
       salaryType: "fixed",
       hourlyRate: null,
       fixedSalary: 18500,
+      attendanceBonus: 0,
+      socialSecurity: 0,
       currency: "THB",
       photo: null,
       createdBy: authUser.email || null
@@ -1864,19 +1889,8 @@ app.post("/api/admin/workspace/ensure-bootstrap", async (req, res) => {
 
 app.post("/api/admin/workspace/bootstrap", async (req, res) => {
   try {
-    const existingState = await fetchWorkspaceBootstrapState(req.authUser.id);
-    if (existingState) {
-      return res.json({
-        created: false,
-        yearMonth: getTodayDateKey().slice(0, 7),
-        employeesCreated: 0,
-        rulesCreated: 0,
-        message: existingState.created_demo_data
-          ? "当前 Google 账号的演示数据只允许初始化一次"
-          : "当前 Google 账号已完成初始化检查"
-      });
-    }
-
+    // 手动“一键初始化”必须交给 bootstrapWorkspaceData 做真实数据数量核对；
+    // 不要在路由层仅凭状态表提前返回，否则状态残留会导致员工/规则为空时永远无法补种数据。
     const result = await bootstrapWorkspaceData(req.authUser.id, req.authUser);
     if (result.created) {
       await upsertWorkspaceBootstrapState(req.authUser.id, req.authUser, {
