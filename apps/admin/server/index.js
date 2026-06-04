@@ -1437,7 +1437,7 @@ function normalizeEmployeePayload(body, authUser) {
 
 async function createEmployeeRecord(payload, authUser) {
   const ownerUserId = authUser.id;
-  const compatibilityRuleId = await getEmployeeCompatibilityAttendanceRuleId(ownerUserId);
+  const compatibilityRuleId = payload.attendanceRuleId || await getEmployeeCompatibilityAttendanceRuleId(ownerUserId);
   const employeeInsert = {
     owner_user_id: ownerUserId,
     employee_no: generateEmployeeNo(),
@@ -1449,6 +1449,9 @@ async function createEmployeeRecord(payload, authUser) {
     dept: payload.dept,
     join_date: payload.joinDate,
     status: payload.status,
+    // 初始化和旧接口仍依赖 employees.attendance_rule_id 作为考勤计算入口；
+    // 即使员工 v2 前端不再编辑规则，也必须在创建时写入后端兼容规则，避免初始化员工无规则导致考勤/薪资为空。
+    attendance_rule_id: compatibilityRuleId,
     salary_type: payload.salaryType,
     hourly_rate: payload.hourlyRate,
     fixed_salary: payload.fixedSalary,
