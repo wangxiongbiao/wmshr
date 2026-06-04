@@ -2,6 +2,7 @@ import dotenv from "dotenv";
 import express from "express";
 import { createClient } from "@supabase/supabase-js";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { DEFAULT_ATTENDANCE_CONFIG, calculateDailyAttendanceRow as calculateV2DailyAttendanceRow } from "./attendance-v2.js";
 
 // Vercel Node Functions import this file from the repository root, while local
 // admin API development runs it from apps/admin. Load both locations without
@@ -172,11 +173,13 @@ function mapEmployeeRow(row, ruleMap = new Map()) {
     dept: row.dept,
     joinDate: row.join_date,
     status: row.status,
-    attendanceRuleId: Number(row.attendance_rule_id),
+    attendanceRuleId: row.attendance_rule_id === null || row.attendance_rule_id === undefined ? 0 : Number(row.attendance_rule_id),
     attendanceRuleName: row.attendance_rule_name || ruleMap.get(Number(row.attendance_rule_id)) || null,
     salaryType: row.salary_type,
     hourlyRate: row.hourly_rate === null ? null : Number(row.hourly_rate),
     fixedSalary: row.fixed_salary === null ? null : Number(row.fixed_salary),
+    attendanceBonus: row.attendance_bonus === null || row.attendance_bonus === undefined ? 0 : Number(row.attendance_bonus),
+    socialSecurity: row.social_security === null || row.social_security === undefined ? 0 : Number(row.social_security),
     currency: row.currency,
     photo: row.photo,
     isDeleted: row.is_deleted
@@ -191,7 +194,7 @@ function mapHistoryRow(row, ruleMap = new Map()) {
   return {
     id: Number(row.id),
     employeeId: Number(row.employee_id),
-    attendanceRuleId: Number(row.attendance_rule_id),
+    attendanceRuleId: row.attendance_rule_id === null || row.attendance_rule_id === undefined ? 0 : Number(row.attendance_rule_id),
     attendanceRuleName: row.attendance_rule_name || ruleMap.get(Number(row.attendance_rule_id)) || null,
     effectiveStartDate: row.effective_start_date,
     effectiveEndDate: row.effective_end_date,
@@ -284,6 +287,55 @@ function getPreviousDate(date) {
 
 function generateEmployeeNo() {
   return `EMP${Date.now().toString().slice(-8)}${String(Math.floor(Math.random() * 90) + 10)}`;
+}
+
+async function getEmployeeCompatibilityAttendanceRuleId(ownerUserId) {
+  // 员工 v2 界面已经不展示/编辑多考勤规则；这里仅为旧 employees.attendance_rule_id 字段提供后端兼容值，
+  // 避免前端重新暴露旧规则历史模型。若后续数据库删除该字段，应先同步检查 create/update 员工接口。
+  const { data: existingRule, error: existingError } = await supabase
+    .from("attendance_rules")
+    .select("id")
+    .eq("owner_user_id", ownerUserId)
+    .order("id", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (existingError) {
+    throw existingError;
+  }
+
+  if (existingRule?.id) {
+    return Number(existingRule.id);
+  }
+
+  const today = getTodayDateKey();
+  const { data: createdRule, error: createError } = await supabase
+    .from("attendance_rules")
+    .insert(addOwnerPayload({
+      name: "默认考勤规则",
+      is_active: true,
+      effective_start_date: today,
+      effective_end_date: null,
+      start_shift: "08:30",
+      end_shift: "17:30",
+      break_start: "12:00",
+      break_end: "13:00",
+      standard_hours: 8,
+      overtime_enabled: true,
+      ot_hourly_fee: 0,
+      overtime_min_unit_hours: 0.5,
+      overtime_rounding: "floor_to_half_hour",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }, ownerUserId))
+    .select("id")
+    .single();
+
+  if (createError) {
+    throw createError;
+  }
+
+  return Number(createdRule.id);
 }
 
 async function fetchRuleMap(ids, ownerUserId) {
@@ -379,26 +431,10 @@ async function fetchEmployeeDetail(employeeId, ownerUserId) {
     throw employeeError;
   }
 
-  const { data: historyRows, error: historyError } = await supabase
-    .from("employee_attendance_rule_history")
-    .select("*")
-    .eq("owner_user_id", ownerUserId)
-    .eq("employee_id", employeeId)
-    .order("effective_start_date", { ascending: false });
-
-  if (historyError) {
-    throw historyError;
-  }
-
-  const ruleIds = Array.from(new Set([
-    Number(employeeRow.attendance_rule_id),
-    ...historyRows.map((row) => Number(row.attendance_rule_id))
-  ]));
-  const ruleMap = await fetchRuleMap(ruleIds, ownerUserId);
-
+  // 员工 v2 弹窗只编辑员工档案和薪资口径，不再展示旧规则历史；保留空数组返回以兼容前端 EmployeeDetail 类型。
   return {
-    employee: mapEmployeeRow(employeeRow, ruleMap),
-    ruleHistory: historyRows.map((row) => mapHistoryRow(row, ruleMap))
+    employee: mapEmployeeRow(employeeRow),
+    ruleHistory: []
   };
 }
 
@@ -406,25 +442,6 @@ function toDateKey(value) {
   return typeof value === "string" ? value.slice(0, 10) : value;
 }
 
-function parseTimeToHours(value) {
-  if (!value) {
-    return null;
-  }
-
-  const match = /^(\d{2}):(\d{2})(?::\d{2})?$/.exec(value);
-  if (!match) {
-    return null;
-  }
-
-  const hours = Number(match[1]);
-  const minutes = Number(match[2]);
-
-  if (hours > 23 || minutes > 59) {
-    return null;
-  }
-
-  return hours + minutes / 60;
-}
 
 function roundToTwo(value) {
   return Math.round(value * 100) / 100;
@@ -461,17 +478,62 @@ function mapAttendanceRecordRow(row) {
   };
 }
 
+function mapAttendanceConfigRow(row) {
+  return {
+    startShift: row.start_shift ? row.start_shift.slice(0, 5) : DEFAULT_ATTENDANCE_CONFIG.start_shift,
+    endShift: row.end_shift ? row.end_shift.slice(0, 5) : DEFAULT_ATTENDANCE_CONFIG.end_shift,
+    breakStart: row.break_start ? row.break_start.slice(0, 5) : DEFAULT_ATTENDANCE_CONFIG.break_start,
+    breakEnd: row.break_end ? row.break_end.slice(0, 5) : DEFAULT_ATTENDANCE_CONFIG.break_end,
+    standardHours: Number(row.standard_hours ?? DEFAULT_ATTENDANCE_CONFIG.standard_hours),
+    otHourlyFee: Number(row.ot_hourly_fee ?? DEFAULT_ATTENDANCE_CONFIG.ot_hourly_fee)
+  };
+}
+
+function normalizeAttendanceConfigPayload(body = {}) {
+  // 前端 v2 设置弹窗只提交全局考勤配置字段；owner_user_id/时间戳由服务端控制，防止跨账号写入。
+  return {
+    start_shift: String(body.startShift || DEFAULT_ATTENDANCE_CONFIG.start_shift).slice(0, 5),
+    end_shift: String(body.endShift || DEFAULT_ATTENDANCE_CONFIG.end_shift).slice(0, 5),
+    break_start: String(body.breakStart || DEFAULT_ATTENDANCE_CONFIG.break_start).slice(0, 5),
+    break_end: String(body.breakEnd || DEFAULT_ATTENDANCE_CONFIG.break_end).slice(0, 5),
+    standard_hours: Number(body.standardHours ?? DEFAULT_ATTENDANCE_CONFIG.standard_hours),
+    ot_hourly_fee: Number(body.otHourlyFee ?? DEFAULT_ATTENDANCE_CONFIG.ot_hourly_fee),
+    updated_at: new Date().toISOString()
+  };
+}
+
+function getV2AttendanceStatusLabel(row) {
+  const statusLabelMap = {
+    normal: "正常",
+    leave: "假期",
+    absent: "缺勤",
+    manual_adjusted: "人工调整",
+    exception: "异常"
+  };
+  return statusLabelMap[row.status] || row.status || "正常";
+}
+
 function mapAttendanceCalculationRow(row, employeeMap = new Map()) {
   const employee = employeeMap.get(Number(row.employee_id));
+  const overtimePayHours = Number(row.overtime_pay_hours);
+  // v2 考勤表格需要一次接口拿齐员工展示字段和费用字段；前端后续只负责筛选、展示、导出，不能再回到旧规则或本地重算。
   return {
     id: Number(row.id),
     employeeId: Number(row.employee_id),
     employeeNo: employee?.employee_no || undefined,
     employeeName: employee?.name || `员工 #${row.employee_id}`,
+    employeeGender: employee?.gender || null,
+    employeeCountry: employee?.country || null,
+    employeeRole: employee?.role || "",
+    employeeDept: employee?.dept || "",
+    employeeStatus: employee?.status || null,
+    employeePhoto: employee?.photo || null,
+    salaryType: employee?.salary_type || null,
+    hourlyRate: employee?.hourly_rate === null || employee?.hourly_rate === undefined ? null : Number(employee.hourly_rate),
+    fixedSalary: employee?.fixed_salary === null || employee?.fixed_salary === undefined ? null : Number(employee.fixed_salary),
+    currency: employee?.currency || "THB",
     attendanceRecordId: row.attendance_record_id === null ? null : Number(row.attendance_record_id),
     date: row.date,
-    attendanceRuleId: row.attendance_rule_id === null ? null : Number(row.attendance_rule_id),
-    attendanceRuleName: row.attendance_rule_name || undefined,
     rawInTime: row.raw_in_time ? row.raw_in_time.slice(0, 5) : null,
     rawOutTime: row.raw_out_time ? row.raw_out_time.slice(0, 5) : null,
     rawHours: Number(row.raw_hours),
@@ -479,8 +541,13 @@ function mapAttendanceCalculationRow(row, employeeMap = new Map()) {
     validHours: Number(row.valid_hours),
     standardHours: Number(row.standard_hours),
     overtimeRawHours: Number(row.overtime_raw_hours),
-    overtimePayHours: Number(row.overtime_pay_hours),
+    overtimePayHours,
+    workPay: Number(row.work_pay || 0),
+    overtimePay: Number(row.overtime_pay || 0),
+    totalPay: Number(row.total_pay || 0),
     status: row.status,
+    statusLabel: getV2AttendanceStatusLabel(row),
+    isOvertime: overtimePayHours > 0,
     hasException: row.has_exception,
     exceptionReason: row.exception_reason,
     note: row.note || "",
@@ -496,6 +563,10 @@ function mapAttendanceSummaryRow(row, employeeMap = new Map()) {
     employeeId: Number(row.employee_id),
     employeeNo: employee?.employee_no || undefined,
     employeeName: employee?.name || `员工 #${row.employee_id}`,
+    // 薪资 v2 员工详情列需要稳定显示“部门 · 职位”和头像；这里随薪资结果一起返回，前端不要再用旧员工列表 fallback。
+    employeeDept: employee?.dept || "未分配",
+    employeeRole: employee?.role || "未设置职位",
+    employeePhoto: employee?.photo || null,
     yearMonth: row.year_month,
     periodStartDate: row.period_start_date,
     periodEndDate: row.period_end_date,
@@ -553,6 +624,10 @@ function mapPayrollResultRow(row, employeeMap = new Map()) {
     employeeId: Number(row.employee_id),
     employeeNo: employee?.employee_no || undefined,
     employeeName: employee?.name || `员工 #${row.employee_id}`,
+    // 薪资 v2 员工详情列需要稳定显示“部门 · 职位”和头像；这里随薪资结果一起返回，前端不要再用旧员工列表 fallback。
+    employeeDept: employee?.dept || "未分配",
+    employeeRole: employee?.role || "未设置职位",
+    employeePhoto: employee?.photo || null,
     yearMonth: row.year_month,
     salaryType: row.salary_type,
     fixedSalary: row.fixed_salary === null ? null : Number(row.fixed_salary),
@@ -579,72 +654,6 @@ function mapPayrollResultRow(row, employeeMap = new Map()) {
   };
 }
 
-function buildAttendanceResultPayload({
-  ownerUserId,
-  employeeId,
-  date,
-  record = null,
-  rule = null,
-  status,
-  hasException,
-  exceptionReason,
-  rawHours = 0,
-  breakDeductionHours = 0,
-  validHours = 0,
-  standardHours = 0,
-  overtimeRawHours = 0,
-  overtimePayHours = 0
-}) {
-  return {
-    owner_user_id: ownerUserId,
-    employee_id: employeeId,
-    attendance_record_id: record ? Number(record.id) : null,
-    date,
-    attendance_rule_id: rule ? Number(rule.id) : null,
-    attendance_rule_name: rule ? rule.name : null,
-    raw_in_time: record?.in_time || null,
-    raw_out_time: record?.out_time || null,
-    raw_hours: roundToTwo(rawHours),
-    break_deduction_hours: roundToTwo(breakDeductionHours),
-    valid_hours: roundToTwo(validHours),
-    standard_hours: roundToTwo(standardHours),
-    overtime_raw_hours: roundToTwo(overtimeRawHours),
-    overtime_pay_hours: roundToTwo(overtimePayHours),
-    status,
-    has_exception: hasException,
-    exception_reason: exceptionReason,
-    note: record?.note || "",
-    source: record?.source || null,
-    calculated_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  };
-}
-
-function calculateOverlapHours(start, end, breakStart, breakEnd) {
-  let adjustedEnd = end;
-  if (adjustedEnd < start) {
-    adjustedEnd += 24;
-  }
-
-  let adjustedBreakEnd = breakEnd;
-  if (adjustedBreakEnd < breakStart) {
-    adjustedBreakEnd += 24;
-  }
-
-  let overlapStart = Math.max(start, breakStart);
-  let overlapEnd = Math.min(adjustedEnd, adjustedBreakEnd);
-  if (overlapStart < overlapEnd) {
-    return overlapEnd - overlapStart;
-  }
-
-  overlapStart = Math.max(start, breakStart + 24);
-  overlapEnd = Math.min(adjustedEnd + 24, adjustedBreakEnd + 24);
-  if (overlapStart < overlapEnd) {
-    return overlapEnd - overlapStart;
-  }
-
-  return 0;
-}
 
 function getMonthEndDate(yearMonth) {
   return getMonthRange(yearMonth).periodEndDate;
@@ -736,6 +745,40 @@ function getTodayDateKey() {
   return new Date().toISOString().slice(0, 10);
 }
 
+async function resolveAttendanceConfig(ownerUserId) {
+  const { data, error } = await supabase
+    .from("attendance_config")
+    .select("*")
+    .eq("owner_user_id", ownerUserId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+  if (data) {
+    return data;
+  }
+
+  // v2 要求每个账号只有一条全局配置；首次计算时自动创建默认值，避免新账号进入考勤页就因缺配置中断。
+  // 默认值必须与 docs/wmshr-后台考勤底层彻底调整为v2逻辑方案.md 的 attendance_config 表结构保持一致。
+  const { data: created, error: createError } = await supabase
+    .from("attendance_config")
+    .insert({
+      owner_user_id: ownerUserId,
+      ...DEFAULT_ATTENDANCE_CONFIG,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    })
+    .select("*")
+    .single();
+
+  if (createError) {
+    throw createError;
+  }
+
+  return created;
+}
+
 function isInactiveEmployeeStatus(status) {
   return status === "disabled" || status === "resigned";
 }
@@ -757,16 +800,15 @@ function shouldCalculateEmployeeDate(employee, date) {
 
 async function fetchCalculationContext(yearMonth, ownerUserId) {
   const { periodStartDate, periodEndDate } = getMonthRange(yearMonth);
-  const [employeesResult, recordsResult, historyResult, rulesResult, calculationsResult, summariesResult] = await Promise.all([
+  const [employeesResult, recordsResult, calculationsResult, summariesResult, attendanceConfig] = await Promise.all([
     supabase.from("employees").select("*").eq("owner_user_id", ownerUserId).order("id", { ascending: true }),
     supabase.from("attendance_records").select("*").eq("owner_user_id", ownerUserId).gte("date", periodStartDate).lte("date", periodEndDate),
-    supabase.from("employee_attendance_rule_history").select("*").eq("owner_user_id", ownerUserId).order("effective_start_date", { ascending: true }),
-    supabase.from("attendance_rules").select("*").eq("owner_user_id", ownerUserId),
     supabase.from("attendance_calculation_results").select("*").eq("owner_user_id", ownerUserId).gte("date", periodStartDate).lte("date", periodEndDate),
-    supabase.from("monthly_attendance_summaries").select("*").eq("owner_user_id", ownerUserId).eq("year_month", yearMonth)
+    supabase.from("monthly_attendance_summaries").select("*").eq("owner_user_id", ownerUserId).eq("year_month", yearMonth),
+    resolveAttendanceConfig(ownerUserId)
   ]);
 
-  for (const result of [employeesResult, recordsResult, historyResult, rulesResult, calculationsResult, summariesResult]) {
+  for (const result of [employeesResult, recordsResult, calculationsResult, summariesResult]) {
     if (result.error) {
       throw result.error;
     }
@@ -775,17 +817,6 @@ async function fetchCalculationContext(yearMonth, ownerUserId) {
   const employees = employeesResult.data;
   const employeeMap = new Map(employees.map((row) => [Number(row.id), row]));
   const recordMap = new Map(recordsResult.data.map((row) => [`${row.employee_id}:${toDateKey(row.date)}`, row]));
-  const ruleMap = new Map(rulesResult.data.map((row) => [Number(row.id), row]));
-  const historyMap = new Map();
-
-  for (const row of historyResult.data) {
-    const employeeId = Number(row.employee_id);
-    if (!historyMap.has(employeeId)) {
-      historyMap.set(employeeId, []);
-    }
-    historyMap.get(employeeId).push(row);
-  }
-
   const calculationMap = new Map(calculationsResult.data.map((row) => [`${row.employee_id}:${toDateKey(row.date)}`, row]));
   const summaryMap = new Map(summariesResult.data.map((row) => [Number(row.employee_id), row]));
 
@@ -793,176 +824,12 @@ async function fetchCalculationContext(yearMonth, ownerUserId) {
     employees,
     employeeMap,
     recordMap,
-    ruleMap,
-    historyMap,
+    attendanceConfig,
     calculationMap,
     summaryMap
   };
 }
 
-function resolveRuleForDate(historyRows, ruleMap, date) {
-  if (!historyRows?.length) {
-    return { rule: null, exceptionReason: "ATTENDANCE_RULE_NOT_FOUND" };
-  }
-
-  const matchingHistory = historyRows.find((row) => {
-    const start = toDateKey(row.effective_start_date);
-    const end = row.effective_end_date ? toDateKey(row.effective_end_date) : null;
-    return date >= start && (!end || date <= end);
-  });
-
-  if (!matchingHistory) {
-    return { rule: null, exceptionReason: "ATTENDANCE_RULE_NOT_FOUND" };
-  }
-
-  const rule = ruleMap.get(Number(matchingHistory.attendance_rule_id));
-  if (!rule) {
-    return { rule: null, exceptionReason: "ATTENDANCE_RULE_NOT_FOUND" };
-  }
-
-  const ruleStart = toDateKey(rule.effective_start_date);
-  const ruleEnd = rule.effective_end_date ? toDateKey(rule.effective_end_date) : null;
-  if (date < ruleStart || (ruleEnd && date > ruleEnd)) {
-    return { rule: null, exceptionReason: "ATTENDANCE_RULE_EXPIRED" };
-  }
-
-  return { rule, exceptionReason: null };
-}
-
-function calculateDailyAttendanceRow(employee, record, rule, date, ownerUserId) {
-  if (!rule) {
-    return buildAttendanceResultPayload({
-      ownerUserId,
-      employeeId: Number(employee.id),
-      date,
-      record,
-      rule: null,
-      status: "exception",
-      hasException: true,
-      exceptionReason: "ATTENDANCE_RULE_NOT_FOUND"
-    });
-  }
-
-  if (!record) {
-    return buildAttendanceResultPayload({
-      ownerUserId,
-      employeeId: Number(employee.id),
-      date,
-      record: null,
-      rule,
-      status: "absent",
-      hasException: false,
-      exceptionReason: null,
-      standardHours: Number(rule.standard_hours)
-    });
-  }
-
-  if (record.type === "leave") {
-    return buildAttendanceResultPayload({
-      ownerUserId,
-      employeeId: Number(employee.id),
-      date,
-      record,
-      rule,
-      status: "leave",
-      hasException: false,
-      exceptionReason: null,
-      standardHours: Number(rule.standard_hours)
-    });
-  }
-
-  if (record.type === "absent") {
-    return buildAttendanceResultPayload({
-      ownerUserId,
-      employeeId: Number(employee.id),
-      date,
-      record,
-      rule,
-      status: "absent",
-      hasException: false,
-      exceptionReason: null,
-      standardHours: Number(rule.standard_hours)
-    });
-  }
-
-  if (!record.in_time) {
-    return buildAttendanceResultPayload({
-      ownerUserId,
-      employeeId: Number(employee.id),
-      date,
-      record,
-      rule,
-      status: "exception",
-      hasException: true,
-      exceptionReason: "IN_TIME_MISSING",
-      standardHours: Number(rule.standard_hours)
-    });
-  }
-
-  if (!record.out_time) {
-    return buildAttendanceResultPayload({
-      ownerUserId,
-      employeeId: Number(employee.id),
-      date,
-      record,
-      rule,
-      status: "exception",
-      hasException: true,
-      exceptionReason: "OUT_TIME_MISSING",
-      standardHours: Number(rule.standard_hours)
-    });
-  }
-
-  const inHours = parseTimeToHours(record.in_time);
-  const outHours = parseTimeToHours(record.out_time);
-  const breakStart = parseTimeToHours(rule.break_start);
-  const breakEnd = parseTimeToHours(rule.break_end);
-
-  if (inHours === null || outHours === null || breakStart === null || breakEnd === null) {
-    return buildAttendanceResultPayload({
-      ownerUserId,
-      employeeId: Number(employee.id),
-      date,
-      record,
-      rule,
-      status: "exception",
-      hasException: true,
-      exceptionReason: "TIME_FORMAT_INVALID",
-      standardHours: Number(rule.standard_hours)
-    });
-  }
-
-  let adjustedOutHours = outHours;
-  if (adjustedOutHours < inHours) {
-    adjustedOutHours += 24;
-  }
-
-  const rawHours = adjustedOutHours - inHours;
-  const breakDeductionHours = calculateOverlapHours(inHours, adjustedOutHours, breakStart, breakEnd);
-  const validHours = Math.max(0, rawHours - breakDeductionHours);
-  const standardHours = Number(rule.standard_hours);
-  const overtimeRawHours = Math.max(0, validHours - standardHours);
-  const overtimePayHours = rule.overtime_enabled
-    ? Math.floor(overtimeRawHours / Number(rule.overtime_min_unit_hours)) * Number(rule.overtime_min_unit_hours)
-    : 0;
-
-  return buildAttendanceResultPayload({
-    ownerUserId,
-    employeeId: Number(employee.id),
-    date,
-    record,
-    rule,
-    status: record.source === "manual" ? "manual_adjusted" : "normal",
-    hasException: false,
-    exceptionReason: null,
-    rawHours,
-    breakDeductionHours,
-    validHours,
-    standardHours,
-    overtimeRawHours,
-    overtimePayHours
-  });
-}
 
 async function upsertAttendanceCalculation(payload) {
   const existing = await supabase
@@ -1057,23 +924,9 @@ async function recalculateDailyAttendance(employeeId, date, ownerUserId, context
   }
 
   const record = effectiveContext.recordMap.get(`${employeeId}:${date}`) || null;
-  const { rule, exceptionReason } = resolveRuleForDate(effectiveContext.historyMap.get(Number(employeeId)), effectiveContext.ruleMap, date);
-  let payload;
-
-  if (!rule && exceptionReason) {
-    payload = buildAttendanceResultPayload({
-      ownerUserId,
-      employeeId: Number(employeeId),
-      date,
-      record,
-      rule: null,
-      status: "exception",
-      hasException: true,
-      exceptionReason
-    });
-  } else {
-    payload = calculateDailyAttendanceRow(employee, record, rule, date, ownerUserId);
-  }
+  // v2 日计算只依赖当前账号唯一 attendance_config，不再读取员工规则历史或多条 attendance_rules。
+  // 这是考勤计算模块的唯一入口；不要为兼容旧规则模型在这里恢复规则匹配逻辑。
+  const payload = calculateV2DailyAttendanceRow(employee, record, effectiveContext.attendanceConfig, date, ownerUserId);
 
   const row = await upsertAttendanceCalculation(payload);
   effectiveContext.calculationMap.set(`${employeeId}:${date}`, row);
@@ -1440,6 +1293,11 @@ async function calculateMonthlyPayroll(employeeId, yearMonth, ownerUserId, { ski
   const allowanceTotal = sumBy(adjustmentItems, (item) => item.type === "allowance");
   const deductionTotal = sumBy(adjustmentItems, (item) => item.type === "deduction");
   const otherTotal = sumBy(adjustmentItems, (item) => item.type === "other");
+  const monthlyAbsentCount = Number(attendanceSummary?.absent_count || 0);
+  // 全勤奖仍读取员工档案配置，但必须受当月考勤汇总约束：只要出现缺勤，本月全勤奖归零。
+  // 这里依赖 recalculateMonthlyAttendance 先刷新 monthly_attendance_summaries，避免薪资生成继续沿用员工档案里的固定全勤奖。
+  const attendanceBonus = monthlyAbsentCount > 0 ? 0 : getNonNegativePayrollAmount(employee.attendance_bonus);
+  const socialSecurity = getNonNegativePayrollAmount(employee.social_security);
   const validHours = Number(attendanceSummary?.total_valid_hours || 0);
   const standardHours = Number(attendanceSummary?.total_standard_hours || 0);
   const overtimePayHours = Number(attendanceSummary?.total_overtime_pay_hours || 0);
@@ -1452,8 +1310,8 @@ async function calculateMonthlyPayroll(employeeId, yearMonth, ownerUserId, { ski
     const fee = row.attendance_rule_id ? Number(ruleFeeMap.get(Number(row.attendance_rule_id)) || 0) : 0;
     return sum + Number(row.overtime_pay_hours || 0) * fee;
   }, 0)) : 0;
-  const grossPay = roundToTwo(basePay + overtimePay + allowanceTotal + otherTotal);
-  const totalDeduction = deductionTotal;
+  const grossPay = roundToTwo(basePay + overtimePay + attendanceBonus + allowanceTotal + otherTotal);
+  const totalDeduction = roundToTwo(socialSecurity + deductionTotal);
   const netPay = roundToTwo(grossPay - totalDeduction);
 
   const row = await upsertMonthlyPayrollResult({
@@ -1533,11 +1391,11 @@ function normalizeEmployeePayload(body, authUser) {
     dept: body.dept,
     joinDate: body.joinDate,
     status: body.status,
-    attendanceRuleId: Number(body.attendanceRuleId),
-    ruleEffectiveStartDate: body.ruleEffectiveStartDate,
     salaryType: body.salaryType,
     hourlyRate: body.hourlyRate === null || body.hourlyRate === "" ? null : Number(body.hourlyRate),
     fixedSalary: body.fixedSalary === null || body.fixedSalary === "" ? null : Number(body.fixedSalary),
+    attendanceBonus: body.attendanceBonus === null || body.attendanceBonus === "" || body.attendanceBonus === undefined ? 0 : Number(body.attendanceBonus),
+    socialSecurity: body.socialSecurity === null || body.socialSecurity === "" || body.socialSecurity === undefined ? 0 : Number(body.socialSecurity),
     salaryEffectiveStartDate: body.salaryEffectiveStartDate || body.joinDate,
     currency: body.currency,
     photo: body.photo || null,
@@ -1547,6 +1405,7 @@ function normalizeEmployeePayload(body, authUser) {
 
 async function createEmployeeRecord(payload, authUser) {
   const ownerUserId = authUser.id;
+  const compatibilityRuleId = await getEmployeeCompatibilityAttendanceRuleId(ownerUserId);
   const employeeInsert = {
     owner_user_id: ownerUserId,
     employee_no: generateEmployeeNo(),
@@ -1558,10 +1417,11 @@ async function createEmployeeRecord(payload, authUser) {
     dept: payload.dept,
     join_date: payload.joinDate,
     status: payload.status,
-    attendance_rule_id: payload.attendanceRuleId,
     salary_type: payload.salaryType,
     hourly_rate: payload.hourlyRate,
     fixed_salary: payload.fixedSalary,
+    attendance_bonus: payload.attendanceBonus,
+    social_security: payload.socialSecurity,
     currency: payload.currency,
     photo: payload.photo,
     is_deleted: false
@@ -1577,23 +1437,6 @@ async function createEmployeeRecord(payload, authUser) {
     throw employeeError;
   }
 
-  const historyInsert = {
-    owner_user_id: ownerUserId,
-    employee_id: Number(employeeRow.id),
-    attendance_rule_id: payload.attendanceRuleId,
-    effective_start_date: payload.ruleEffectiveStartDate,
-    effective_end_date: null,
-    created_by: payload.createdBy || authUser.email || null,
-    created_at: new Date().toISOString()
-  };
-
-  const { error: historyError } = await supabase
-    .from("employee_attendance_rule_history")
-    .insert(historyInsert);
-
-  if (historyError) {
-    throw historyError;
-  }
 
   await ensureSalaryProfileForEmployee(employeeRow, ownerUserId, payload.salaryEffectiveStartDate || payload.joinDate);
   return Number(employeeRow.id);
@@ -1612,6 +1455,9 @@ async function updateEmployeeRecord(employeeId, payload, authUser) {
     throw existingError;
   }
 
+  // 员工 v2 不再编辑考勤规则；编辑保存时沿用已有兼容规则，避免重新暴露旧规则模型，同时修复保存 payload 引用未定义规则 ID 的问题。
+  const compatibilityRuleId = existingEmployee.attendance_rule_id || await getEmployeeCompatibilityAttendanceRuleId(ownerUserId);
+
   const updatePayload = {
     name: payload.name,
     gender: payload.gender,
@@ -1621,10 +1467,12 @@ async function updateEmployeeRecord(employeeId, payload, authUser) {
     dept: payload.dept,
     join_date: payload.joinDate,
     status: payload.status,
-    attendance_rule_id: payload.attendanceRuleId,
+    attendance_rule_id: compatibilityRuleId,
     salary_type: payload.salaryType,
     hourly_rate: payload.hourlyRate,
     fixed_salary: payload.fixedSalary,
+    attendance_bonus: payload.attendanceBonus,
+    social_security: payload.socialSecurity,
     currency: payload.currency,
     photo: payload.photo
   };
@@ -1641,76 +1489,7 @@ async function updateEmployeeRecord(employeeId, payload, authUser) {
     throw updateError;
   }
 
-  const ruleChanged = Number(existingEmployee.attendance_rule_id) !== Number(payload.attendanceRuleId);
-  if (ruleChanged) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(payload.ruleEffectiveStartDate)) {
-      throw new Error("规则生效日期格式必须为 YYYY-MM-DD");
-    }
-
-    const { data: currentHistory, error: currentHistoryError } = await supabase
-      .from("employee_attendance_rule_history")
-      .select("*")
-      .eq("owner_user_id", ownerUserId)
-      .eq("employee_id", employeeId)
-      .is("effective_end_date", null)
-      .order("effective_start_date", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (currentHistoryError) {
-      throw currentHistoryError;
-    }
-
-    const currentStartDate = currentHistory?.effective_start_date ? toDateKey(currentHistory.effective_start_date) : null;
-    if (currentStartDate && payload.ruleEffectiveStartDate < currentStartDate) {
-      throw new Error("规则生效日期不能早于当前规则历史开始日期");
-    }
-
-    if (currentHistory && currentStartDate === payload.ruleEffectiveStartDate) {
-      const { error: updateHistoryError } = await supabase
-        .from("employee_attendance_rule_history")
-        .update({
-          attendance_rule_id: payload.attendanceRuleId,
-          created_by: payload.createdBy || authUser.email || null
-        })
-        .eq("owner_user_id", ownerUserId)
-        .eq("id", Number(currentHistory.id));
-
-      if (updateHistoryError) {
-        throw updateHistoryError;
-      }
-    } else {
-      if (currentHistory) {
-        const previousEndDate = getPreviousDate(payload.ruleEffectiveStartDate);
-        const { error: closeHistoryError } = await supabase
-          .from("employee_attendance_rule_history")
-          .update({ effective_end_date: previousEndDate })
-          .eq("owner_user_id", ownerUserId)
-          .eq("employee_id", employeeId)
-          .is("effective_end_date", null);
-
-        if (closeHistoryError) {
-          throw closeHistoryError;
-        }
-      }
-
-      const { error: insertHistoryError } = await supabase
-        .from("employee_attendance_rule_history")
-        .insert({
-          owner_user_id: ownerUserId,
-          employee_id: employeeId,
-          attendance_rule_id: payload.attendanceRuleId,
-          effective_start_date: payload.ruleEffectiveStartDate,
-          effective_end_date: null,
-          created_by: payload.createdBy || authUser.email || null,
-          created_at: new Date().toISOString()
-        });
-
-      if (insertHistoryError) {
-        throw insertHistoryError;
-      }
-    }
-  }
+  // 员工 v2 保存不再改变考勤规则关系；旧 attendance_rule_id 仅由创建时的后端兼容值维护。
 
   await ensureSalaryProfileForEmployee(employeeRow, ownerUserId, payload.salaryEffectiveStartDate || payload.joinDate);
   return Number(employeeRow.id);
@@ -2115,103 +1894,183 @@ app.post("/api/admin/workspace/bootstrap", async (req, res) => {
 app.get("/api/admin/dashboard", async (req, res) => {
   try {
     const ownerUserId = req.authUser.id;
-    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || ""))
-      ? String(req.query.date)
-      : getTodayDateKey();
-    const yearMonth = /^\d{4}-\d{2}$/.test(String(req.query.yearMonth || ""))
-      ? String(req.query.yearMonth)
-      : date.slice(0, 7);
-
-    const [employeesResult, todayCalculationsResult, summariesResult, rulesResult, payrollResult] = await Promise.all([
+    const [employeesResult, calculationsResult, attendanceConfig] = await Promise.all([
       supabase
         .from("employees")
         .select("*")
-        .eq("owner_user_id", ownerUserId),
+        .eq("owner_user_id", ownerUserId)
+        .order("id", { ascending: true }),
       supabase
         .from("attendance_calculation_results")
         .select("*")
         .eq("owner_user_id", ownerUserId)
-        .eq("date", date),
-      supabase
-        .from("monthly_attendance_summaries")
-        .select("*")
-        .eq("owner_user_id", ownerUserId)
-        .eq("year_month", yearMonth),
-      supabase
-        .from("attendance_rules")
-        .select("*")
-        .eq("owner_user_id", ownerUserId)
-        .eq("is_active", true)
-        .order("effective_start_date", { ascending: false }),
-      supabase
-        .from("monthly_payroll_results")
-        .select("gross_pay,total_deduction,net_pay,currency")
-        .eq("owner_user_id", ownerUserId)
-        .eq("year_month", yearMonth)
+        .order("date", { ascending: true }),
+      resolveAttendanceConfig(ownerUserId)
     ]);
 
-    for (const result of [employeesResult, todayCalculationsResult, summariesResult, rulesResult, payrollResult]) {
+    for (const result of [employeesResult, calculationsResult]) {
       if (result.error) {
         throw result.error;
       }
     }
 
     const employees = employeesResult.data || [];
-    const employeeMap = new Map(employees.map((row) => [Number(row.id), row]));
-    const ruleFeeMap = new Map((rulesResult.data || []).map((row) => [Number(row.id), Number(row.ot_hourly_fee || 0)]));
-    const todayCalculations = todayCalculationsResult.data || [];
-    const summaries = summariesResult.data || [];
-    const payrollRows = payrollResult.data || [];
-    const activeStatuses = new Set(["active", "probation", "on_leave"]);
-    const activeEmployeeCount = employees.filter((row) => activeStatuses.has(row.status)).length;
-    const todayExceptionCount = todayCalculations.filter((row) => row.has_exception).length;
-    const todayRecordCount = todayCalculations.length;
-    const todayOvertimePay = roundToTwo(todayCalculations.reduce((sum, row) => {
-      const fee = row.attendance_rule_id ? Number(ruleFeeMap.get(Number(row.attendance_rule_id)) || 0) : 0;
-      return sum + Number(row.overtime_pay_hours || 0) * fee;
+    const calculations = calculationsResult.data || [];
+    const activeStatuses = new Set(["active", "probation"]);
+    const activeEmployees = employees.filter((row) => activeStatuses.has(row.status));
+    const activeEmployeeIds = new Set(activeEmployees.map((row) => Number(row.id)));
+    const totalEmployeeCount = employees.length;
+    const activeEmployeeCount = activeEmployees.length;
+    const inactiveEmployeeCount = Math.max(0, totalEmployeeCount - activeEmployeeCount);
+    const dashboardDate = calculations.length
+      ? calculations.reduce((latest, row) => row.date > latest ? row.date : latest, calculations[0].date)
+      : getTodayDateKey();
+    const todayCalculations = calculations.filter((row) => row.date === dashboardDate && activeEmployeeIds.has(Number(row.employee_id)));
+    const todayCalculationMap = new Map(todayCalculations.map((row) => [Number(row.employee_id), row]));
+    const config = mapAttendanceConfigRow(attendanceConfig);
+    const dailyBreakMinutes = Math.max(0, Math.round((parseTimeToMinutes(config.breakEnd) - parseTimeToMinutes(config.breakStart)) || 0));
+    const todayWorkHours = roundToTwo(todayCalculations.reduce((sum, row) => sum + Number(row.valid_hours || 0), 0));
+    const todayOvertimeHours = roundToTwo(todayCalculations.reduce((sum, row) => sum + Number(row.overtime_pay_hours || 0), 0));
+    const todayOvertimeEstimatePay = roundToTwo(todayCalculations.reduce((sum, row) => {
+      const storedPay = Number(row.overtime_pay || 0);
+      return sum + (storedPay > 0 ? storedPay : Number(row.overtime_pay_hours || 0) * Number(config.otHourlyFee || 0));
     }, 0));
-    const currency = payrollRows[0]?.currency || employees[0]?.currency || "THB";
-    const monthlyPayrollGrossPay = roundToTwo(payrollRows.reduce((sum, row) => sum + Number(row.gross_pay || 0), 0));
-    const monthlyPayrollDeduction = roundToTwo(payrollRows.reduce((sum, row) => sum + Number(row.total_deduction || 0), 0));
-    const monthlyPayrollNetPay = roundToTwo(payrollRows.reduce((sum, row) => sum + Number(row.net_pay || 0), 0));
+    const todayExceptionCount = activeEmployees.reduce((count, employee) => {
+      const row = todayCalculationMap.get(Number(employee.id));
+      if (!row) {
+        return count + 1;
+      }
+      return row.has_exception || row.status === "absent" || row.status === "exception" ? count + 1 : count;
+    }, 0);
 
-    const employeeStats = summaries
-      .map((row) => {
-        const employee = employeeMap.get(Number(row.employee_id));
+    const employeeStats = activeEmployees
+      .map((employee) => {
+        const employeeCalculations = calculations.filter((row) => Number(row.employee_id) === Number(employee.id));
+        const workedCalculations = employeeCalculations.filter((row) => row.status !== "absent" && row.status !== "leave" && Number(row.valid_hours || 0) > 0);
+        const totalValidHours = roundToTwo(employeeCalculations.reduce((sum, row) => sum + Number(row.valid_hours || 0), 0));
+        const totalOvertimeHours = roundToTwo(employeeCalculations.reduce((sum, row) => sum + Number(row.overtime_pay_hours || 0), 0));
+        const daysWorked = workedCalculations.length;
+        const avgDailyHours = daysWorked > 0 ? roundToTwo(totalValidHours / daysWorked) : 0;
+        const satiety = config.standardHours > 0 ? Math.round((avgDailyHours / config.standardHours) * 100) : 0;
+
         return {
-          employeeId: Number(row.employee_id),
-          employeeNo: employee?.employee_no || undefined,
-          employeeName: employee?.name || `员工 #${row.employee_id}`,
-          validHours: Number(row.total_valid_hours || 0),
-          overtimePayHours: Number(row.total_overtime_pay_hours || 0),
-          exceptionCount: Number(row.exception_count || 0)
+          employeeId: Number(employee.id),
+          employeeNo: employee.employee_no || undefined,
+          employeeName: employee.name || `员工 #${employee.id}`,
+          employeeDept: employee.dept || "未分配",
+          employeeRole: employee.role || "",
+          employeePhoto: employee.photo || null,
+          totalValidHours,
+          totalOvertimeHours,
+          daysWorked,
+          avgDailyHours,
+          satiety: satiety || 0
         };
       })
-      .sort((a, b) => b.validHours - a.validHours)
-      .slice(0, 6);
+      .sort((a, b) => b.totalValidHours - a.totalValidHours);
+
+    const departmentMap = new Map();
+    activeEmployees.forEach((employee) => {
+      const deptName = employee.dept || "未分配";
+      if (!departmentMap.has(deptName)) {
+        departmentMap.set(deptName, {
+          deptName,
+          staffCount: 0,
+          totalValidHours: 0,
+          totalOvertimeHours: 0,
+          totalDays: 0
+        });
+      }
+      departmentMap.get(deptName).staffCount += 1;
+    });
+
+    calculations.forEach((row) => {
+      if (!activeEmployeeIds.has(Number(row.employee_id)) || row.status === "absent" || row.status === "leave") {
+        return;
+      }
+      const employee = activeEmployees.find((item) => Number(item.id) === Number(row.employee_id));
+      const deptName = employee?.dept || "未分配";
+      const dept = departmentMap.get(deptName);
+      if (!dept) {
+        return;
+      }
+      const validHours = Number(row.valid_hours || 0);
+      dept.totalValidHours += validHours;
+      dept.totalOvertimeHours += Number(row.overtime_pay_hours || 0);
+      if (validHours > 0) {
+        dept.totalDays += 1;
+      }
+    });
+
+    const departmentStats = Array.from(departmentMap.values())
+      .map((item) => {
+        const totalValidHours = roundToTwo(item.totalValidHours);
+        const totalOvertimeHours = roundToTwo(item.totalOvertimeHours);
+        const avgHours = item.totalDays > 0 ? roundToTwo(totalValidHours / item.totalDays) : 0;
+        const otRatio = totalValidHours > 0 ? Math.round((totalOvertimeHours / totalValidHours) * 100) : 0;
+        let loadLabel = "普通负荷";
+        let badgeTone = "emerald";
+        let actionAdvice = "部门编制与单量供给契合良好，可维持现状。";
+
+        if (otRatio > 20 || avgHours > 8.8) {
+          loadLabel = "重度过载 🔥";
+          badgeTone = "rose";
+          actionAdvice = "该组生产力持续满载，极易积压。建议在此配置下增设 1-2 名额外助理。";
+        } else if (otRatio > 10 || avgHours > 8.2) {
+          loadLabel = "适度饱和 ⚡";
+          badgeTone = "amber";
+          actionAdvice = "生产任务饱和情况较好，应留意仓位订单波动。";
+        }
+
+        return {
+          ...item,
+          totalValidHours,
+          totalOvertimeHours,
+          avgHours,
+          otRatio,
+          loadLabel,
+          badgeTone,
+          actionAdvice
+        };
+      })
+      .sort((a, b) => b.totalValidHours - a.totalValidHours);
 
     res.json({
-      date,
-      yearMonth,
+      dashboardDate,
+      totalEmployeeCount,
       activeEmployeeCount,
-      activeRuleCount: (rulesResult.data || []).length,
-      todayOvertimePay,
-      todayRecordCount,
+      inactiveEmployeeCount,
+      todayWorkHours,
+      todayAverageWorkHours: activeEmployeeCount > 0 ? roundToTwo(todayWorkHours / activeEmployeeCount) : 0,
+      todayOvertimeHours,
+      todayOvertimeEstimatePay,
       todayExceptionCount,
-      todayExceptionRate: todayRecordCount > 0 ? roundToTwo((todayExceptionCount / todayRecordCount) * 100) : 0,
-      monthlyPayrollGrossPay,
-      monthlyPayrollDeduction,
-      monthlyPayrollNetPay,
-      monthlyValidHours: roundToTwo(summaries.reduce((sum, row) => sum + Number(row.total_valid_hours || 0), 0)),
-      monthlyOvertimePayHours: roundToTwo(summaries.reduce((sum, row) => sum + Number(row.total_overtime_pay_hours || 0), 0)),
-      monthlyExceptionCount: summaries.reduce((sum, row) => sum + Number(row.exception_count || 0), 0),
-      currency,
-      employeeStats
+      todayExceptionRate: activeEmployeeCount > 0 ? roundToTwo((todayExceptionCount / activeEmployeeCount) * 100) : 0,
+      config: {
+        standardHours: Number(config.standardHours || DEFAULT_ATTENDANCE_CONFIG.standard_hours),
+        dailyBreakMinutes,
+        overtimeMultiplier: 1,
+        otHourlyFee: Number(config.otHourlyFee || 0),
+        currency: employees[0]?.currency || "THB"
+      },
+      employeeStats,
+      departmentStats
     });
   } catch (error) {
     res.status(500).json({ error: error.message || "数据看板加载失败" });
   }
 });
+
+function parseTimeToMinutes(value) {
+  if (!value) {
+    return 0;
+  }
+  const match = /^(\d{2}):(\d{2})(?::\d{2})?$/.exec(String(value));
+  if (!match) {
+    return 0;
+  }
+  return Number(match[1]) * 60 + Number(match[2]);
+}
 
 app.get("/api/admin/attendance-rules/options", async (_req, res) => {
   try {
@@ -2447,11 +2306,44 @@ app.get("/api/admin/attendance-rules/:id/related-employees", async (req, res) =>
   }
 });
 
+app.get("/api/admin/attendance-config", async (req, res) => {
+  try {
+    const row = await resolveAttendanceConfig(req.authUser.id);
+    res.json(mapAttendanceConfigRow(row));
+  } catch (error) {
+    res.status(500).json({ error: error.message || "考勤配置加载失败" });
+  }
+});
+
+app.put("/api/admin/attendance-config", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const payload = normalizeAttendanceConfigPayload(req.body);
+    const { data, error } = await supabase
+      .from("attendance_config")
+      .upsert({
+        owner_user_id: ownerUserId,
+        ...payload,
+        created_at: new Date().toISOString()
+      }, { onConflict: "owner_user_id" })
+      .select("*")
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    res.json(mapAttendanceConfigRow(data));
+  } catch (error) {
+    res.status(500).json({ error: error.message || "考勤配置保存失败" });
+  }
+});
+
 app.get("/api/admin/attendance-calculations", async (req, res) => {
   try {
     const ownerUserId = req.authUser.id;
     const yearMonth = String(req.query.yearMonth || "");
-    if (!/^\d{4}-\d{2}$/.test(yearMonth)) {
+    if (yearMonth && !/^\d{4}-\d{2}$/.test(yearMonth)) {
       return res.status(400).json({ error: "yearMonth 必须为 YYYY-MM" });
     }
 
@@ -2460,7 +2352,8 @@ app.get("/api/admin/attendance-calculations", async (req, res) => {
       return res.status(400).json({ error: "date 必须为 YYYY-MM-DD" });
     }
 
-    const { periodStartDate, periodEndDate } = getMonthRange(yearMonth);
+    const monthRange = yearMonth ? getMonthRange(yearMonth) : null;
+    // v2 考勤页支持“全部时间”；没有 yearMonth/date 时保留全量列表查询，只有按月筛选才加月份范围。
     let calculationQuery = supabase
       .from("attendance_calculation_results")
       .select("*")
@@ -2470,10 +2363,10 @@ app.get("/api/admin/attendance-calculations", async (req, res) => {
 
     if (date) {
       calculationQuery = calculationQuery.eq("date", date);
-    } else {
+    } else if (monthRange) {
       calculationQuery = calculationQuery
-        .gte("date", periodStartDate)
-        .lte("date", periodEndDate);
+        .gte("date", monthRange.periodStartDate)
+        .lte("date", monthRange.periodEndDate);
     }
 
     const calculationsResult = await calculationQuery;
@@ -2509,7 +2402,6 @@ app.get("/api/admin/attendance-calculations", async (req, res) => {
           const haystack = [
             row.employeeName,
             row.employeeNo,
-            row.attendanceRuleName || "",
             employee.name,
             employee.employee_no || ""
           ].join(" ").toLowerCase();
@@ -2549,27 +2441,23 @@ app.get("/api/admin/attendance-calculations/:id", async (req, res) => {
       throw error;
     }
 
-    const [employeeResult, recordResult, ruleResult] = await Promise.all([
+    // 考勤计算详情只返回 v2 需要的员工、原始打卡和计算结果；不要再回查或透出旧 attendance_rules。
+    const [employeeResult, recordResult] = await Promise.all([
       supabase.from("employees").select("*").eq("owner_user_id", ownerUserId).eq("id", Number(row.employee_id)).maybeSingle(),
       row.attendance_record_id
         ? supabase.from("attendance_records").select("*").eq("owner_user_id", ownerUserId).eq("id", Number(row.attendance_record_id)).maybeSingle()
-        : Promise.resolve({ data: null, error: null }),
-      row.attendance_rule_id
-        ? supabase.from("attendance_rules").select("*").eq("owner_user_id", ownerUserId).eq("id", Number(row.attendance_rule_id)).maybeSingle()
         : Promise.resolve({ data: null, error: null })
     ]);
 
     if (employeeResult.error) throw employeeResult.error;
     if (recordResult.error) throw recordResult.error;
-    if (ruleResult.error) throw ruleResult.error;
 
     const employeeMap = employeeResult.data ? new Map([[Number(employeeResult.data.id), employeeResult.data]]) : new Map();
 
     res.json({
       result: mapAttendanceCalculationRow(row, employeeMap),
       employee: employeeResult.data ? mapEmployeeRow(employeeResult.data) : null,
-      record: recordResult.data ? mapAttendanceRecordRow(recordResult.data) : null,
-      rule: ruleResult.data ? mapAttendanceRuleRow(ruleResult.data) : null
+      record: recordResult.data ? mapAttendanceRecordRow(recordResult.data) : null
     });
   } catch (error) {
     res.status(500).json({ error: error.message || "考勤计算详情加载失败" });
@@ -3366,7 +3254,6 @@ app.get("/api/admin/employees", async (req, res) => {
     const status = String(req.query.status || "all");
     const country = String(req.query.country || "all");
     const salaryType = String(req.query.salaryType || "all");
-    const attendanceRuleId = String(req.query.attendanceRuleId || "all");
     const role = String(req.query.role || "all");
     const usePagination = req.query.page !== undefined || req.query.pageSize !== undefined;
     const page = Math.max(1, Number.parseInt(String(req.query.page || "1"), 10) || 1);
@@ -3393,10 +3280,6 @@ app.get("/api/admin/employees", async (req, res) => {
 
     if (salaryType !== "all") {
       employeeQuery = employeeQuery.eq("salary_type", salaryType);
-    }
-
-    if (attendanceRuleId !== "all") {
-      employeeQuery = employeeQuery.eq("attendance_rule_id", Number(attendanceRuleId));
     }
 
     if (role !== "all") {
@@ -3431,18 +3314,17 @@ app.get("/api/admin/employees", async (req, res) => {
     }
 
     const rows = employeeResult.data || [];
-    const ruleMap = await fetchRuleMap(Array.from(new Set(rows.map((row) => Number(row.attendance_rule_id)))), ownerUserId);
     const roleOptions = Array.from(new Set((roleOptionsResult.data || [])
       .map((row) => String(row.role || "").trim())
       .filter(Boolean)));
 
     if (!usePagination) {
-      res.json(rows.map((row) => mapEmployeeRow(row, ruleMap)));
+      res.json(rows.map((row) => mapEmployeeRow(row)));
       return;
     }
 
     res.json({
-      items: rows.map((row) => mapEmployeeRow(row, ruleMap)),
+      items: rows.map((row) => mapEmployeeRow(row)),
       total: employeeResult.count || 0,
       page,
       pageSize,

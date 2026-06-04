@@ -3,45 +3,28 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, BadgeCheck, Eye, RefreshCw, Search } from "lucide-react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { AlertCircle, Calendar, Check, CheckCircle2, Clock, DollarSign, Download, Receipt, Search, TrendingUp } from "lucide-react";
 import type {
   Employee,
   MonthlyPayrollResult,
   PayrollResultDetail,
-  SalaryAdjustmentItem,
-  SalaryAdjustmentPayload,
-  SalaryAdjustmentType
 } from "../types";
 import {
   approvePayrollResult,
   confirmPayrollResult,
-  createSalaryAdjustmentItem,
-  deleteSalaryAdjustmentItem,
   fetchPayrollResultDetail,
   fetchPayrollResults,
-  fetchSalaryAdjustmentItems,
   generateMonthlyPayroll,
-  recalculateMonthlyPayroll,
-  recalculateOnePayroll,
   rejectPayrollResult,
-  updateSalaryAdjustmentItem
 } from "../lib/api";
 import { useDialog } from "./DialogProvider";
 import { ModalShell } from "./ModalShell";
-import { cn, formatCurrency, formatDateTime, formatDuration, SALARY_TYPE_LABELS } from "../lib/utils";
-import { Pagination } from "./Pagination";
+import { cn, formatCurrency, formatDuration, SALARY_TYPE_LABELS } from "../lib/utils";
 
 interface PayrollTableProps {
   employees: Employee[];
 }
-
-const CALCULATION_STATUS_META: Record<string, { label: string; className: string }> = {
-  draft: { label: "草稿", className: "bg-slate-100 text-slate-700" },
-  calculated: { label: "已计算", className: "bg-blue-100 text-blue-700" },
-  blocked: { label: "需重算", className: "bg-red-100 text-red-700" },
-  confirmed: { label: "已确认", className: "bg-emerald-100 text-emerald-700" }
-};
 
 const REVIEW_STATUS_META: Record<string, { label: string; className: string }> = {
   pending: { label: "待核对", className: "bg-amber-100 text-amber-700" },
@@ -49,44 +32,8 @@ const REVIEW_STATUS_META: Record<string, { label: string; className: string }> =
   rejected: { label: "已驳回", className: "bg-rose-100 text-rose-700" }
 };
 
-const PAYROLL_PAGE_SIZE = 8;
-
-const ADJUSTMENT_TYPE_META: Record<SalaryAdjustmentType, { label: string; className: string }> = {
-  allowance: { label: "补贴", className: "bg-emerald-50 text-emerald-700" },
-  deduction: { label: "扣款", className: "bg-rose-50 text-rose-700" },
-  other: { label: "其他", className: "bg-sky-50 text-sky-700" }
-};
-
 function getDefaultYearMonth() {
   return new Date().toISOString().slice(0, 7);
-}
-
-function isSalaryAdjustmentLocked(result: MonthlyPayrollResult | null) {
-  return result?.calculationStatus === "confirmed" || result?.reviewStatus === "approved";
-}
-
-function getSalaryAdjustmentLockMessage(result: MonthlyPayrollResult | null) {
-  if (result?.calculationStatus === "confirmed") {
-    return "该薪酬结果已确认，薪资项已锁定";
-  }
-  if (result?.reviewStatus === "approved") {
-    return "该薪酬结果已核对通过，薪资项已锁定";
-  }
-  return "";
-}
-
-function isPayrollRecalculateLocked(result: MonthlyPayrollResult) {
-  return result.calculationStatus === "confirmed" || result.reviewStatus === "approved";
-}
-
-function getPayrollRecalculateLockMessage(result: MonthlyPayrollResult) {
-  if (result.calculationStatus === "confirmed") {
-    return "已确认的薪酬结果不能重算";
-  }
-  if (result.reviewStatus === "approved") {
-    return "已核对通过，需先驳回后再重算";
-  }
-  return "重新计算";
 }
 
 function Modal({
@@ -94,55 +41,44 @@ function Modal({
   title,
   onClose,
   children,
-  className = "max-w-6xl"
+  className = "max-w-6xl",
+  footer
 }: {
   isOpen: boolean;
   title: string;
   onClose: () => void;
   children: ReactNode;
   className?: string;
+  footer?: ReactNode;
 }) {
   return (
-    <ModalShell isOpen={isOpen} onClose={onClose} title={title} className={className} bodyClassName="overflow-y-auto">
+    <ModalShell
+      isOpen={isOpen}
+      onClose={onClose}
+      title={title}
+      className={className}
+      bodyClassName="overflow-y-auto"
+      footer={footer}
+    >
       {children}
     </ModalShell>
   );
 }
 
-type SalaryAdjustmentFormState = Omit<SalaryAdjustmentPayload, "amount"> & {
-  amount: number | "";
-};
-
-const DEFAULT_ADJUSTMENT_FORM: SalaryAdjustmentFormState = {
-  employeeId: 0,
-  yearMonth: "",
-  type: "allowance",
-  name: "",
-  amount: 0,
-  note: ""
-};
-
 export function PayrollTable({ employees }: PayrollTableProps) {
   const { confirm, prompt } = useDialog();
   const [keyword, setKeyword] = useState("");
   const [yearMonth, setYearMonth] = useState(getDefaultYearMonth());
-  const [salaryType, setSalaryType] = useState("all");
   const [calculationStatus, setCalculationStatus] = useState("all");
   const [reviewStatus, setReviewStatus] = useState("all");
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [results, setResults] = useState<MonthlyPayrollResult[]>([]);
-  const [page, setPage] = useState(1);
   const [error, setError] = useState("");
-  const [detail, setDetail] = useState<PayrollResultDetail | null>(null);
-  const [isDetailOpen, setIsDetailOpen] = useState(false);
-  const [adjustmentItems, setAdjustmentItems] = useState<SalaryAdjustmentItem[]>([]);
-  const [isAdjustmentListOpen, setIsAdjustmentListOpen] = useState(false);
-  const [adjustmentTarget, setAdjustmentTarget] = useState<MonthlyPayrollResult | null>(null);
-  const [editingAdjustment, setEditingAdjustment] = useState<SalaryAdjustmentItem | null>(null);
-  const [isAdjustmentFormOpen, setIsAdjustmentFormOpen] = useState(false);
-  const [adjustmentForm, setAdjustmentForm] = useState<SalaryAdjustmentFormState>(DEFAULT_ADJUSTMENT_FORM);
-  const [adjustmentFormError, setAdjustmentFormError] = useState("");
+  const [payslipDetail, setPayslipDetail] = useState<PayrollResultDetail | null>(null);
+  const [isPayslipOpen, setIsPayslipOpen] = useState(false);
+  const [signName, setSignName] = useState("");
+  const [isCashPaid, setIsCashPaid] = useState(false);
   const [hasLoadedResultsOnce, setHasLoadedResultsOnce] = useState(false);
   const [hasPromptedAutoGenerate, setHasPromptedAutoGenerate] = useState(false);
   const autoGeneratePromptingRef = useRef(false);
@@ -150,13 +86,11 @@ export function PayrollTable({ employees }: PayrollTableProps) {
   const loadData = async (nextFilters?: {
     keyword?: string;
     yearMonth?: string;
-    salaryType?: string;
     calculationStatus?: string;
     reviewStatus?: string;
   }) => {
     const effectiveKeyword = nextFilters?.keyword ?? keyword;
     const effectiveYearMonth = nextFilters?.yearMonth ?? yearMonth;
-    const effectiveSalaryType = nextFilters?.salaryType ?? salaryType;
     const effectiveCalculationStatus = nextFilters?.calculationStatus ?? calculationStatus;
     const effectiveReviewStatus = nextFilters?.reviewStatus ?? reviewStatus;
 
@@ -166,7 +100,6 @@ export function PayrollTable({ employees }: PayrollTableProps) {
       const nextResults = await fetchPayrollResults({
         keyword: effectiveKeyword,
         yearMonth: effectiveYearMonth,
-        salaryType: effectiveSalaryType,
         calculationStatus: effectiveCalculationStatus,
         reviewStatus: effectiveReviewStatus
       });
@@ -185,7 +118,7 @@ export function PayrollTable({ employees }: PayrollTableProps) {
     }, keyword.trim() ? 350 : 0);
 
     return () => window.clearTimeout(timer);
-  }, [calculationStatus, keyword, reviewStatus, salaryType, yearMonth]);
+  }, [calculationStatus, keyword, reviewStatus, yearMonth]);
 
   useEffect(() => {
     setHasPromptedAutoGenerate(false);
@@ -214,7 +147,6 @@ export function PayrollTable({ employees }: PayrollTableProps) {
       results.length === 0 &&
       employees.length > 0 &&
       keyword.trim() === "" &&
-      salaryType === "all" &&
       calculationStatus === "all" &&
       reviewStatus === "all";
 
@@ -243,146 +175,29 @@ export function PayrollTable({ employees }: PayrollTableProps) {
 
       await runGenerateMonthly();
     })();
-  }, [calculationStatus, confirm, employees.length, error, hasLoadedResultsOnce, hasPromptedAutoGenerate, keyword, loading, results.length, reviewStatus, salaryType, submitting, yearMonth]);
+  }, [calculationStatus, confirm, employees.length, error, hasLoadedResultsOnce, hasPromptedAutoGenerate, keyword, loading, results.length, reviewStatus, submitting, yearMonth]);
 
-  const openDetail = async (resultId: number) => {
+  const openPayslip = async (result: MonthlyPayrollResult) => {
     setSubmitting(true);
     try {
-      const nextDetail = await fetchPayrollResultDetail(resultId);
-      setDetail(nextDetail);
-      setIsDetailOpen(true);
+      const nextDetail = await fetchPayrollResultDetail(result.id);
+      // v2 工资条是发放签收入口，必须用详情接口拿到员工、薪资项和汇总，不能用列表行直接确认。
+      setPayslipDetail(nextDetail);
+      setSignName("");
+      setIsCashPaid(result.calculationStatus === "confirmed");
+      setIsPayslipOpen(true);
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "薪酬详情加载失败");
+      setError(nextError instanceof Error ? nextError.message : "工资条加载失败");
     } finally {
       setSubmitting(false);
     }
   };
 
-  const openAdjustmentList = async (result: MonthlyPayrollResult) => {
-    setSubmitting(true);
-    try {
-      const items = await fetchSalaryAdjustmentItems({ employeeId: result.employeeId, yearMonth: result.yearMonth });
-      setAdjustmentTarget(result);
-      setAdjustmentItems(items);
-      setIsAdjustmentListOpen(true);
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "一次性薪资项加载失败");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const reloadAdjustments = async (target = adjustmentTarget) => {
-    if (!target) {
-      return;
-    }
-    const items = await fetchSalaryAdjustmentItems({ employeeId: target.employeeId, yearMonth: target.yearMonth });
-    setAdjustmentItems(items);
-  };
-
-  const openCreateAdjustment = () => {
-    if (!adjustmentTarget) {
-      return;
-    }
-    if (isSalaryAdjustmentLocked(adjustmentTarget)) {
-      setError(getSalaryAdjustmentLockMessage(adjustmentTarget));
-      return;
-    }
-    setAdjustmentFormError("");
-    setEditingAdjustment(null);
-    setAdjustmentForm({
-      employeeId: adjustmentTarget.employeeId,
-      yearMonth: adjustmentTarget.yearMonth,
-      type: "allowance",
-      name: "",
-      amount: "",
-      note: ""
-    });
-    setIsAdjustmentFormOpen(true);
-  };
-
-  const openEditAdjustment = (item: SalaryAdjustmentItem) => {
-    if (isSalaryAdjustmentLocked(adjustmentTarget)) {
-      setError(getSalaryAdjustmentLockMessage(adjustmentTarget));
-      return;
-    }
-    setAdjustmentFormError("");
-    setEditingAdjustment(item);
-    setAdjustmentForm({
-      employeeId: item.employeeId,
-      yearMonth: item.yearMonth,
-      type: item.type,
-      name: item.name,
-      amount: item.amount,
-      note: item.note
-    });
-    setIsAdjustmentFormOpen(true);
-  };
-
-  const handleSaveAdjustment = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (isSalaryAdjustmentLocked(adjustmentTarget)) {
-      setError(getSalaryAdjustmentLockMessage(adjustmentTarget));
-      return;
-    }
-
-    setAdjustmentFormError("");
-    const amount = adjustmentForm.amount === "" ? Number.NaN : Number(adjustmentForm.amount);
-    if (Number.isNaN(amount) || amount < 0) {
-      setAdjustmentFormError("请填写大于等于 0 的薪资项金额");
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      const payload: SalaryAdjustmentPayload = {
-        ...adjustmentForm,
-        amount
-      };
-
-      if (editingAdjustment) {
-        await updateSalaryAdjustmentItem(editingAdjustment.id, payload);
-      } else {
-        await createSalaryAdjustmentItem(payload);
-      }
-      setIsAdjustmentFormOpen(false);
-      setAdjustmentFormError("");
-      await reloadAdjustments();
-      await loadData();
-    } catch (nextError) {
-      setAdjustmentFormError(nextError instanceof Error ? nextError.message : "一次性薪资项保存失败");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleDeleteAdjustment = async (item: SalaryAdjustmentItem) => {
-    if (isSalaryAdjustmentLocked(adjustmentTarget)) {
-      setError(getSalaryAdjustmentLockMessage(adjustmentTarget));
-      return;
-    }
-
-    const confirmed = await confirm({
-      title: "确认删除一次性薪资项",
-      message: "删除后该项目将不再计入当前自然月薪酬。是否确认删除？",
-      confirmText: "确认删除",
-      cancelText: "保留项目",
-      tone: "danger"
-    });
-    if (!confirmed) {
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      await deleteSalaryAdjustmentItem(item.id);
-      await reloadAdjustments();
-      await loadData();
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "一次性薪资项删除失败");
-    } finally {
-      setSubmitting(false);
-    }
+  const closePayslip = () => {
+    setIsPayslipOpen(false);
+    setPayslipDetail(null);
+    setSignName("");
+    setIsCashPaid(false);
   };
 
   const handleGenerateMonthly = async () => {
@@ -400,65 +215,12 @@ export function PayrollTable({ employees }: PayrollTableProps) {
     await runGenerateMonthly();
   };
 
-  const handleRecalculateMonthly = async () => {
-    const confirmed = await confirm({
-      title: "确认重算月度薪酬",
-      message: "将重新计算当前筛选月份的薪酬结果。若薪资配置、考勤汇总或一次性薪资项已变化，结果金额可能变化。是否继续？",
-      confirmText: "重算本月",
-      cancelText: "取消",
-      tone: "warning"
-    });
-    if (!confirmed) {
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      const response = await recalculateMonthlyPayroll(yearMonth);
-      await loadData();
-      if (response.failureCount > 0) {
-        const firstFailure = response.failures[0];
-        setError(`本月薪酬重算完成 ${response.successCount} 条，失败 ${response.failureCount} 条。${firstFailure ? `首个失败原因：${firstFailure.error}` : ""}`);
-      }
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "批量重算薪酬失败");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleRecalculateOne = async (result: MonthlyPayrollResult) => {
-    if (isPayrollRecalculateLocked(result)) {
-      setError(getPayrollRecalculateLockMessage(result));
-      return;
-    }
-
-    const confirmed = await confirm({
-      title: "确认重算当前员工薪酬",
-      message: "将根据当前薪资配置、自然月考勤汇总和一次性薪资项重新计算该员工薪酬。是否继续？",
-      confirmText: "确认重算",
-      cancelText: "取消",
-      tone: "warning"
-    });
-    if (!confirmed) {
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      await recalculateOnePayroll(result.employeeId, result.yearMonth);
-      await loadData();
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "单个员工薪酬重算失败");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   const handleApprove = async (resultId: number) => {
     setSubmitting(true);
     try {
-      await approvePayrollResult(resultId);
+      const approvedResult = await approvePayrollResult(resultId);
+      // 工资条弹窗内核对通过后要同步本地详情状态，避免用户必须关闭重开才能继续签收确认。
+      setPayslipDetail((prev) => prev && prev.result.id === resultId ? { ...prev, result: approvedResult } : prev);
       await loadData();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "标记核对通过失败");
@@ -483,7 +245,9 @@ export function PayrollTable({ employees }: PayrollTableProps) {
 
     setSubmitting(true);
     try {
-      await rejectPayrollResult(resultId, reason || "");
+      const rejectedResult = await rejectPayrollResult(resultId, reason || "");
+      // 保持工资条弹窗和列表的同一条业务状态一致；驳回后用户仍可在弹窗查看原因上下文。
+      setPayslipDetail((prev) => prev && prev.result.id === resultId ? { ...prev, result: rejectedResult } : prev);
       await loadData();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "驳回薪酬结果失败");
@@ -493,10 +257,15 @@ export function PayrollTable({ employees }: PayrollTableProps) {
   };
 
   const handleConfirm = async (result: MonthlyPayrollResult) => {
+    if (!isCashPaid || !signName.trim()) {
+      setError("请先确认企业款项已足额支付，并填写员工或经办人签名");
+      return;
+    }
+
     const confirmed = await confirm({
-      title: "确认本月最终薪酬",
-      message: "确认后该薪酬结果将作为本月最终核算结果。是否确认？",
-      confirmText: "确认生效",
+      title: "确认工资条已签收发放",
+      message: "确认后该员工本月薪酬将标记为已发放，薪资项和重算入口会锁定。是否确认？",
+      confirmText: "核销并确认已发放",
       cancelText: "取消",
       tone: "danger"
     });
@@ -506,8 +275,10 @@ export function PayrollTable({ employees }: PayrollTableProps) {
 
     setSubmitting(true);
     try {
-      await confirmPayrollResult(result.id);
+      const confirmedResult = await confirmPayrollResult(result.id);
+      setPayslipDetail((prev) => prev && prev.result.id === result.id ? { ...prev, result: confirmedResult } : prev);
       await loadData();
+      closePayslip();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "确认薪酬结果失败");
     } finally {
@@ -515,21 +286,43 @@ export function PayrollTable({ employees }: PayrollTableProps) {
     }
   };
 
-  const resetFilters = () => {
-    const next = {
-      keyword: "",
-      yearMonth: getDefaultYearMonth(),
-      salaryType: "all",
-      calculationStatus: "all",
-      reviewStatus: "all"
-    };
-    setKeyword(next.keyword);
-    setYearMonth(next.yearMonth);
-    setSalaryType(next.salaryType);
-    setCalculationStatus(next.calculationStatus);
-    setReviewStatus(next.reviewStatus);
-    setPage(1);
-    void loadData(next);
+  const applyPayoutStatusFilter = (status: "all" | "pending" | "paid") => {
+    // v2 薪资页按“待发放/已发放”理解状态；后端仍用 review/calculation 状态表达，前端只做映射，不把旧状态筛选暴露成主入口。
+    const nextCalculationStatus = status === "paid" ? "confirmed" : "all";
+    const nextReviewStatus = status === "pending" ? "pending" : "all";
+    setCalculationStatus(nextCalculationStatus);
+    setReviewStatus(nextReviewStatus);
+    void loadData({ calculationStatus: nextCalculationStatus, reviewStatus: nextReviewStatus });
+  };
+
+  const handleExportCSV = () => {
+    const headers = ["年月", "员工", "员工编号", "所属部门", "职位", "计薪方式", "有效工时", "加班时长", "加班费", "应发", "扣款", "实发", "发放状态", "币种"];
+    const rows = results.map((item) => [
+      item.yearMonth,
+      `"${item.employeeName}"`,
+      item.employeeNo || "-",
+      `"${item.employeeDept || "未分配"}"`,
+      `"${item.employeeRole || "未设置职位"}"`,
+      SALARY_TYPE_LABELS[item.salaryType],
+      item.validHours.toFixed(2),
+      item.overtimePayHours.toFixed(2),
+      item.overtimePay.toFixed(2),
+      item.grossPay.toFixed(2),
+      item.totalDeduction.toFixed(2),
+      item.netPay.toFixed(2),
+      item.calculationStatus === "confirmed" ? "已发放" : "待发放",
+      item.currency
+    ]);
+    const csvContent = "\uFEFF" + [headers.join(","), ...rows.map((row) => row.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `员工薪资报表_${yearMonth}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const totals = useMemo(() => {
@@ -545,102 +338,88 @@ export function PayrollTable({ employees }: PayrollTableProps) {
   }, [results]);
 
   const displayCurrency = results[0]?.currency || employees[0]?.currency || "THB";
-  const adjustmentLocked = isSalaryAdjustmentLocked(adjustmentTarget);
-  const adjustmentLockMessage = getSalaryAdjustmentLockMessage(adjustmentTarget);
-  const totalPages = Math.max(1, Math.ceil(results.length / PAYROLL_PAGE_SIZE));
-  const paginatedResults = useMemo(() => {
-    const start = (page - 1) * PAYROLL_PAGE_SIZE;
-    return results.slice(start, start + PAYROLL_PAGE_SIZE);
-  }, [page, results]);
+  const availableMonths = useMemo(() => {
+    // v2 原型有“快捷月份 + 自定义月份”；这里基于当前月份和已加载结果生成快捷项，避免额外引入旧后台筛选字段。
+    const monthSet = new Set<string>([yearMonth, getDefaultYearMonth(), ...results.map((item) => item.yearMonth)]);
+    return Array.from(monthSet).sort((a, b) => b.localeCompare(a));
+  }, [results, yearMonth]);
+  const payrollMetrics = useMemo(() => {
+    const confirmedCount = results.filter((item) => item.calculationStatus === "confirmed").length;
+    const pendingCount = Math.max(0, results.length - confirmedCount);
+    const totalHours = results.reduce((sum, item) => sum + item.validHours, 0);
+    const totalOtHours = results.reduce((sum, item) => sum + item.overtimePayHours, 0);
 
-  useEffect(() => {
-    if (page > totalPages) {
-      setPage(totalPages);
-    }
-  }, [page, totalPages]);
+    return {
+      confirmedCount,
+      pendingCount,
+      totalHours,
+      totalOtHours,
+      progressPct: results.length > 0 ? (confirmedCount / results.length) * 100 : 0
+    };
+  }, [results]);
+  const payoutFilter = calculationStatus === "confirmed" ? "paid" : reviewStatus === "pending" ? "pending" : "all";
+  const payslipResult = payslipDetail?.result || null;
+  const payslipEmployee = payslipDetail?.employee || null;
+  const payslipWorkingDays = payslipResult && payslipResult.standardHours > 0 ? Math.round(payslipResult.validHours / payslipResult.standardHours) : 0;
+  const payslipTaxOrDeduction = payslipResult ? Math.max(0, payslipResult.grossPay - payslipResult.netPay) : 0;
+
 
   return (
     <div className="space-y-6">
-      <div className="glass-panel rounded-xl p-5">
-        <div className="flex flex-col gap-4">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-[minmax(260px,1.5fr)_160px_160px_160px_160px_120px]">
-            <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">搜索</label>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={keyword}
-                  onChange={(event) => {
-                    setKeyword(event.target.value);
-                    setPage(1);
-                  }}
-                  placeholder="搜索员工姓名、员工编号..."
-                  className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg bg-white text-sm focus:ring-2 focus:ring-brand-500 outline-none"
-                />
-                <Search className="w-5 h-5 absolute left-3 top-2.5 text-slate-400" />
-              </div>
-            </div>
-            <Field label="年月">
-              <input
-                type="month"
-                value={yearMonth}
-                onChange={(event) => {
-                  setYearMonth(event.target.value);
-                  setPage(1);
-                }}
-                className="w-full px-3 py-2.5 border border-slate-300 rounded-lg bg-white text-sm focus:ring-2 focus:ring-brand-500 outline-none"
-              />
-            </Field>
-            <Field label="计薪方式">
-              <select
-                value={salaryType}
-                onChange={(event) => {
-                  setSalaryType(event.target.value);
-                  setPage(1);
-                }}
-                className="w-full px-3 py-2.5 border border-slate-300 rounded-lg bg-white text-sm focus:ring-2 focus:ring-brand-500 outline-none"
-              >
-                <option value="all">全部方式</option>
-                <option value="fixed">固定工资</option>
-                <option value="hourly">时薪</option>
-              </select>
-            </Field>
-            <Field label="计算状态">
-              <select
-                value={calculationStatus}
-                onChange={(event) => {
-                  setCalculationStatus(event.target.value);
-                  setPage(1);
-                }}
-                className="w-full px-3 py-2.5 border border-slate-300 rounded-lg bg-white text-sm focus:ring-2 focus:ring-brand-500 outline-none"
-              >
-                <option value="all">全部状态</option>
-                <option value="calculated">已计算</option>
-                <option value="confirmed">已确认</option>
-              </select>
-            </Field>
-            <Field label="核对状态">
-              <select
-                value={reviewStatus}
-                onChange={(event) => {
-                  setReviewStatus(event.target.value);
-                  setPage(1);
-                }}
-                className="w-full px-3 py-2.5 border border-slate-300 rounded-lg bg-white text-sm focus:ring-2 focus:ring-brand-500 outline-none"
-              >
-                <option value="all">全部状态</option>
-                <option value="pending">待核对</option>
-                <option value="approved">已通过</option>
-                <option value="rejected">已驳回</option>
-              </select>
-            </Field>
-            <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">操作</label>
-              <button onClick={resetFilters} className="w-full px-3 py-2.5 rounded-lg border border-slate-300 bg-white text-sm text-slate-700 hover:bg-slate-50">
-                重置
-              </button>
-            </div>
+      <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-green-50 text-green-600 flex items-center justify-center font-bold shadow-inner">
+            <Calendar className="w-5 h-5" />
           </div>
+          <div>
+            <h2 className="font-bold text-slate-800 text-base flex items-center gap-2">
+              月份工资发放与核算
+              <span className="px-2 py-0.5 rounded-full bg-brand-50 text-brand-700 text-xs font-mono font-bold">
+                {yearMonth}
+              </span>
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5">以后端月度薪酬结果为准，按月份查看核算、核对与最终确认</p>
+          </div>
+        </div>
+
+        <div className="w-full sm:w-auto flex flex-wrap items-center gap-2.5">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-slate-500 whitespace-nowrap">快捷月份:</span>
+            <select
+              value={yearMonth}
+              onChange={(event) => {
+                setYearMonth(event.target.value);
+              }}
+              className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-mono text-sm focus:ring-2 focus:ring-brand-500 outline-none cursor-pointer"
+            >
+              {availableMonths.map((month) => (
+                <option key={month} value={month}>{month}月</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-slate-500 whitespace-nowrap">自定义:</span>
+            <input
+              type="month"
+              value={yearMonth}
+              onChange={(event) => {
+                if (event.target.value) {
+                  setYearMonth(event.target.value);
+                }
+              }}
+              className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-mono text-sm focus:ring-2 focus:ring-brand-500 outline-none cursor-pointer"
+            />
+          </div>
+
+          <button
+            onClick={handleExportCSV}
+            disabled={results.length === 0}
+            className="px-3 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50 transition flex items-center gap-1.5 shadow-sm ml-auto sm:ml-0 disabled:opacity-50"
+          >
+            <Download className="w-4 h-4 text-emerald-500" />
+            <span>导出CSV表</span>
+          </button>
         </div>
       </div>
 
@@ -650,395 +429,354 @@ export function PayrollTable({ employees }: PayrollTableProps) {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <SummaryCard label="应发总额" value={formatCurrency(totals.gross, displayCurrency)} />
-        <SummaryCard label="扣款总额" value={formatCurrency(totals.deduction, displayCurrency)} tone={totals.deduction > 0 ? "danger" : "neutral"} />
-        <SummaryCard label="实发总额" value={formatCurrency(totals.net, displayCurrency)} />
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4 relative overflow-hidden group hover:shadow-md transition">
+          <div className="absolute top-0 right-0 p-3 text-brand-100 group-hover:text-brand-200 transition">
+            <DollarSign className="w-14 h-14" />
+          </div>
+          <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">应发工资总额</p>
+          <p className="text-2xl font-bold font-mono text-slate-800 mt-1">{formatCurrency(totals.gross, displayCurrency)}</p>
+          <div className="flex items-center gap-1 text-[10px] text-slate-400 mt-2">
+            <TrendingUp className="w-3.5 h-3.5 text-blue-500" />
+            <span>基于 {payrollMetrics.totalHours.toFixed(1)}h 正常工时核算</span>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4 relative overflow-hidden group hover:shadow-md transition">
+          <div className="absolute top-0 right-0 p-3 text-emerald-100 group-hover:text-emerald-200 transition">
+            <CheckCircle2 className="w-14 h-14" />
+          </div>
+          <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">已完成发放（确认）</p>
+          <p className="text-2xl font-bold font-mono text-emerald-600 mt-1">{formatCurrency(results.filter((item) => item.calculationStatus === "confirmed").reduce((sum, item) => sum + item.netPay, 0), displayCurrency)}</p>
+          <div className="flex items-center gap-1 text-[10px] text-emerald-600/80 mt-2 font-medium">
+            <Check className="w-3.5 h-3.5" />
+            <span>包含 {payrollMetrics.confirmedCount} 名已确认员工</span>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4 relative overflow-hidden group hover:shadow-md transition">
+          <div className="absolute top-0 right-0 p-3 text-amber-100 group-hover:text-amber-200 transition">
+            <AlertCircle className="w-14 h-14" />
+          </div>
+          <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">未发放（待结）总额</p>
+          <p className="text-2xl font-bold font-mono text-amber-600 mt-1">{formatCurrency(Math.max(0, totals.net - results.filter((item) => item.calculationStatus === "confirmed").reduce((sum, item) => sum + item.netPay, 0)), displayCurrency)}</p>
+          <div className="flex items-center gap-1 text-[10px] text-amber-600 mt-2 font-medium">
+            <Clock className="w-3.5 h-3.5" />
+            <span>还有 {payrollMetrics.pendingCount} 人待支付</span>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4 relative overflow-hidden group hover:shadow-md transition">
+          <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">工资发放核销进度</p>
+          <div className="flex items-center justify-between mt-1">
+            <p className="text-2xl font-bold text-slate-800">{payrollMetrics.progressPct.toFixed(0)}%</p>
+            <span className="text-xs bg-slate-100 text-slate-600 font-bold px-2 py-0.5 rounded-full font-mono">
+              {payrollMetrics.confirmedCount} / {results.length} 人
+            </span>
+          </div>
+          <div className="w-full bg-slate-100 h-2 rounded-full mt-3 overflow-hidden">
+            <div
+              className="bg-brand-500 h-full rounded-full transition-all duration-500"
+              style={{ width: `${payrollMetrics.progressPct}%` }}
+            />
+          </div>
+        </div>
       </div>
 
       <div className="glass-panel rounded-xl overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-100 bg-white">
-          <h3 className="text-sm font-semibold text-slate-800">月度薪酬结果</h3>
-          <p className="text-xs text-slate-400 mt-1">正式结果以后端月度薪酬为准，不再直接遍历原始考勤记录计算</p>
+        <div className="p-4 bg-slate-50 border-b border-slate-100 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              onClick={() => applyPayoutStatusFilter("all")}
+              className={cn("px-3 py-1.5 text-xs font-semibold rounded-lg transition-all", payoutFilter === "all" ? "bg-brand-600 text-white shadow-sm" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-100")}
+            >
+              全部员工 ({results.length})
+            </button>
+            <button
+              onClick={() => applyPayoutStatusFilter("pending")}
+              className={cn("px-3 py-1.5 text-xs font-semibold rounded-lg transition-all", payoutFilter === "pending" ? "bg-amber-500 text-white shadow-sm" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-100")}
+            >
+              ⏳ 待发放 ({payrollMetrics.pendingCount})
+            </button>
+            <button
+              onClick={() => applyPayoutStatusFilter("paid")}
+              className={cn("px-3 py-1.5 text-xs font-semibold rounded-lg transition-all", payoutFilter === "paid" ? "bg-emerald-600 text-white shadow-sm" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-100")}
+            >
+              ✅ 已发放 ({payrollMetrics.confirmedCount})
+            </button>
+          </div>
+
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="relative">
+              <input
+                type="text"
+                value={keyword}
+                onChange={(event) => {
+                  setKeyword(event.target.value);
+                }}
+                placeholder="搜索员工、编号..."
+                className="w-full sm:w-64 pl-8 pr-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-brand-500"
+              />
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+            </div>
+          </div>
         </div>
 
         {loading ? (
           <div className="px-6 py-10 text-center text-sm text-slate-500">正在加载薪酬结果...</div>
         ) : results.length === 0 ? (
-          <div className="px-6 py-10 text-center">
-            <div className="flex flex-col items-center gap-3">
-              <p className="text-sm text-slate-500">当前条件下还没有薪酬结果</p>
-              <button
-                onClick={() => void handleGenerateMonthly()}
-                disabled={submitting}
-                className="px-4 py-2 rounded-lg bg-brand-600 text-white text-sm hover:bg-brand-700 disabled:opacity-60"
-              >
-                立即生成本月薪酬
-              </button>
-            </div>
+          <div className="p-12 text-center text-slate-400">
+            <Receipt className="w-12 h-12 text-slate-200 mx-auto mb-3" />
+            <p className="text-sm">没有找到符合筛选条件的员工薪资数据</p>
+            <p className="text-xs text-slate-300 mt-1">请核对是否已为该月份 "{yearMonth}" 录入过任何员工的出勤卡</p>
           </div>
         ) : (
           <div>
-            <div className="grid grid-cols-1 gap-4 p-5 xl:grid-cols-2">
-              {paginatedResults.map((item) => {
-                const baseSalary = item.salaryType === "fixed"
-                  ? formatCurrency(item.fixedSalary || 0, item.currency)
-                  : formatCurrency(item.hourlyPay, item.currency);
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50/50 text-slate-500 text-xs uppercase border-b border-slate-100">
+                    <th className="px-6 py-3.5 font-semibold">员工详情</th>
+                    <th className="px-4 py-3.5 font-semibold text-center">上班天数</th>
+                    <th className="px-4 py-3.5 font-semibold text-center">有效工时</th>
+                    <th className="px-4 py-3.5 font-semibold text-center text-blue-500">加班</th>
+                    <th className="px-4 py-3.5 font-semibold text-center text-blue-600">总加班时长</th>
+                    <th className="px-6 py-3.5 font-semibold text-right">计算基薪 (应发)</th>
+                    <th className="px-6 py-3.5 font-semibold text-right text-green-600">加班费</th>
+                    <th className="px-6 py-3.5 font-semibold text-right text-blue-700">税后实发 (总额)</th>
+                    <th className="px-6 py-3.5 font-semibold text-center">发放状态 / 动作</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {results.map((item) => {
+                    // v2 原型展示“上班天数”；正式接口当前给的是月度汇总工时，因此按标准工时折算天数，后续接口若返回天数再直接替换这里。
+                    const workingDays = item.standardHours > 0 ? Math.round(item.validHours / item.standardHours) : 0;
+                    const isPaid = item.calculationStatus === "confirmed";
+                    const baseSalary = item.salaryType === "fixed"
+                      ? formatCurrency(item.fixedSalary || 0, item.currency)
+                      : formatCurrency(item.hourlyPay, item.currency);
 
-                return (
-                  <div key={item.id} className={cn("rounded-xl border border-slate-200 bg-white p-4 transition hover:shadow-md", item.calculationStatus === "blocked" && "border-red-200 bg-red-50/30")}>
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="text-base font-bold text-slate-800">{item.employeeName}</h3>
-                          <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600">{item.yearMonth}</span>
-                          <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600">{SALARY_TYPE_LABELS[item.salaryType]}</span>
-                        </div>
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                          <span className={cn("rounded-full px-2 py-1 text-xs font-medium", CALCULATION_STATUS_META[item.calculationStatus]?.className || "bg-slate-100 text-slate-700")}>
-                            {CALCULATION_STATUS_META[item.calculationStatus]?.label || item.calculationStatus}
+                    return (
+                      <tr key={item.id} className="hover:bg-slate-50/70 border-b border-slate-100 bg-white transition-colors">
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 font-bold overflow-hidden border-2 border-white shadow-sm flex-shrink-0">
+                              {item.employeePhoto ? (
+                                <img src={item.employeePhoto} className="w-full h-full object-cover" alt="" />
+                              ) : (
+                                <span style={{ fontSize: "14.4px" }}>{item.employeeName.charAt(0)}</span>
+                              )}
+                            </div>
+                            <div>
+                              <p className="font-semibold text-slate-900 truncate max-w-[150px]">{item.employeeName}</p>
+                              <p className="text-[10px] text-slate-400 mt-0.5">{item.employeeDept || "未分配"} · {item.employeeRole || "未设置职位"}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-4 text-center">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold font-mono text-xs">
+                            {workingDays} 天
                           </span>
-                          <span className={cn("rounded-full px-2 py-1 text-xs font-medium", REVIEW_STATUS_META[item.reviewStatus]?.className || "bg-slate-100 text-slate-700")}>
-                            {REVIEW_STATUS_META[item.reviewStatus]?.label || item.reviewStatus}
+                        </td>
+                        <td className="px-4 py-4 text-center text-xs font-mono text-slate-600">
+                          {formatDuration(item.validHours)}
+                        </td>
+                        <td className="px-4 py-4 text-center">
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 font-semibold font-mono text-xs">
+                            {item.overtimePayHours > 0 ? "1" : "0"} 次
                           </span>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap items-center justify-end gap-2">
-                        <TooltipButton label="查看详情" onClick={() => void openDetail(item.id)} className="p-2 text-slate-500">
-                          <Eye className="w-4 h-4" />
-                        </TooltipButton>
-                        <TooltipButton
-                          label={isSalaryAdjustmentLocked(item) ? "查看一次性薪资项（已锁定）" : "管理一次性薪资项"}
-                          onClick={() => void openAdjustmentList(item)}
-                          className="px-3 py-2 text-xs text-slate-600"
-                        >
-                          薪资项
-                        </TooltipButton>
-                        <TooltipButton label={getPayrollRecalculateLockMessage(item)} onClick={() => void handleRecalculateOne(item)} disabled={isPayrollRecalculateLocked(item)} className="p-2 text-slate-500">
-                          <RefreshCw className="w-4 h-4" />
-                        </TooltipButton>
-                        <TooltipButton label="核对通过" onClick={() => void handleApprove(item.id)} disabled={item.calculationStatus === "blocked" || item.calculationStatus === "confirmed" || item.reviewStatus === "approved"} className="p-2 text-emerald-600">
-                          <BadgeCheck className="w-4 h-4" />
-                        </TooltipButton>
-                        <TooltipButton label="驳回薪资结果" onClick={() => void handleReject(item.id)} disabled={item.calculationStatus === "confirmed"} className="px-3 py-2 text-xs text-rose-600">
-                          驳回
-                        </TooltipButton>
-                        <TooltipButton label="确认最终薪酬" onClick={() => void handleConfirm(item)} disabled={item.calculationStatus !== "calculated" || item.reviewStatus !== "approved"} className="px-3 py-2 text-xs text-white bg-slate-900 hover:bg-slate-800">
-                          确认
-                        </TooltipButton>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
-                      <PayrollInfo label="有效工时" value={formatDuration(item.validHours)} mono />
-                      <PayrollInfo label="时薪" value={item.hourlyRate === null ? "-" : formatCurrency(item.hourlyRate, item.currency)} mono />
-                      <PayrollInfo label="薪资" value={baseSalary} mono />
-                      <PayrollInfo label="加班时间" value={formatDuration(item.overtimePayHours)} mono highlight />
-                      <PayrollInfo label="加班费" value={formatCurrency(item.overtimePay, item.currency)} mono highlight />
-                      <PayrollInfo label="补贴 / 扣款" value={`${formatCurrency(item.allowanceTotal, item.currency)} / -${formatCurrency(item.totalDeduction, item.currency)}`} mono />
-                      <PayrollInfo label="应发" value={formatCurrency(item.grossPay, item.currency)} mono strong />
-                    </div>
-                  </div>
-                );
-              })}
+                        </td>
+                        <td className="px-4 py-4 text-center text-xs font-mono text-blue-600 font-bold">
+                          {formatDuration(item.overtimePayHours)}
+                        </td>
+                        <td className="px-6 py-4 text-right text-xs font-mono text-slate-600">
+                          {baseSalary}
+                        </td>
+                        <td className="px-6 py-4 text-right text-xs font-mono text-green-600 font-semibold">
+                          {formatCurrency(item.overtimePay, item.currency)}
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <span className="text-sm font-bold font-mono text-blue-800">
+                            {formatCurrency(item.netPay, item.currency)}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          <div className="flex flex-col items-center justify-center gap-2">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <span className={cn(
+                                "inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-lg border",
+                                isPaid ? "text-emerald-700 bg-emerald-50 border-emerald-100" : "text-amber-700 bg-amber-50 border-amber-100"
+                              )}>
+                                {isPaid ? <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse" /> : null}
+                                {isPaid ? "已发放" : "待发放"}
+                              </span>
+                              <button
+                                onClick={() => void openPayslip(item)}
+                                disabled={submitting}
+                                className={cn(
+                                  "px-2.5 py-1 text-xs font-semibold rounded-lg transition flex items-center gap-1 disabled:opacity-50",
+                                  isPaid
+                                    ? "text-brand-700 bg-brand-50 border border-brand-100 hover:bg-brand-100"
+                                    : "text-white bg-brand-600 hover:bg-brand-700 shadow-sm hover:shadow"
+                                )}
+                              >
+                                <Receipt className="w-3 h-3" />
+                                <span>{isPaid ? "查看工资条" : "生成工资条"}</span>
+                              </button>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
 
-            <Pagination
-              page={page}
-              pageSize={PAYROLL_PAGE_SIZE}
-              total={results.length}
-              itemName="条薪酬结果"
-              className="mx-5 mb-5"
-              onPageChange={setPage}
-            />
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row justify-between items-center text-xs text-slate-500">
+              <div>
+                当前列表共显示 <span className="font-bold text-slate-700">{results.length}</span> 名员工的计算记录
+              </div>
+              <div>
+                薪资发放由人事及仓库管理员校对后，可通过<span className="font-bold text-slate-700">【生成工资条】</span>开启独立签收单，一键核对实缴
+              </div>
+            </div>
           </div>
         )}
       </div>
 
-      <Modal isOpen={isDetailOpen} title="薪酬结果详情" onClose={() => setIsDetailOpen(false)}>
-        {detail ? (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 text-sm">
-              <DetailItem label="员工">{detail.result.employeeName}</DetailItem>
-              <DetailItem label="员工编号">{detail.result.employeeNo || "-"}</DetailItem>
-              <DetailItem label="年月">{detail.result.yearMonth}</DetailItem>
-              <DetailItem label="计薪方式">{SALARY_TYPE_LABELS[detail.result.salaryType]}</DetailItem>
-              <DetailItem label="固定工资">{detail.result.fixedSalary === null ? "-" : formatCurrency(detail.result.fixedSalary, detail.result.currency)}</DetailItem>
-              <DetailItem label="时薪">{detail.result.hourlyRate === null ? "-" : formatCurrency(detail.result.hourlyRate, detail.result.currency)}</DetailItem>
-              <DetailItem label="计算状态">{CALCULATION_STATUS_META[detail.result.calculationStatus]?.label || detail.result.calculationStatus}</DetailItem>
-              <DetailItem label="核对状态">{REVIEW_STATUS_META[detail.result.reviewStatus]?.label || detail.result.reviewStatus}</DetailItem>
+
+      <Modal
+        isOpen={isPayslipOpen}
+        title="员工工资发放明细单"
+        onClose={closePayslip}
+        className="max-w-lg"
+        footer={payslipResult ? (
+          <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <button type="button" onClick={closePayslip} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">
+              取消
+            </button>
+            <div className="flex flex-wrap justify-end gap-2">
+              {payslipResult.calculationStatus !== "confirmed" ? (
+                <button
+                  type="button"
+                  onClick={() => void handleReject(payslipResult.id)}
+                  disabled={submitting || payslipResult.calculationStatus === "blocked"}
+                  className="px-4 py-2 rounded-lg border border-rose-200 bg-white text-sm text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  驳回
+                </button>
+              ) : null}
+              {payslipResult.calculationStatus !== "confirmed" && payslipResult.reviewStatus !== "approved" ? (
+                <button
+                  type="button"
+                  onClick={() => void handleApprove(payslipResult.id)}
+                  disabled={submitting || payslipResult.calculationStatus === "blocked"}
+                  className="px-4 py-2 rounded-lg border border-emerald-200 bg-emerald-50 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  核对通过
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => void handleConfirm(payslipResult)}
+                disabled={submitting || payslipResult.calculationStatus === "confirmed" || payslipResult.reviewStatus !== "approved" || !isCashPaid || !signName.trim()}
+                className="px-4 py-2 rounded-lg bg-brand-600 text-sm font-bold text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                {payslipResult.calculationStatus === "confirmed" ? "已确认发放" : "核销并确认已发放"}
+              </button>
+            </div>
+          </div>
+        ) : null}
+      >
+        {payslipResult ? (
+          <div className="space-y-5 text-sm text-slate-700">
+            <div className="rounded-xl bg-brand-600 p-4 text-white">
+              <span className="rounded-full bg-brand-500/50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-brand-100">
+                MONTHLY SALARY RECEIPT
+              </span>
+              <h3 className="mt-1 text-lg font-bold">员工工资发放明细单</h3>
+              <p className="mt-0.5 text-xs text-brand-100">月份：{payslipResult.yearMonth} · 核对及现场发放核销</p>
             </div>
 
-            <section className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <h4 className="text-sm font-semibold text-slate-800 mb-3">考勤汇总输入</h4>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                <DetailItem label="有效工时">{formatDuration(detail.result.validHours)}</DetailItem>
-                <DetailItem label="标准工时">{formatDuration(detail.result.standardHours)}</DetailItem>
-                <DetailItem label="加班计薪">{formatDuration(detail.result.overtimePayHours)}</DetailItem>
-                <DetailItem label="加班费">{formatCurrency(detail.result.overtimePay, detail.result.currency)}</DetailItem>
+            <div className="flex items-center gap-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
+              <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold overflow-hidden border">
+                {payslipEmployee?.photo ? (
+                  <img src={payslipEmployee.photo} className="w-full h-full object-cover" alt="" />
+                ) : (
+                  <span>{payslipResult.employeeName.charAt(0)}</span>
+                )}
               </div>
-            </section>
-
-            <section className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <h4 className="text-sm font-semibold text-slate-800 mb-3">金额构成</h4>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                <DetailItem label="时薪工资">{formatCurrency(detail.result.hourlyPay, detail.result.currency)}</DetailItem>
-                <DetailItem label="补贴合计">{formatCurrency(detail.result.allowanceTotal, detail.result.currency)}</DetailItem>
-                <DetailItem label="扣款合计">{formatCurrency(detail.result.totalDeduction, detail.result.currency)}</DetailItem>
-                <DetailItem label="其他合计">{formatCurrency(detail.result.otherTotal, detail.result.currency)}</DetailItem>
-                <DetailItem label="应发金额">{formatCurrency(detail.result.grossPay, detail.result.currency)}</DetailItem>
-                <DetailItem label="实发金额">{formatCurrency(detail.result.netPay, detail.result.currency)}</DetailItem>
-                <DetailItem label="计算时间">{detail.result.calculatedAt || "-"}</DetailItem>
-                <DetailItem label="确认时间">{detail.result.confirmedAt || "-"}</DetailItem>
+              <div>
+                <p className="text-base font-bold text-slate-800">{payslipResult.employeeName}</p>
+                <p className="text-xs text-slate-500">{payslipEmployee?.dept || "全区"} · {payslipEmployee?.role || SALARY_TYPE_LABELS[payslipResult.salaryType]}</p>
               </div>
-            </section>
-
-            <section className="rounded-xl border border-slate-200 bg-white p-4">
-              <h4 className="text-sm font-semibold text-slate-800 mb-3">一次性薪资项</h4>
-              <div className="space-y-2">
-                {detail.adjustmentItems.length === 0 ? (
-                  <p className="text-sm text-slate-500">当前月份没有一次性薪资项</p>
-                ) : detail.adjustmentItems.map((item) => (
-                  <div key={item.id} className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2 text-sm">
-                    <div className="flex items-center gap-2">
-                      <span className={cn("px-2 py-1 rounded-full text-xs font-medium", ADJUSTMENT_TYPE_META[item.type].className)}>
-                        {ADJUSTMENT_TYPE_META[item.type].label}
-                      </span>
-                      <span className="text-slate-700">{item.name}</span>
-                      {item.note ? <span className="text-slate-400">· {item.note}</span> : null}
-                    </div>
-                    <span className="font-mono text-slate-700">{formatCurrency(item.amount, detail.result.currency)}</span>
-                  </div>
-                ))}
+              <div className="ml-auto text-right">
+                <span className="block font-mono text-xs text-slate-400">ID: {payslipResult.employeeNo || `#${payslipResult.employeeId}`}</span>
+                <span className={cn("mt-1 inline-block rounded px-2 py-0.5 text-xs font-semibold", REVIEW_STATUS_META[payslipResult.reviewStatus]?.className)}>
+                  {REVIEW_STATUS_META[payslipResult.reviewStatus]?.label || payslipResult.reviewStatus}
+                </span>
               </div>
-            </section>
+            </div>
 
-            {detail.result.blockedReason && (
-              <section className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-                <div className="flex items-center gap-2 font-semibold mb-2">
-                  <AlertCircle className="w-4 h-4" />
-                  历史异常原因
-                </div>
-                <p>{detail.result.blockedReason}</p>
-              </section>
-            )}
+            <div className="space-y-2 border-y border-dashed border-slate-200 py-3.5 font-mono text-xs">
+              <div className="flex justify-between"><span className="text-slate-500">标准计薪时限 (每日):</span><span className="font-semibold text-slate-800">{formatDuration(payslipResult.standardHours)}</span></div>
+              <div className="flex justify-between"><span className="text-slate-500">本月有效上班天数:</span><span className="font-bold text-slate-800">{payslipWorkingDays} 天</span></div>
+              <div className="flex justify-between"><span className="text-slate-500">本月累计上班工时:</span><span className="font-semibold text-slate-800">{formatDuration(payslipResult.validHours)}</span></div>
+              <div className="flex justify-between"><span className="text-slate-500">本月有效加班工时:</span><span className="font-bold text-blue-600">{formatDuration(payslipResult.overtimePayHours)}</span></div>
+            </div>
+
+            <div className="space-y-2 text-xs">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">应纳发计算说明</p>
+              <div className="space-y-2 rounded-lg bg-slate-50 p-3 font-mono">
+                <div className="flex justify-between"><span className="text-slate-500">计算基薪:</span><span className="font-bold text-slate-800 text-right">{formatCurrency(payslipResult.hourlyPay, payslipResult.currency)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-500">加班应得:</span><span className="font-bold text-green-600 text-right">+ {formatCurrency(payslipResult.overtimePay, payslipResult.currency)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-500">补贴/其他:</span><span className="font-bold text-slate-800 text-right">+ {formatCurrency(payslipResult.allowanceTotal + payslipResult.otherTotal, payslipResult.currency)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-500">扣款/代扣:</span><span className="text-red-500 text-right">- {formatCurrency(payslipTaxOrDeduction, payslipResult.currency)}</span></div>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-brand-100 bg-brand-50 p-4 text-center">
+              <span className="block text-xs font-bold text-brand-600">本月实际应发放</span>
+              <p className="font-mono text-3xl font-extrabold text-brand-800">{formatCurrency(payslipResult.netPay, payslipResult.currency)}</p>
+              <span className="block text-[10px] text-brand-500">发放币种：{payslipResult.currency}</span>
+            </div>
+
+            <div className="space-y-3 rounded-lg border border-slate-200/60 bg-slate-50 p-3.5">
+              <div className="flex items-start gap-2.5">
+                <input
+                  type="checkbox"
+                  id="isCashPaidCheckbox"
+                  checked={isCashPaid}
+                  onChange={(event) => setIsCashPaid(event.target.checked)}
+                  disabled={payslipResult.calculationStatus === "confirmed"}
+                  className="mt-0.5 h-4 w-4 cursor-pointer rounded border-slate-300 text-brand-600 focus:ring-brand-500 disabled:cursor-not-allowed"
+                />
+                <label htmlFor="isCashPaidCheckbox" className="cursor-pointer select-none text-xs font-semibold text-slate-600">
+                  确认企业款项已足额支付（现金发放或网银已转账）
+                </label>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-500">员工电子签名/HR 签章核销:</label>
+                <input
+                  type="text"
+                  placeholder="输入经办人或员工签名 (如: Thin Thin / HR)"
+                  value={signName}
+                  onChange={(event) => setSignName(event.target.value)}
+                  disabled={payslipResult.calculationStatus === "confirmed"}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs outline-none placeholder-slate-400 focus:border-transparent focus:ring-2 focus:ring-brand-500 disabled:bg-slate-100"
+                />
+              </div>
+              {payslipResult.reviewStatus !== "approved" && payslipResult.calculationStatus !== "confirmed" ? (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                  需要先核对通过，才能完成签收发放确认。
+                </p>
+              ) : null}
+            </div>
           </div>
         ) : null}
       </Modal>
 
-      <Modal isOpen={isAdjustmentListOpen} title="一次性薪资项管理" onClose={() => setIsAdjustmentListOpen(false)} className="max-w-4xl">
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm text-slate-500">
-                {adjustmentTarget ? `${adjustmentTarget.employeeName} · ${adjustmentTarget.yearMonth}` : ""}
-              </div>
-              {adjustmentLocked ? (
-                <div className="mt-2 inline-flex rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">
-                  {adjustmentLockMessage}
-                </div>
-              ) : null}
-            </div>
-            <button
-              type="button"
-              onClick={openCreateAdjustment}
-              disabled={adjustmentLocked}
-              className="px-4 py-2 rounded-lg bg-brand-600 text-white text-sm hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
-              title={adjustmentLocked ? adjustmentLockMessage : "新增薪资项"}
-            >
-              新增薪资项
-            </button>
-          </div>
-
-          <div className="rounded-xl border border-slate-200 overflow-hidden">
-            <table className="w-full text-left">
-              <thead>
-                <tr className="bg-slate-50 text-slate-500 text-xs uppercase border-b border-slate-100">
-                  <th className="px-4 py-3">类型</th>
-                  <th className="px-4 py-3">名称</th>
-                  <th className="px-4 py-3 text-right">金额</th>
-                  <th className="px-4 py-3">备注</th>
-                  <th className="px-4 py-3">创建时间</th>
-                  <th className="px-4 py-3 text-center">操作</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 bg-white">
-                {adjustmentItems.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-sm text-slate-500">当前没有一次性薪资项</td>
-                  </tr>
-                ) : adjustmentItems.map((item) => (
-                  <tr key={item.id}>
-                    <td className="px-4 py-4">
-                      <span className={cn("px-2 py-1 rounded-full text-xs font-medium", ADJUSTMENT_TYPE_META[item.type].className)}>
-                        {ADJUSTMENT_TYPE_META[item.type].label}
-                      </span>
-                    </td>
-                    <td className="px-4 py-4 text-sm text-slate-700">{item.name}</td>
-                    <td className="px-4 py-4 text-sm text-right font-mono text-slate-700">{formatCurrency(item.amount, adjustmentTarget?.currency || "THB")}</td>
-                    <td className="px-4 py-4 text-sm text-slate-500">{item.note || "-"}</td>
-                    <td className="px-4 py-4 text-sm text-slate-500 font-mono">{formatDateTime(item.createdAt)}</td>
-                    <td className="px-4 py-4">
-                      <div className="flex items-center justify-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => openEditAdjustment(item)}
-                          disabled={adjustmentLocked}
-                          className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                          title={adjustmentLocked ? adjustmentLockMessage : "编辑薪资项"}
-                        >
-                          编辑
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void handleDeleteAdjustment(item)}
-                          disabled={adjustmentLocked}
-                          className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-rose-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                          title={adjustmentLocked ? adjustmentLockMessage : "删除薪资项"}
-                        >
-                          删除
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-            {adjustmentTarget?.calculationStatus === "confirmed"
-              ? "薪酬结果已确认，薪资项仅允许查看，不能再调整。"
-              : adjustmentLocked
-                ? "薪酬结果核对通过后，薪资项仅允许查看；如需修改，请先驳回后再调整。"
-              : "保存一次性薪资项后，列表会刷新；若要让金额重新计入薪酬结果，请执行单个或批量重算。"}
-          </div>
-        </div>
-      </Modal>
-
-      <Modal isOpen={isAdjustmentFormOpen} title={editingAdjustment ? "编辑一次性薪资项" : "新增一次性薪资项"} onClose={() => setIsAdjustmentFormOpen(false)} className="max-w-2xl">
-        <form onSubmit={handleSaveAdjustment} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field label="项目类型">
-              <select value={adjustmentForm.type} onChange={(event) => setAdjustmentForm((prev) => ({ ...prev, type: event.target.value as SalaryAdjustmentType }))} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-brand-500 outline-none">
-                <option value="allowance">补贴</option>
-                <option value="deduction">扣款</option>
-                <option value="other">其他</option>
-              </select>
-            </Field>
-            <Field label="金额">
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={adjustmentForm.amount}
-                onChange={(event) => setAdjustmentForm((prev) => ({ ...prev, amount: event.target.value === "" ? "" : Number(event.target.value) }))}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none"
-              />
-            </Field>
-          </div>
-          <Field label="项目名称">
-            <input type="text" value={adjustmentForm.name} onChange={(event) => setAdjustmentForm((prev) => ({ ...prev, name: event.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none" />
-          </Field>
-          <Field label="备注">
-            <textarea value={adjustmentForm.note} onChange={(event) => setAdjustmentForm((prev) => ({ ...prev, note: event.target.value }))} rows={3} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm resize-none focus:ring-2 focus:ring-brand-500 outline-none" />
-          </Field>
-          {adjustmentFormError ? (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{adjustmentFormError}</div>
-          ) : null}
-          <div className="flex justify-end gap-3 pt-2 border-t border-slate-100">
-            <button type="button" onClick={() => setIsAdjustmentFormOpen(false)} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">
-              取消
-            </button>
-            <button type="submit" disabled={submitting} className="px-6 py-2 text-sm text-white bg-brand-600 hover:bg-brand-700 rounded-lg disabled:opacity-60">
-              {submitting ? "保存中..." : "保存"}
-            </button>
-          </div>
-        </form>
-      </Modal>
     </div>
-  );
-}
-
-function SummaryCard({ label, value, tone = "neutral" }: { label: string; value: string; tone?: "neutral" | "danger" }) {
-  return (
-    <div className="glass-panel rounded-xl p-5">
-      <p className="text-sm text-slate-500">{label}</p>
-      <p className={cn("mt-2 text-2xl font-bold", tone === "danger" ? "text-red-600" : "text-slate-800")}>{value}</p>
-    </div>
-  );
-}
-
-function PayrollInfo({
-  label,
-  value,
-  mono = false,
-  highlight = false,
-  strong = false
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-  highlight?: boolean;
-  strong?: boolean;
-}) {
-  return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-      <p className="text-[10px] uppercase tracking-wide text-slate-400">{label}</p>
-      <p className={cn("mt-1 text-sm font-semibold text-slate-800", mono && "font-mono", highlight && "text-blue-600", strong && "text-slate-900")}>{value}</p>
-    </div>
-  );
-}
-
-function TooltipButton({
-  label,
-  onClick,
-  disabled = false,
-  className,
-  children
-}: {
-  label: string;
-  onClick: () => void;
-  disabled?: boolean;
-  className?: string;
-  children: ReactNode;
-}) {
-  return (
-    <span className="group relative inline-flex">
-      <button
-        type="button"
-        onClick={onClick}
-        disabled={disabled}
-        aria-label={label}
-        className={cn(
-          "rounded-lg border border-slate-200 bg-white transition hover:bg-slate-50 disabled:opacity-40",
-          className
-        )}
-      >
-        {children}
-      </button>
-      <span className="pointer-events-none absolute -top-9 left-1/2 z-20 hidden -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-xs font-medium text-white shadow-lg group-hover:block">
-        {label}
-      </span>
-    </span>
-  );
-}
-
-function DetailItem({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div>
-      <p className="text-xs uppercase text-slate-400 mb-1">{label}</p>
-      <div className="text-sm text-slate-700">{children}</div>
-    </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="block">
-      <span className="block text-xs font-medium text-slate-500 mb-1 uppercase">{label}</span>
-      {children}
-    </label>
   );
 }

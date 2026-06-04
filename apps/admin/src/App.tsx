@@ -13,7 +13,6 @@ import { AttendanceTable } from "./components/AttendanceTable";
 import { PayrollTable } from "./components/PayrollTable";
 import {
   EmployeeModal,
-  StatusActionModal,
   AttendanceRuleModal,
   AttendanceRuleRelatedEmployeesModal,
   AttendanceRuleToggleModal
@@ -25,7 +24,6 @@ import {
   AttendanceRuleFormData,
   AttendanceRuleOption,
   AttendanceRuleRelatedEmployee,
-  EmployeeAttendanceRuleHistory,
   EmployeeUpsertPayload
 } from "./types";
 import { INITIAL_EMPLOYEES } from "./constants";
@@ -38,7 +36,6 @@ import {
   ensureWorkspaceBootstrap,
   enableAttendanceRule,
   fetchAttendanceRuleDetail,
-  fetchAttendanceRuleOptions,
   fetchAttendanceRuleRelatedEmployees,
   fetchAttendanceRules,
   fetchEmployeeDetail,
@@ -82,25 +79,23 @@ export default function App() {
   const isGooglePopupCallback =
     searchParams.get(GOOGLE_POPUP_QUERY_KEY) === GOOGLE_POPUP_QUERY_VALUE && Boolean(window.opener);
 
-  const [activeTab, setActiveTab] = useState<TabId>('employees');
+  // 员工管理、考勤计算、薪资核算按 v2 可见界面顺序恢复；旧后台兼容字段只留在接口层处理。
+  const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const [session, setSession] = useState<Session | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [googleSigningIn, setGoogleSigningIn] = useState(false);
   const [authError, setAuthError] = useState("");
   const [employees, setEmployees] = useState<Employee[]>(INITIAL_EMPLOYEES);
   const [attendanceRuleList, setAttendanceRuleList] = useState<AttendanceRule[]>([]);
-  const [attendanceRules, setAttendanceRules] = useState<AttendanceRuleOption[]>([]);
   const [employeesLoading, setEmployeesLoading] = useState(false);
   const [attendanceRulesLoading, setAttendanceRulesLoading] = useState(false);
   const [employeeSaving, setEmployeeSaving] = useState(false);
-  const [statusSaving, setStatusSaving] = useState(false);
   const [attendanceRuleSaving, setAttendanceRuleSaving] = useState(false);
   const [attendanceRuleToggleSaving, setAttendanceRuleToggleSaving] = useState(false);
   const [relatedEmployeesLoading, setRelatedEmployeesLoading] = useState(false);
   const [workspaceBootstrapping, setWorkspaceBootstrapping] = useState(false);
   const [workspaceBootstrapChecking, setWorkspaceBootstrapChecking] = useState(false);
   const [workspaceBootstrapDismissed, setWorkspaceBootstrapDismissed] = useState(false);
-  const [employeeListRefreshKey, setEmployeeListRefreshKey] = useState(0);
   const [globalLoadingMessage, setGlobalLoadingMessage] = useState("");
   const bootstrapCheckedSessionRef = useRef<string | null>(null);
   const popupPollTimerRef = useRef<number | null>(null);
@@ -110,10 +105,6 @@ export default function App() {
   // Modal States
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
-  const [employeeRuleHistory, setEmployeeRuleHistory] = useState<EmployeeAttendanceRuleHistory[]>([]);
-  const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
-  const [statusTarget, setStatusTarget] = useState<'disabled' | 'resigned'>('disabled');
-  const [statusTargetEmployee, setStatusTargetEmployee] = useState<Employee | null>(null);
   const [isAttendanceRuleModalOpen, setIsAttendanceRuleModalOpen] = useState(false);
   const [editingAttendanceRule, setEditingAttendanceRule] = useState<AttendanceRule | null>(null);
   const [isRelatedEmployeesModalOpen, setIsRelatedEmployeesModalOpen] = useState(false);
@@ -131,10 +122,6 @@ export default function App() {
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
     }, 3000);
-  };
-
-  const refreshEmployeeListView = () => {
-    setEmployeeListRefreshKey((prev) => prev + 1);
   };
 
   const clearPopupPollTimer = () => {
@@ -302,7 +289,6 @@ export default function App() {
     if (!session?.access_token) {
       setEmployees([]);
       setAttendanceRuleList([]);
-      setAttendanceRules([]);
       setWorkspaceBootstrapChecking(false);
       setWorkspaceBootstrapDismissed(false);
       bootstrapCheckedSessionRef.current = null;
@@ -339,13 +325,8 @@ export default function App() {
   const loadEmployeeModuleData = async () => {
     setEmployeesLoading(true);
     try {
-      const [employeeRows, ruleRows] = await Promise.all([
-        fetchEmployees(),
-        fetchAttendanceRuleOptions()
-      ]);
+      const employeeRows = await fetchEmployees();
       setEmployees(employeeRows);
-      setAttendanceRules(ruleRows);
-      refreshEmployeeListView();
     } catch (error) {
       addToast(error instanceof Error ? error.message : "员工模块数据加载失败");
     } finally {
@@ -435,7 +416,6 @@ export default function App() {
     setSession(null);
     setEmployees([]);
     setAttendanceRuleList([]);
-    setAttendanceRules([]);
     setWorkspaceBootstrapDismissed(false);
   };
 
@@ -448,7 +428,7 @@ export default function App() {
         loadAttendanceRuleModuleData()
       ]);
       setWorkspaceBootstrapDismissed(true);
-      setActiveTab("employees");
+      setActiveTab("attendance");
       addToast(result.message || "已为当前账号初始化后台示例数据");
     } catch (error) {
       addToast(error instanceof Error ? error.message : "初始化后台失败");
@@ -459,7 +439,6 @@ export default function App() {
 
   const openCreateEmployee = () => {
     setEditingEmployee(null);
-    setEmployeeRuleHistory([]);
     setIsEmployeeModalOpen(true);
   };
 
@@ -468,7 +447,6 @@ export default function App() {
     try {
       const detail = await fetchEmployeeDetail(employee.id);
       setEditingEmployee(detail.employee);
-      setEmployeeRuleHistory(detail.ruleHistory);
       setIsEmployeeModalOpen(true);
     } catch (error) {
       addToast(error instanceof Error ? error.message : "员工详情加载失败");
@@ -489,8 +467,6 @@ export default function App() {
         next.push(detail.employee);
         return next.sort((a, b) => a.id - b.id);
       });
-      refreshEmployeeListView();
-      setEmployeeRuleHistory(detail.ruleHistory);
       setEditingEmployee(detail.employee);
       setIsEmployeeModalOpen(false);
       addToast(editingEmployee ? '员工档案已更新' : '新员工已添加成功');
@@ -501,35 +477,27 @@ export default function App() {
     }
   };
 
-  const openStatusModal = (employee: Employee, target: 'disabled' | 'resigned') => {
-    setStatusTargetEmployee(employee);
-    setStatusTarget(target);
-    setIsStatusModalOpen(true);
-  };
+  const handleDeleteEmployee = async (employee: Employee) => {
+    const confirmed = await confirm({
+      title: "确认删除员工?",
+      message: `此操作会将员工 ${employee.name} 从 v2 员工列表中移除，后续仍可在后台数据中保留离职记录。是否继续？`,
+      confirmText: "确认删除",
+      cancelText: "取消",
+      tone: "danger"
+    });
 
-  const handleConfirmStatus = async () => {
-    if (!statusTargetEmployee) {
+    if (!confirmed) {
       return;
     }
 
-    setStatusSaving(true);
     try {
-      const detail = await updateEmployeeStatus(statusTargetEmployee.id, statusTarget);
-      setEmployees((prev) => prev.map((employee) => employee.id === detail.employee.id ? detail.employee : employee));
-      refreshEmployeeListView();
-      setIsStatusModalOpen(false);
-      setStatusTargetEmployee(null);
-      addToast(statusTarget === 'disabled' ? '员工已停用' : '员工已标记为离职');
+      // 当前后端没有物理删除接口；v2 删除入口只负责让员工退出当前员工列表，因此沿用状态接口标记为离职，避免误删历史考勤/薪资记录。
+      await updateEmployeeStatus(employee.id, "resigned");
+      setEmployees((prev) => prev.filter((item) => item.id !== employee.id));
+      addToast("员工已从当前列表移除");
     } catch (error) {
-      addToast(error instanceof Error ? error.message : "员工状态更新失败");
-    } finally {
-      setStatusSaving(false);
+      addToast(error instanceof Error ? error.message : "员工删除失败");
     }
-  };
-
-  const refreshAttendanceRuleOptions = async () => {
-    const options = await fetchAttendanceRuleOptions();
-    setAttendanceRules(options);
   };
 
   const syncAttendanceRuleIntoState = (rule: AttendanceRule) => {
@@ -580,7 +548,6 @@ export default function App() {
         : await createAttendanceRule(payload);
 
       syncAttendanceRuleIntoState(detail.rule);
-      await refreshAttendanceRuleOptions();
       setIsAttendanceRuleModalOpen(false);
       setEditingAttendanceRule(null);
       addToast(editingAttendanceRule ? "考勤规则已更新" : "考勤规则已创建");
@@ -623,7 +590,6 @@ export default function App() {
         : await enableAttendanceRule(toggleTargetRule.id);
 
       syncAttendanceRuleIntoState(detail.rule);
-      await refreshAttendanceRuleOptions();
       setIsAttendanceRuleToggleModalOpen(false);
       setToggleTargetRule(null);
       addToast(detail.rule.isActive ? "考勤规则已启用" : "考勤规则已停用");
@@ -638,7 +604,6 @@ export default function App() {
     const titles: Record<TabId, string> = {
       dashboard: '数据看板',
       employees: '员工管理',
-      attendanceRules: '考勤规则管理',
       attendance: '考勤计算',
       payroll: '薪资核算'
     };
@@ -721,28 +686,20 @@ export default function App() {
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.2 }}
             >
+              {/* 各业务模块先以 v2 可见界面为准挂载，再按界面重写/对接接口，避免旧后台字段反向污染 UI。 */}
               {activeTab === 'dashboard' && (
-                <Dashboard />
+                <Dashboard
+                  onOpenSettings={() => setActiveTab('attendance')}
+                  onNav={setActiveTab}
+                />
               )}
               {activeTab === 'employees' && (
                 <EmployeeList
-                  attendanceRules={attendanceRules}
+                  employees={employees}
                   loading={employeesLoading}
-                  refreshKey={employeeListRefreshKey}
                   onAddEmployee={openCreateEmployee}
-                  onEditEmployee={openEditEmployee}
-                  onDisableEmployee={(employee) => openStatusModal(employee, 'disabled')}
-                  onResignEmployee={(employee) => openStatusModal(employee, 'resigned')}
-                />
-              )}
-              {activeTab === 'attendanceRules' && (
-                <AttendanceRuleList
-                  rules={attendanceRuleList}
-                  loading={attendanceRulesLoading}
-                  onAddRule={openCreateAttendanceRule}
-                  onEditRule={openEditAttendanceRule}
-                  onToggleRule={openAttendanceRuleToggleModal}
-                  onViewRelatedEmployees={openRelatedEmployeesModal}
+                  onEditEmployee={(employee) => void openEditEmployee(employee)}
+                  onDeleteEmployee={(employee) => void handleDeleteEmployee(employee)}
                 />
               )}
               {activeTab === 'attendance' && (
@@ -762,18 +719,7 @@ export default function App() {
         onClose={() => setIsEmployeeModalOpen(false)}
         onSave={handleSaveEmployee}
         employee={editingEmployee}
-        attendanceRules={attendanceRules}
-        ruleHistory={employeeRuleHistory}
         saving={employeeSaving}
-      />
-
-      <StatusActionModal
-        isOpen={isStatusModalOpen}
-        onClose={() => setIsStatusModalOpen(false)}
-        onConfirm={handleConfirmStatus}
-        employee={statusTargetEmployee}
-        targetStatus={statusTarget}
-        loading={statusSaving}
       />
 
       <AttendanceRuleModal

@@ -1,5 +1,6 @@
 import { supabase } from "./supabase";
 import {
+  AppConfig,
   AttendanceCalculationDetail,
   AttendanceCalculationResult,
   AttendanceRecord,
@@ -51,16 +52,9 @@ export async function fetchEmployees(): Promise<Employee[]> {
   return request<Employee[]>("/api/admin/employees");
 }
 
-export async function fetchDashboardData(params: {
-  date: string;
-  yearMonth: string;
-}): Promise<DashboardData> {
-  const search = new URLSearchParams({
-    date: params.date,
-    yearMonth: params.yearMonth
-  });
-
-  return request<DashboardData>(`/api/admin/dashboard?${search.toString()}`);
+export async function fetchDashboardData(): Promise<DashboardData> {
+  // v2 数据看板不再由前端日期筛选驱动；后端按当前账号最后一次考勤结果周期返回完整看板契约。
+  return request<DashboardData>("/api/admin/dashboard");
 }
 
 export async function fetchEmployeesPage(params: EmployeeListFilters & {
@@ -83,9 +77,6 @@ export async function fetchEmployeesPage(params: EmployeeListFilters & {
   }
   if (params.salaryType && params.salaryType !== "all") {
     search.set("salaryType", params.salaryType);
-  }
-  if (params.attendanceRuleId && params.attendanceRuleId !== "all") {
-    search.set("attendanceRuleId", params.attendanceRuleId);
   }
   if (params.role && params.role !== "all") {
     search.set("role", params.role);
@@ -144,15 +135,31 @@ export async function fetchAttendanceRuleRelatedEmployees(ruleId: number, curren
   return request<AttendanceRuleRelatedEmployee[]>(`/api/admin/attendance-rules/${ruleId}/related-employees${query}`);
 }
 
+export async function fetchAttendanceConfig(): Promise<AppConfig> {
+  return request<AppConfig>("/api/admin/attendance-config");
+}
+
+export async function updateAttendanceConfig(payload: AppConfig): Promise<AppConfig> {
+  // v2 考勤页只维护账号级全局配置；保存后由后端重算接口统一消费，前端不再保存多规则关系。
+  return request<AppConfig>("/api/admin/attendance-config", {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
 export async function fetchAttendanceCalculations(params: {
   keyword?: string;
-  yearMonth: string;
+  yearMonth?: string;
   date?: string;
   employeeId?: number | null;
   status?: string;
   hasException?: string;
 }): Promise<AttendanceCalculationResult[]> {
-  const search = new URLSearchParams({ yearMonth: params.yearMonth });
+  // v2 原型有“全部时间/按天/按月”三种筛选；yearMonth 只在按月或按天辅助查询时传，全部时间不能被前端硬塞当前月份。
+  const search = new URLSearchParams();
+  if (params.yearMonth) {
+    search.set("yearMonth", params.yearMonth);
+  }
   if (params.date) {
     search.set("date", params.date);
   }

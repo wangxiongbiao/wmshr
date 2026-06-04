@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export type TabId = 'dashboard' | 'employees' | 'attendanceRules' | 'attendance' | 'payroll';
+export type TabId = 'dashboard' | 'employees' | 'attendance' | 'payroll';
 
 export type Gender = 'male' | 'female';
 
@@ -51,6 +51,8 @@ export interface Employee {
   salaryType: SalaryType;
   hourlyRate: number | null;
   fixedSalary: number | null;
+  attendanceBonus: number;
+  socialSecurity: number;
   currency: CurrencyCode;
   joinDate: string;
   status: EmployeeStatus;
@@ -131,6 +133,7 @@ export interface EmployeeAttendanceRuleHistory {
 
 export interface EmployeeDetail {
   employee: Employee;
+  // 员工 v2 界面不再展示规则历史；后端返回空数组以兼容旧调用方。
   ruleHistory: EmployeeAttendanceRuleHistory[];
 }
 
@@ -139,7 +142,6 @@ export interface EmployeeListFilters {
   status?: string;
   country?: string;
   salaryType?: string;
-  attendanceRuleId?: string;
   role?: string;
   includeInactive?: boolean;
 }
@@ -162,11 +164,11 @@ export interface EmployeeUpsertPayload {
   dept: string;
   joinDate: string;
   status: EmployeeStatus;
-  attendanceRuleId: number;
-  ruleEffectiveStartDate: string;
   salaryType: SalaryType;
   hourlyRate: number | null;
   fixedSalary: number | null;
+  attendanceBonus: number;
+  socialSecurity: number;
   salaryEffectiveStartDate: string;
   currency: CurrencyCode;
   photo: string | null;
@@ -188,10 +190,19 @@ export interface AttendanceCalculationResult {
   employeeId: number;
   employeeNo?: string;
   employeeName: string;
+  // v2 表格接口一次性返回员工展示字段，避免页面再拼旧员工规则/薪资规则接口或在前端二次推导。
+  employeeGender: Gender | null;
+  employeeCountry: CountryCode | null;
+  employeeRole: string;
+  employeeDept: string;
+  employeeStatus: EmployeeStatus | null;
+  employeePhoto: string | null;
+  salaryType: SalaryType | null;
+  hourlyRate: number | null;
+  fixedSalary: number | null;
+  currency: CurrencyCode;
   attendanceRecordId: number | null;
   date: string;
-  attendanceRuleId: number | null;
-  attendanceRuleName?: string;
   rawInTime: string | null;
   rawOutTime: string | null;
   rawHours: number;
@@ -200,7 +211,13 @@ export interface AttendanceCalculationResult {
   standardHours: number;
   overtimeRawHours: number;
   overtimePayHours: number;
+  // v2 后端直接返回费用结果，前端只展示/导出，不再二次按旧考勤规则重算。
+  workPay: number;
+  overtimePay: number;
+  totalPay: number;
   status: AttendanceCalculationStatus;
+  statusLabel: string;
+  isOvertime: boolean;
   hasException: boolean;
   exceptionReason: string | null;
   note: string;
@@ -212,7 +229,6 @@ export interface AttendanceCalculationDetail {
   result: AttendanceCalculationResult;
   employee: Employee | null;
   record: AttendanceRecord | null;
-  rule: AttendanceRule | null;
 }
 
 export interface MonthlyAttendanceSummary {
@@ -279,6 +295,10 @@ export interface MonthlyPayrollResult {
   employeeId: number;
   employeeNo?: string;
   employeeName: string;
+  // 薪资 v2 表格的“员工详情”列必须由薪资结果接口一次返回展示字段，避免回退到旧员工列表或计薪方式造成列内容错乱。
+  employeeDept: string;
+  employeeRole: string;
+  employeePhoto: string | null;
   yearMonth: string;
   salaryType: SalaryType;
   fixedSalary: number | null;
@@ -360,32 +380,55 @@ export interface AttendanceDetails {
   ot: number;
 }
 
+export interface DashboardConfig {
+  standardHours: number;
+  dailyBreakMinutes: number;
+  overtimeMultiplier: number;
+  otHourlyFee: number;
+  currency: CurrencyCode;
+}
+
 export interface DashboardEmployeeStat {
   employeeId: number;
   employeeNo?: string;
   employeeName: string;
-  validHours: number;
-  overtimePayHours: number;
-  exceptionCount: number;
+  employeeDept: string;
+  employeeRole: string;
+  employeePhoto: string | null;
+  totalValidHours: number;
+  totalOvertimeHours: number;
+  daysWorked: number;
+  avgDailyHours: number;
+  satiety: number;
+}
+
+export interface DashboardDepartmentStat {
+  deptName: string;
+  staffCount: number;
+  totalValidHours: number;
+  totalOvertimeHours: number;
+  totalDays: number;
+  avgHours: number;
+  otRatio: number;
+  loadLabel: string;
+  badgeTone: 'emerald' | 'amber' | 'rose';
+  actionAdvice: string;
 }
 
 export interface DashboardData {
-  date: string;
-  yearMonth: string;
+  dashboardDate: string;
+  totalEmployeeCount: number;
   activeEmployeeCount: number;
-  activeRuleCount: number;
-  todayOvertimePay: number;
-  todayRecordCount: number;
+  inactiveEmployeeCount: number;
+  todayWorkHours: number;
+  todayAverageWorkHours: number;
+  todayOvertimeHours: number;
+  todayOvertimeEstimatePay: number;
   todayExceptionCount: number;
   todayExceptionRate: number;
-  monthlyPayrollGrossPay: number;
-  monthlyPayrollDeduction: number;
-  monthlyPayrollNetPay: number;
-  monthlyValidHours: number;
-  monthlyOvertimePayHours: number;
-  monthlyExceptionCount: number;
-  currency: CurrencyCode;
+  config: DashboardConfig;
   employeeStats: DashboardEmployeeStat[];
+  departmentStats: DashboardDepartmentStat[];
 }
 
 export interface EmployeeStats {

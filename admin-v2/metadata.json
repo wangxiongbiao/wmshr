@@ -1,0 +1,6 @@
+{
+  "name": "WMSHR - 海外仓员工管理系统",
+  "description": "一个功能齐全的海外仓考勤管理系统，支持数据看板、员工管理、考勤计算和薪资核算。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
