@@ -15,7 +15,8 @@
     "build:admin": "npm --workspace @wmshr/admin run build",
     "build:home": "npm --workspace @wmshr/home run build",
     "lint": "npm run lint --workspaces --if-present",
-    "build": "npm run build --workspaces --if-present"
+    "build": "npm run build --workspaces --if-present",
+    "deploy:prod": "bash scripts/deploy-production.sh"
   },
   "overrides": {
     "react": "19.1.0",
