@@ -244,11 +244,13 @@ function hashEmployeeAppPassword(password, salt = crypto.randomBytes(16).toStrin
 
 function verifyEmployeeAppPassword(password, storedHash) {
   const [algorithm, iterations, salt, expected] = String(storedHash || "").split("$");
-  if (algorithm !== "pbkdf2_sha256" || !iterations || !salt || !expected) {
+  const iterationCount = Number(iterations);
+  // 数据库 hash 可能来自旧数据或手动导入；先校验格式和长度，避免 timingSafeEqual 因 Buffer 长度不一致抛异常并泄露实现细节。
+  if (algorithm !== "pbkdf2_sha256" || !Number.isFinite(iterationCount) || !salt || !/^[a-f0-9]{64}$/i.test(expected || "")) {
     return false;
   }
 
-  const actual = crypto.pbkdf2Sync(String(password), salt, Number(iterations), 32, "sha256").toString("hex");
+  const actual = crypto.pbkdf2Sync(String(password), salt, iterationCount, 32, "sha256").toString("hex");
   return crypto.timingSafeEqual(Buffer.from(actual, "hex"), Buffer.from(expected, "hex"));
 }
 
