@@ -9,8 +9,8 @@ interface AuthScreenProps {
   error?: string;
 }
 
-function DutylixLogoMark() {
-  // 登录页、侧边栏和门户共用同一品牌图标；这里不要再使用旧后台盾牌图标，避免品牌入口不一致。
+function WmshrLogoMark() {
+  // 继续复用 public/dutylix-icon.svg 这个既有路径，避免改动静态资源引用面；图形内容已恢复为蓝底 WMSHR 立方体标识。
   return <img src="/dutylix-icon.svg" alt="" aria-hidden="true" className="w-12 h-12" />;
 }
 
@@ -27,69 +27,148 @@ function GoogleIcon() {
 
 export function AuthScreen({ loading = false, onGoogleLogin, error }: AuthScreenProps) {
   return (
-    <div className="min-h-screen bg-[#f8fafc] flex items-center justify-center p-6">
-      <div className="w-full max-w-5xl grid lg:grid-cols-[1.2fr_0.8fr] gap-6">
-        <section className="glass-panel rounded-3xl p-10 lg:p-12 relative overflow-hidden">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(37,99,235,0.08),_transparent_38%),radial-gradient(circle_at_bottom_right,_rgba(14,165,233,0.08),_transparent_30%)] pointer-events-none" />
-          <div className="relative">
-            <div className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg shadow-brand-600/20 mb-6">
-              <DutylixLogoMark />
-            </div>
-            <p className="text-sm font-medium text-brand-700 mb-3">DUTYLIX Admin</p>
-            <h1 className="text-4xl font-bold text-slate-900 leading-tight">
-              DUTYLIX考勤与薪资自动运行
-            </h1>
-            <p className="mt-5 text-slate-600 text-base leading-7 max-w-xl">
-              登录后才会加载员工、考勤和薪资模块数据。本后台当前接入的是 Supabase Auth，
-              会使用你的 Google 账号完成统一登录。
-            </p>
+    <div className="min-h-screen overflow-hidden bg-[#eef5f2] text-slate-950">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_12%_10%,rgba(191,224,221,0.75),transparent_32%),radial-gradient(circle_at_86%_18%,rgba(219,232,244,0.8),transparent_28%),linear-gradient(135deg,#fbfaf6_0%,#eef5f2_48%,#e8f0f6_100%)]" />
+      <div className="absolute inset-0 opacity-[0.16] bg-[linear-gradient(to_right,#64748b_1px,transparent_1px),linear-gradient(to_bottom,#64748b_1px,transparent_1px)] bg-[size:72px_72px]" />
 
-            <div className="mt-8 grid sm:grid-cols-3 gap-3">
-              <div className="rounded-2xl border border-slate-200 bg-white/80 p-4">
-                <p className="text-xs text-slate-400 uppercase mb-1">Auth</p>
-                <p className="text-sm font-semibold text-slate-800">Supabase Google OAuth</p>
+      <main className="relative min-h-screen px-5 py-5 lg:px-10 lg:py-8 flex items-center">
+        <div className="absolute right-5 top-5 lg:right-10 lg:top-8 rounded-full border border-white/70 bg-white/60 px-4 py-2 text-xs font-semibold text-slate-500 shadow-sm backdrop-blur-xl">
+          admin.dutylix.com
+        </div>
+
+        <div className="mx-auto grid w-full max-w-7xl items-center gap-6 lg:grid-cols-[1.12fr_0.88fr]">
+          <section className="relative min-h-[620px] overflow-hidden rounded-[2rem] border border-white/70 bg-white/45 p-6 shadow-[0_30px_100px_rgba(15,23,42,0.12)] backdrop-blur-2xl lg:rounded-[2.5rem] lg:p-8">
+            {/* 视觉面板只负责传达“考勤/薪资被校准”的业务气质；真实认证边界仍在右侧 Google OAuth 卡片，不在门户主站保存登录态。 */}
+            <div className="absolute left-7 top-8 z-10 hidden h-[82%] w-px bg-slate-900/10 lg:block" />
+
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_20%,rgba(14,165,233,0.12),transparent_34%),radial-gradient(circle_at_70%_80%,rgba(16,185,129,0.12),transparent_28%)]" />
+            <div className="absolute -right-14 top-16 h-64 w-64 rounded-full bg-cyan-100/70 blur-3xl" />
+            <div className="absolute bottom-0 left-1/2 h-52 w-72 -translate-x-1/2 rounded-full bg-emerald-100/70 blur-3xl" />
+
+            <div className="relative ml-0 grid h-full min-h-[560px] grid-rows-[1fr_auto] lg:ml-12">
+              <div className="relative rounded-[1.75rem] border border-white/65 bg-[#dfeae8] p-5 shadow-inner overflow-hidden">
+                <div className="absolute inset-0 bg-[linear-gradient(145deg,rgba(15,23,42,0.08),transparent_42%),radial-gradient(circle_at_70%_20%,rgba(255,255,255,0.9),transparent_24%)]" />
+                <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-[#d7e4e2] to-transparent" />
+
+                <div className="relative grid h-full min-h-[360px] grid-cols-[0.9fr_1.1fr] gap-4">
+                  <div className="flex flex-col justify-end gap-4">
+                    <div className="w-44 rounded-[1.35rem] border border-white/70 bg-white/70 p-4 shadow-xl shadow-slate-900/5 backdrop-blur-md">
+                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">今日上班</p>
+                      <p className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">08:30</p>
+                      <p className="mt-2 text-xs text-slate-500">考勤已同步</p>
+                    </div>
+                    <div className="ml-10 w-52 rounded-[1.35rem] border border-white/70 bg-slate-950/80 p-4 text-white shadow-2xl shadow-slate-900/20 backdrop-blur-md">
+                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-cyan-100/70">薪资待确认</p>
+                      <div className="mt-4 space-y-2">
+                        <div className="h-2 w-28 rounded-full bg-white/70" />
+                        <div className="h-2 w-36 rounded-full bg-white/35" />
+                        <div className="h-2 w-20 rounded-full bg-emerald-300/80" />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="relative flex items-center justify-center">
+                    <div className="absolute h-72 w-72 rounded-full border border-white/70 bg-white/25" />
+                    <div className="relative h-80 w-64 rotate-3 rounded-[2rem] border border-white/80 bg-white/80 p-5 shadow-2xl shadow-slate-900/10 backdrop-blur-md">
+                      <div className="flex items-center justify-between border-b border-slate-200 pb-4">
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">考勤明细</p>
+                          <p className="mt-1 text-lg font-semibold text-slate-900">今日汇总</p>
+                        </div>
+                        <span className="rounded-full bg-emerald-100 px-3 py-1 text-[10px] font-bold text-emerald-700">正常</span>
+                      </div>
+                      <div className="mt-5 space-y-4">
+                        {["标准工时", "加班时长", "请假记录"].map((label, index) => (
+                          <div key={label}>
+                            <div className="mb-2 flex justify-between text-xs text-slate-500">
+                              <span>{label}</span>
+                              <span>{index === 0 ? "8.0h" : index === 1 ? "1.25h" : "已核对"}</span>
+                            </div>
+                            <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                              <div className={`h-full rounded-full ${index === 0 ? "w-[82%] bg-slate-800" : index === 1 ? "w-[38%] bg-cyan-400" : "w-[58%] bg-emerald-400"}`} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-6 rounded-2xl bg-slate-50 p-4">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">待处理工资条</p>
+                        <p className="mt-2 text-2xl font-semibold text-slate-900">12</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div className="rounded-2xl border border-slate-200 bg-white/80 p-4">
-                <p className="text-xs text-slate-400 uppercase mb-1">Access</p>
-                <p className="text-sm font-semibold text-slate-800">Session-protected API</p>
-              </div>
-              <div className="rounded-2xl border border-slate-200 bg-white/80 p-4">
-                <p className="text-xs text-slate-400 uppercase mb-1">Scope</p>
-                <p className="text-sm font-semibold text-slate-800">Admin workspace only</p>
+
+              <div className="mt-6 grid gap-3 sm:grid-cols-3">
+                {[
+                  ["安全登录", "Google 账号进入"],
+                  ["专属工作台", "只显示你的团队数据"],
+                  ["薪资边界", "工资与考勤独立核对"]
+                ].map(([title, caption]) => (
+                  <div key={title} className="rounded-2xl border border-white/70 bg-white/55 p-4 shadow-sm backdrop-blur-xl">
+                    <p className="text-sm font-semibold text-slate-800">{title}</p>
+                    <p className="mt-1 text-xs text-slate-500">{caption}</p>
+                  </div>
+                ))}
               </div>
             </div>
-          </div>
-        </section>
+          </section>
 
-        <aside className="bg-white rounded-3xl border border-slate-200 shadow-sm p-8 lg:p-10 flex flex-col justify-center">
-          <div className="mb-8">
-            <p className="text-sm text-slate-500 mb-2">管理员登录</p>
-            <h2 className="text-2xl font-bold text-slate-900">使用 Google 继续</h2>
-            <p className="mt-3 text-sm text-slate-500 leading-6">
-              点击后会打开 Google 授权弹窗，授权完成后会自动回到当前后台，不会整页跳转。
-            </p>
-          </div>
+          <aside className="relative mx-auto w-full max-w-[480px] rounded-[2rem] border border-white/75 bg-white/80 p-7 shadow-[0_30px_90px_rgba(15,23,42,0.14)] backdrop-blur-2xl lg:-ml-8 lg:p-9">
+            <div className="absolute -left-6 top-14 hidden h-24 w-12 rounded-l-full border-y border-l border-white/70 bg-white/50 lg:block" />
+            <div className="relative">
+              <div className="mb-8 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white shadow-lg shadow-slate-900/10">
+                    <WmshrLogoMark />
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold tracking-[0.18em] text-slate-400">WMSHR</p>
+                    <p className="text-sm font-semibold text-slate-700">管理后台</p>
+                  </div>
+                </div>
+                <span className="rounded-full bg-emerald-50 px-3 py-1.5 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-100">
+                  在线
+                </span>
+              </div>
 
-          <button
-            onClick={onGoogleLogin}
-            disabled={loading}
-            className="w-full rounded-2xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 px-5 py-4 text-sm font-semibold shadow-sm transition flex items-center justify-center gap-3 disabled:opacity-60"
-          >
-            <GoogleIcon />
-            {loading ? "正在打开 Google 弹窗..." : "使用 Google 登录"}
-          </button>
+              <div className="mb-8">
+                <p className="mb-3 text-sm font-semibold text-cyan-700">管理员登录</p>
+                <h1 className="text-4xl font-semibold leading-[1.08] tracking-[-0.04em] text-slate-950 lg:text-5xl">
+                  考勤与薪资自动运行
+                </h1>
+                <p className="mt-5 text-base leading-7 text-slate-500">
+                  统一管理员入口，登录后即可查看员工、考勤、加班与工资条数据。
+                </p>
+              </div>
 
-          {error && (
-            <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {error}
+              <button
+                onClick={onGoogleLogin}
+                disabled={loading}
+                className="group flex w-full items-center justify-center gap-3 rounded-2xl border border-slate-200 bg-slate-950 px-5 py-4 text-sm font-semibold text-white shadow-xl shadow-slate-900/15 transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white">
+                  <GoogleIcon />
+                </span>
+                {loading ? "正在打开 Google 授权..." : "使用 Google 账号进入后台"}
+              </button>
+
+              {error && (
+                <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {error}
+                </div>
+              )}
+
+              <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50/80 p-4 text-sm leading-6 text-slate-500">
+                <p className="font-semibold text-slate-700">主站进入 · Google 登录 · 数据安全隔离</p>
+                <p className="mt-1 text-xs">
+                  登录成功后进入你的管理工作台，员工与薪资数据不会展示给未授权访问者。
+                </p>
+              </div>
             </div>
-          )}
-
-          <div className="mt-8 text-xs text-slate-400 leading-5">
-            当前后台仅允许通过 Google 账号登录，请确保浏览器允许本页面弹出授权窗口。
-          </div>
-        </aside>
-      </div>
+          </aside>
+        </div>
+      </main>
     </div>
   );
 }

@@ -9,7 +9,7 @@ const resources = {
         features: 'Solutions',
         about: 'Mobile APP Download',
         docs: 'About Us',
-        waitlist: 'Login with Google',
+        waitlist: 'Use Now',
       },
       about_section: {
         badge: 'OUR MISSION',
@@ -141,7 +141,7 @@ const resources = {
         features: '解决方案',
         about: '移动端APP下载',
         docs: '关于我们',
-        waitlist: '谷歌登录',
+        waitlist: '立即使用',
       },
       about_section: {
         badge: '我们的使命',
@@ -273,7 +273,7 @@ const resources = {
         features: '解決方案',
         about: '移動端APP下載',
         docs: '關於我們',
-        waitlist: '谷歌登錄',
+        waitlist: '立即使用',
       },
       hero: {
         badge: '智能化勞動力管理平台',
@@ -405,7 +405,7 @@ const resources = {
         features: 'โซลูชัน',
         about: 'ดาวน์โหลดแอปมือถือ',
         docs: 'เกี่ยวกับเรา',
-        waitlist: 'เข้าสู่ระบบแอดมิน',
+        waitlist: 'ใช้งานทันที',
       },
       about_section: {
         badge: 'พันธกิจของเรา',
@@ -512,7 +512,7 @@ const resources = {
         features: 'Solusi',
         about: 'Unduh Aplikasi Seluler',
         docs: 'Dokumentasi API',
-        waitlist: 'Login Admin',
+        waitlist: 'Use Now',
       },
       hero: {
         badge: 'Platform Manajemen Tenaga Kerja Global',
@@ -601,7 +601,7 @@ const resources = {
         features: 'Penyelesaian',
         about: 'Muat Turun Aplikasi Mudah Alih',
         docs: 'Dok API',
-        waitlist: 'Log Masuk Admin',
+        waitlist: 'Guna Sekarang',
       },
       hero: {
         badge: 'Platform Pengurusan Tenaga Kerja Global',
@@ -690,7 +690,7 @@ const resources = {
         features: 'Soluciones',
         about: 'Descargar App Móvil',
         docs: 'Docs API',
-        waitlist: 'Entrar al Admin',
+        waitlist: 'Usar ahora',
       },
       hero: {
         badge: 'Plataforma de Gestión de Personal Global',
@@ -779,7 +779,7 @@ const resources = {
         features: 'Soluções',
         about: 'Descarregar App Móvel',
         docs: 'Docs API',
-        waitlist: 'Entrar no Admin',
+        waitlist: 'Usar agora',
       },
       hero: {
         badge: 'Plataforma de Gestão de Força de Trabalho Global',
