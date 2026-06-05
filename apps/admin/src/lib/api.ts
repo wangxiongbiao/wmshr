@@ -13,6 +13,7 @@ import {
   AttendanceRuleRelatedEmployee,
   DashboardData,
   Employee,
+  EmployeeAppAccountResponse,
   EmployeeDetail,
   EmployeeListFilters,
   EmployeeListPage,
@@ -134,6 +135,23 @@ export async function fetchEmployeesPage(params: EmployeeListFilters & {
 
 export async function fetchEmployeeDetail(employeeId: number): Promise<EmployeeDetail> {
   return request<EmployeeDetail>(`/api/admin/employees/${employeeId}`);
+}
+
+export async function fetchEmployeeAppAccount(employeeId: number): Promise<EmployeeAppAccountResponse> {
+  return request<EmployeeAppAccountResponse>(`/api/admin/employees/${employeeId}/app-account`);
+}
+
+export async function resetEmployeeAppPassword(employeeId: number): Promise<EmployeeAppAccountResponse> {
+  return request<EmployeeAppAccountResponse>(`/api/admin/employees/${employeeId}/app-account/reset-password`, {
+    method: "POST"
+  });
+}
+
+export async function updateEmployeeAppAccountStatus(employeeId: number, status: "active" | "disabled"): Promise<EmployeeAppAccountResponse> {
+  return request<EmployeeAppAccountResponse>(`/api/admin/employees/${employeeId}/app-account/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ status })
+  });
 }
 
 export async function fetchAttendanceRuleOptions(): Promise<AttendanceRuleOption[]> {

@@ -4,7 +4,7 @@
  */
 
 import { useMemo, useState } from "react";
-import { Edit, Plus, Search, Trash2 } from "lucide-react";
+import { Edit, KeyRound, Plus, Search, Trash2 } from "lucide-react";
 import { Employee } from "../types";
 import { cn, COUNTRY_FLAGS, COUNTRY_NAMES, formatCurrency } from "../lib/utils";
 
@@ -13,6 +13,7 @@ interface EmployeeListProps {
   loading?: boolean;
   onAddEmployee: () => void;
   onEditEmployee: (emp: Employee) => void;
+  onManageAppAccount: (emp: Employee) => void;
   onDeleteEmployee: (emp: Employee) => void;
 }
 
@@ -36,7 +37,7 @@ function getV2HourlyRate(employee: Employee) {
   return monthlyWage !== null && monthlyWage > 0 ? (monthlyWage / 30) / 8 : null;
 }
 
-export function EmployeeList({ employees, loading = false, onAddEmployee, onEditEmployee, onDeleteEmployee }: EmployeeListProps) {
+export function EmployeeList({ employees, loading = false, onAddEmployee, onEditEmployee, onManageAppAccount, onDeleteEmployee }: EmployeeListProps) {
   const [query, setSearchQuery] = useState("");
 
   // 员工管理按 admin-v2 原型展示：本组件只做 v2 的姓名/职位/区域搜索和卡片渲染，避免把正式后台的多筛选、分页、停用/离职按钮重新带回界面。
@@ -92,6 +93,13 @@ export function EmployeeList({ employees, loading = false, onAddEmployee, onEdit
             return (
               <div key={emp.id} className="glass-panel rounded-xl p-5 hover:shadow-md transition-all duration-300 flex flex-col relative group">
                 <div className="absolute top-4 right-4 flex gap-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={() => onManageAppAccount(emp)}
+                    className="p-1.5 bg-white rounded-lg shadow-sm border border-brand-200 hover:bg-brand-50 text-brand-600"
+                    title="账号管理"
+                  >
+                    <KeyRound className="w-4 h-4" />
+                  </button>
                   <button
                     onClick={() => onEditEmployee(emp)}
                     className="p-1.5 bg-white rounded-lg shadow-sm border border-slate-200 hover:bg-slate-50 text-slate-600"

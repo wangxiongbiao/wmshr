@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import dotenv from "dotenv";
 import express from "express";
 import { createClient } from "@supabase/supabase-js";
@@ -15,6 +16,9 @@ const PORT = Number(process.env.ADMIN_API_PORT || 8788);
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY;
+const EMPLOYEE_APP_DEFAULT_PASSWORD = "Aa123456";
+const EMPLOYEE_APP_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 30;
+const EMPLOYEE_APP_TOKEN_SECRET = process.env.EMPLOYEE_APP_TOKEN_SECRET || SUPABASE_SERVICE_ROLE_KEY || SUPABASE_PUBLISHABLE_KEY || "wmshr-local-mobile-token-secret";
 
 if (!SUPABASE_URL || (!SUPABASE_SERVICE_ROLE_KEY && !SUPABASE_PUBLISHABLE_KEY)) {
   throw new Error("Missing SUPABASE_URL and a usable Supabase API key in apps/admin/.env or Vercel environment variables");
@@ -216,6 +220,205 @@ function mapEmployeeRow(row, ruleMap = new Map()) {
     currency: row.currency,
     photo: row.photo,
     isDeleted: row.is_deleted
+  };
+}
+
+function mapEmployeeAppAccountRow(row) {
+  return {
+    id: Number(row.id),
+    employeeId: Number(row.employee_id),
+    employeeName: row.employee_name || "",
+    account: row.account,
+    status: row.status,
+    lastLoginAt: row.last_login_at,
+    passwordUpdatedAt: row.password_updated_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function hashEmployeeAppPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
+  // 员工 App 密码不接 Supabase Auth；第一版由后端自管 hash，避免后台 Google 管理员账号和员工账号混用。
+  const derived = crypto.pbkdf2Sync(String(password), salt, 120000, 32, "sha256").toString("hex");
+  return `pbkdf2_sha256$120000$${salt}$${derived}`;
+}
+
+function verifyEmployeeAppPassword(password, storedHash) {
+  const [algorithm, iterations, salt, expected] = String(storedHash || "").split("$");
+  if (algorithm !== "pbkdf2_sha256" || !iterations || !salt || !expected) {
+    return false;
+  }
+
+  const actual = crypto.pbkdf2Sync(String(password), salt, Number(iterations), 32, "sha256").toString("hex");
+  return crypto.timingSafeEqual(Buffer.from(actual, "hex"), Buffer.from(expected, "hex"));
+}
+
+function signEmployeeAppToken(payload) {
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const signature = crypto.createHmac("sha256", EMPLOYEE_APP_TOKEN_SECRET).update(body).digest("base64url");
+  return `${body}.${signature}`;
+}
+
+function generateEmployeeAppToken(accountRow) {
+  const expiresAt = Date.now() + EMPLOYEE_APP_TOKEN_TTL_MS;
+  // token 只承载员工账号定位字段；所有敏感状态仍以后端数据库为准，后续需要鉴权接口时必须复查 account status。
+  return {
+    token: signEmployeeAppToken({
+      accountId: Number(accountRow.id),
+      ownerUserId: accountRow.owner_user_id,
+      employeeId: Number(accountRow.employee_id),
+      expiresAt
+    }),
+    expiresAt: new Date(expiresAt).toISOString()
+  };
+}
+
+function buildEmployeeAppAccountName(employeeRow) {
+  // 第一版默认用员工编号作为 App 账号，保证 Admin 看到的账号和员工列表中的员工编号稳定对应。
+  return String(employeeRow.employee_no || `emp-${employeeRow.id}`).trim();
+}
+
+async function ensureEmployeeAppAccount(employeeRow, ownerUserId) {
+  const now = new Date().toISOString();
+  const account = buildEmployeeAppAccountName(employeeRow);
+  const { data, error } = await supabase
+    .from("employee_app_accounts")
+    .upsert({
+      owner_user_id: ownerUserId,
+      employee_id: Number(employeeRow.id),
+      account,
+      password_hash: hashEmployeeAppPassword(EMPLOYEE_APP_DEFAULT_PASSWORD),
+      status: employeeRow.status === "disabled" || employeeRow.status === "resigned" ? "disabled" : "active",
+      password_updated_at: now,
+      updated_at: now
+    }, {
+      onConflict: "owner_user_id,employee_id",
+      ignoreDuplicates: true
+    })
+    .select("*, employees(name)")
+    .single();
+
+  if (error && error.code !== "PGRST116") {
+    throw error;
+  }
+
+  return data ? mapEmployeeAppAccountRow({ ...data, employee_name: data.employees?.name }) : null;
+}
+
+async function fetchEmployeeAppAccount(employeeId, ownerUserId) {
+  const { data: employeeRow, error: employeeError } = await supabase
+    .from("employees")
+    .select("id, employee_no, name, status")
+    .eq("owner_user_id", ownerUserId)
+    .eq("id", employeeId)
+    .single();
+
+  if (employeeError) {
+    throw employeeError;
+  }
+
+  const { data: accountRow, error: accountError } = await supabase
+    .from("employee_app_accounts")
+    .select("*, employees(name)")
+    .eq("owner_user_id", ownerUserId)
+    .eq("employee_id", employeeId)
+    .maybeSingle();
+
+  if (accountError) {
+    throw accountError;
+  }
+
+  if (accountRow) {
+    return mapEmployeeAppAccountRow({ ...accountRow, employee_name: accountRow.employees?.name });
+  }
+
+  return await ensureEmployeeAppAccount(employeeRow, ownerUserId);
+}
+
+async function resetEmployeeAppPassword(employeeId, ownerUserId) {
+  await fetchEmployeeAppAccount(employeeId, ownerUserId);
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("employee_app_accounts")
+    .update({
+      password_hash: hashEmployeeAppPassword(EMPLOYEE_APP_DEFAULT_PASSWORD),
+      password_updated_at: now,
+      updated_at: now
+    })
+    .eq("owner_user_id", ownerUserId)
+    .eq("employee_id", employeeId)
+    .select("*, employees(name)")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return {
+    account: mapEmployeeAppAccountRow({ ...data, employee_name: data.employees?.name }),
+    defaultPassword: EMPLOYEE_APP_DEFAULT_PASSWORD
+  };
+}
+
+async function setEmployeeAppAccountStatus(employeeId, ownerUserId, status) {
+  if (!["active", "disabled"].includes(status)) {
+    throw new Error("员工 App 账号状态不合法");
+  }
+
+  await fetchEmployeeAppAccount(employeeId, ownerUserId);
+  const { data, error } = await supabase
+    .from("employee_app_accounts")
+    .update({ status, updated_at: new Date().toISOString() })
+    .eq("owner_user_id", ownerUserId)
+    .eq("employee_id", employeeId)
+    .select("*, employees(name)")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return mapEmployeeAppAccountRow({ ...data, employee_name: data.employees?.name });
+}
+
+async function authenticateEmployeeAppAccount(account, password) {
+  const normalizedAccount = String(account || "").trim();
+  const { data: rows, error } = await supabase
+    .from("employee_app_accounts")
+    .select("*, employees(*)")
+    .eq("account", normalizedAccount);
+
+  if (error) {
+    throw error;
+  }
+
+  if (!rows || rows.length === 0) {
+    throw new Error("账号或密码错误");
+  }
+  if (rows.length > 1) {
+    throw new Error("App 账号重复，请联系后台管理员处理");
+  }
+
+  const row = rows[0];
+  if (row.status !== "active" || ["disabled", "resigned"].includes(row.employees?.status)) {
+    throw new Error("账号已停用，请联系管理员");
+  }
+  if (!verifyEmployeeAppPassword(password, row.password_hash)) {
+    throw new Error("账号或密码错误");
+  }
+
+  const { error: updateError } = await supabase
+    .from("employee_app_accounts")
+    .update({ last_login_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq("id", row.id);
+
+  if (updateError) {
+    throw updateError;
+  }
+
+  const token = generateEmployeeAppToken(row);
+  return {
+    ...token,
+    employee: mapEmployeeRow(row.employees)
   };
 }
 
@@ -541,6 +744,7 @@ function getV2AttendanceStatusLabel(row) {
   const statusLabelMap = {
     normal: "正常",
     leave: "假期",
+    sick_leave: "病假",
     absent: "缺勤",
     manual_adjusted: "人工调整",
     exception: "异常"
@@ -690,6 +894,17 @@ function mapPayrollResultRow(row, employeeMap = new Map()) {
   };
 }
 
+function buildPayrollPreviewRow(payload) {
+  // 薪资主列表以“当前在职员工 + 当月考勤汇总”为主；未生成工资条时没有 monthly_payroll_results.id。
+  // 预览行使用稳定负数 id：前端表格 key 不会重复，同时仍可用 id > 0 判断是否是真实工资结果主键。
+  return {
+    ...payload,
+    id: -Number(payload.employee_id),
+    created_at: payload.calculated_at,
+    updated_at: payload.calculated_at,
+    confirmed_at: null
+  };
+}
 
 function getMonthEndDate(yearMonth) {
   return getMonthRange(yearMonth).periodEndDate;
@@ -1052,7 +1267,8 @@ async function recalculateMonthlyAttendance(yearMonth, ownerUserId, targetEmploy
       record_count: rows.filter((row) => row.attendance_record_id !== null).length,
       exception_count: rows.filter((row) => row.has_exception).length,
       absent_count: rows.filter((row) => row.status === "absent").length,
-      leave_count: rows.filter((row) => row.status === "leave").length,
+      // 病假不计工时，但月汇总仍归入请假类计数；若后续要单独统计病假，应先给 monthly_attendance_summaries 增加独立字段。
+      leave_count: rows.filter((row) => row.status === "leave" || row.status === "sick_leave").length,
       manual_adjusted_count: rows.filter((row) => row.status === "manual_adjusted").length,
       can_generate_payroll: rows.every((row) => !row.has_exception),
       blocked_reason: rows.every((row) => !row.has_exception) ? null : "存在未处理异常考勤记录",
@@ -1345,29 +1561,9 @@ async function upsertMonthlyPayrollResult(payload) {
   return data;
 }
 
-async function calculateMonthlyPayroll(employeeId, yearMonth, ownerUserId, { skipExisting = false, forceRecalculate = false } = {}) {
-  // 薪资生成入口先校验员工状态，防止前端或历史按钮显式传 employeeId 时绕过批量接口过滤。
-  await assertEmployeeAvailableForAttendanceAndPayroll(employeeId, ownerUserId);
-  await recalculateMonthlyAttendance(yearMonth, ownerUserId, Number(employeeId));
-
-  const context = await getPayrollSourceContext(employeeId, yearMonth, ownerUserId);
+function buildMonthlyPayrollPayloadFromContext(context, yearMonth, ownerUserId, { forceRecalculate = false, previewOnly = false } = {}) {
   const { employee, salaryProfile, attendanceSummary, adjustmentItems, dailyCalculations, ruleFeeMap, existingPayrollResult } = context;
-
-  if (skipExisting && existingPayrollResult) {
-    return {
-      row: existingPayrollResult,
-      skipped: true
-    };
-  }
-
-  const lockError = getPayrollResultLockError(existingPayrollResult);
-  if (lockError) {
-    throw new Error(lockError);
-  }
-
-  const employeeMap = new Map([[Number(employee.id), employee]]);
   const salaryConfig = buildPayrollSalaryConfig(employee, salaryProfile);
-
   const allowanceTotal = sumBy(adjustmentItems, (item) => item.type === "allowance");
   const deductionTotal = sumBy(adjustmentItems, (item) => item.type === "deduction");
   const otherTotal = sumBy(adjustmentItems, (item) => item.type === "other");
@@ -1391,8 +1587,9 @@ async function calculateMonthlyPayroll(employeeId, yearMonth, ownerUserId, { ski
   const grossPay = roundToTwo(basePay + overtimePay + attendanceBonus + allowanceTotal + otherTotal);
   const totalDeduction = roundToTwo(socialSecurity + deductionTotal);
   const netPay = roundToTwo(grossPay - totalDeduction);
+  const isBlockedByAttendance = attendanceSummary?.can_generate_payroll === false;
 
-  const row = await upsertMonthlyPayrollResult({
+  return {
     employee_id: Number(employee.id),
     owner_user_id: ownerUserId,
     year_month: yearMonth,
@@ -1412,13 +1609,43 @@ async function calculateMonthlyPayroll(employeeId, yearMonth, ownerUserId, { ski
     gross_pay: grossPay,
     total_deduction: totalDeduction,
     net_pay: netPay,
-    calculation_status: "calculated",
+    // 列表预览行必须体现考勤异常，真实生成入口会再次硬拦截，避免 UI 和后端业务规则分叉。
+    calculation_status: isBlockedByAttendance ? "blocked" : (previewOnly ? "draft" : "calculated"),
     review_status: forceRecalculate || existingPayrollResult ? "pending" : (existingPayrollResult?.review_status || "pending"),
-    blocked_reason: null,
-    calculated_at: new Date().toISOString(),
+    blocked_reason: isBlockedByAttendance ? (attendanceSummary.blocked_reason || "存在未处理异常考勤记录") : null,
+    calculated_at: previewOnly ? null : new Date().toISOString(),
     confirmed_at: existingPayrollResult?.calculation_status === "confirmed" ? existingPayrollResult.confirmed_at : null,
     updated_at: new Date().toISOString()
-  });
+  };
+}
+
+async function calculateMonthlyPayroll(employeeId, yearMonth, ownerUserId, { skipExisting = false, forceRecalculate = false } = {}) {
+  // 薪资生成入口先校验员工状态，防止前端或历史按钮显式传 employeeId 时绕过批量接口过滤。
+  await assertEmployeeAvailableForAttendanceAndPayroll(employeeId, ownerUserId);
+  await recalculateMonthlyAttendance(yearMonth, ownerUserId, Number(employeeId));
+
+  const context = await getPayrollSourceContext(employeeId, yearMonth, ownerUserId);
+  const { employee, attendanceSummary, existingPayrollResult } = context;
+
+  if (skipExisting && existingPayrollResult) {
+    return {
+      row: existingPayrollResult,
+      skipped: true
+    };
+  }
+
+  // 考勤汇总是薪资生成的前置契约：有未处理异常时，后端必须硬拦截，不能只靠前端按钮状态提示。
+  if (attendanceSummary?.can_generate_payroll === false) {
+    throw new Error(attendanceSummary.blocked_reason || "存在未处理异常考勤记录，不能生成工资");
+  }
+
+  const lockError = getPayrollResultLockError(existingPayrollResult);
+  if (lockError) {
+    throw new Error(lockError);
+  }
+
+  const employeeMap = new Map([[Number(employee.id), employee]]);
+  const row = await upsertMonthlyPayrollResult(buildMonthlyPayrollPayloadFromContext(context, yearMonth, ownerUserId, { forceRecalculate }));
 
   return {
     row,
@@ -1532,6 +1759,8 @@ async function createEmployeeRecord(payload, authUser) {
 
 
   await ensureSalaryProfileForEmployee(employeeRow, ownerUserId, payload.salaryEffectiveStartDate || payload.joinDate);
+  // 每次新增员工必须同步初始化一个员工端 App 账号；账号默认取员工编号，密码统一为 Aa123456，确保 Admin 创建员工后可立即复制给员工登录。
+  await ensureEmployeeAppAccount(employeeRow, ownerUserId);
   return Number(employeeRow.id);
 }
 
@@ -1934,6 +2163,22 @@ app.get("/api/public/google-auth-url", async (req, res) => {
   } catch (error) {
     console.error("Create google auth url failed", error);
     res.status(500).json({ error: error.message || "生成 Google 授权地址失败" });
+  }
+});
+
+app.post("/api/mobile/auth/login", async (req, res) => {
+  try {
+    const account = String(req.body?.account || "").trim();
+    const password = String(req.body?.password || "");
+
+    if (!account || !password) {
+      return res.status(400).json({ error: "请输入 App 账号和密码" });
+    }
+
+    const result = await authenticateEmployeeAppAccount(account, password);
+    res.json(result);
+  } catch (error) {
+    res.status(401).json({ error: error.message || "员工端登录失败" });
   }
 });
 
@@ -2817,62 +3062,70 @@ app.get("/api/admin/payroll-results", async (req, res) => {
       return res.status(400).json({ error: "yearMonth 必须为 YYYY-MM" });
     }
 
-    const payrollResult = await supabase
-      .from("monthly_payroll_results")
-      .select("*")
-      .eq("owner_user_id", ownerUserId)
-      .eq("year_month", yearMonth)
-      .order("id", { ascending: true });
     const employeesResult = await supabase
       .from("employees")
       .select("*")
-      .eq("owner_user_id", ownerUserId);
+      .eq("owner_user_id", ownerUserId)
+      .eq("is_deleted", false)
+      .order("id", { ascending: true });
 
-    if (payrollResult.error) {
-      throw payrollResult.error;
-    }
     if (employeesResult.error) {
       throw employeesResult.error;
     }
 
-    const employeeMap = new Map(employeesResult.data.map((row) => [Number(row.id), row]));
     const employeeId = req.query.employeeId ? Number(req.query.employeeId) : null;
     const keyword = String(req.query.keyword || "").trim().toLowerCase();
     const salaryType = String(req.query.salaryType || "all");
     const calculationStatus = String(req.query.calculationStatus || "all");
     const reviewStatus = String(req.query.reviewStatus || "all");
+    const targetEmployees = employeesResult.data.filter((employee) => {
+      // 薪资核算主列表必须以当前可参与考勤/薪资的员工为准；历史停用/离职员工的工资结果只保留在库里，不进入当期工作流。
+      if (!isEmployeeAvailableForAttendanceAndPayroll(employee)) {
+        return false;
+      }
+      if (employeeId && Number(employee.id) !== employeeId) {
+        return false;
+      }
+      return true;
+    });
+    const employeeMap = new Map(targetEmployees.map((row) => [Number(row.id), row]));
+    const rows = [];
 
-    const rows = payrollResult.data
-      .map((row) => mapPayrollResultRow(row, employeeMap))
-      .filter((row) => {
-        if (employeeId && row.employeeId !== employeeId) {
-          return false;
-        }
-        if (keyword) {
-          const employee = employeeMap.get(row.employeeId);
-          const haystack = [
-            row.employeeName,
-            row.employeeNo || "",
-            employee?.name || "",
-            employee?.employee_no || ""
-          ].join(" ").toLowerCase();
-          if (!haystack.includes(keyword)) {
-            return false;
-          }
-        }
-        if (salaryType !== "all" && row.salaryType !== salaryType) {
-          return false;
-        }
-        if (calculationStatus !== "all" && row.calculationStatus !== calculationStatus) {
-          return false;
-        }
-        if (reviewStatus !== "all" && row.reviewStatus !== reviewStatus) {
-          return false;
-        }
-        return true;
-      });
+    for (const employee of targetEmployees) {
+      const context = await getPayrollSourceContext(Number(employee.id), yearMonth, ownerUserId);
+      const mappedRow = context.existingPayrollResult
+        ? mapPayrollResultRow(context.existingPayrollResult, employeeMap)
+        : mapPayrollResultRow(buildPayrollPreviewRow(buildMonthlyPayrollPayloadFromContext(context, yearMonth, ownerUserId, { previewOnly: true })), employeeMap);
+      rows.push(mappedRow);
+    }
 
-    res.json(rows);
+    const filteredRows = rows.filter((row) => {
+      if (keyword) {
+        const employee = employeeMap.get(row.employeeId);
+        const haystack = [
+          row.employeeName,
+          row.employeeNo || "",
+          employee?.name || "",
+          employee?.nickname || "",
+          employee?.employee_no || ""
+        ].join(" ").toLowerCase();
+        if (!haystack.includes(keyword)) {
+          return false;
+        }
+      }
+      if (salaryType !== "all" && row.salaryType !== salaryType) {
+        return false;
+      }
+      if (calculationStatus !== "all" && row.calculationStatus !== calculationStatus) {
+        return false;
+      }
+      if (reviewStatus !== "all" && row.reviewStatus !== reviewStatus) {
+        return false;
+      }
+      return true;
+    });
+
+    res.json(filteredRows);
   } catch (error) {
     res.status(500).json({ error: error.message || "薪酬结果加载失败" });
   }
@@ -3772,6 +4025,34 @@ app.get("/api/admin/employees/:id", async (req, res) => {
     res.json(detail);
   } catch (error) {
     res.status(500).json({ error: error.message || "员工详情加载失败" });
+  }
+});
+
+app.get("/api/admin/employees/:id/app-account", async (req, res) => {
+  try {
+    const account = await fetchEmployeeAppAccount(Number(req.params.id), req.authUser.id);
+    res.json({ account, defaultPassword: EMPLOYEE_APP_DEFAULT_PASSWORD });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "员工 App 账号加载失败" });
+  }
+});
+
+app.post("/api/admin/employees/:id/app-account/reset-password", async (req, res) => {
+  try {
+    // 重置密码固定回到第一版初始密码，方便 Admin 在弹窗里一键复制账号密码给员工。
+    const result = await resetEmployeeAppPassword(Number(req.params.id), req.authUser.id);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "重置员工 App 密码失败" });
+  }
+});
+
+app.patch("/api/admin/employees/:id/app-account/status", async (req, res) => {
+  try {
+    const account = await setEmployeeAppAccountStatus(Number(req.params.id), req.authUser.id, req.body?.status);
+    res.json({ account, defaultPassword: EMPLOYEE_APP_DEFAULT_PASSWORD });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "更新员工 App 账号状态失败" });
   }
 });
 

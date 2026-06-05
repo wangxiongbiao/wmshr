@@ -3,12 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { ShieldCheck } from "lucide-react";
-
 interface AuthScreenProps {
   loading?: boolean;
   onGoogleLogin: () => void;
   error?: string;
+}
+
+function DutylixLogoMark() {
+  // 登录页、侧边栏和门户共用同一品牌图标；这里不要再使用旧后台盾牌图标，避免品牌入口不一致。
+  return <img src="/dutylix-icon.svg" alt="" aria-hidden="true" className="w-12 h-12" />;
 }
 
 function GoogleIcon() {
@@ -29,12 +32,12 @@ export function AuthScreen({ loading = false, onGoogleLogin, error }: AuthScreen
         <section className="glass-panel rounded-3xl p-10 lg:p-12 relative overflow-hidden">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(37,99,235,0.08),_transparent_38%),radial-gradient(circle_at_bottom_right,_rgba(14,165,233,0.08),_transparent_30%)] pointer-events-none" />
           <div className="relative">
-            <div className="w-12 h-12 rounded-2xl bg-brand-600 text-white flex items-center justify-center shadow-lg shadow-brand-600/20 mb-6">
-              <ShieldCheck className="w-6 h-6" />
+            <div className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg shadow-brand-600/20 mb-6">
+              <DutylixLogoMark />
             </div>
-            <p className="text-sm font-medium text-brand-700 mb-3">WMSHR Admin</p>
+            <p className="text-sm font-medium text-brand-700 mb-3">DUTYLIX Admin</p>
             <h1 className="text-4xl font-bold text-slate-900 leading-tight">
-              只允许通过 Google 账号进入后台管理端
+              DUTYLIX考勤与薪资自动运行
             </h1>
             <p className="mt-5 text-slate-600 text-base leading-7 max-w-xl">
               登录后才会加载员工、考勤和薪资模块数据。本后台当前接入的是 Supabase Auth，

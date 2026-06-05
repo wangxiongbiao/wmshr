@@ -16,6 +16,7 @@ import {
   fetchPayrollResultDetail,
   fetchPayrollResults,
   generateMonthlyPayroll,
+  generateOnePayroll,
   rejectPayrollResult,
 } from "../lib/api";
 import { useDialog } from "./DialogProvider";
@@ -180,12 +181,20 @@ export function PayrollTable({ employees }: PayrollTableProps) {
   const openPayslip = async (result: MonthlyPayrollResult) => {
     setSubmitting(true);
     try {
-      const nextDetail = await fetchPayrollResultDetail(result.id);
+      if (result.calculationStatus === "blocked") {
+        setError(result.blockedReason || "存在未处理异常考勤记录，不能生成工资条");
+        return;
+      }
+      // 薪资列表现在会返回“在职员工 + 考勤汇总”的待生成预览行；预览行没有真实结果 id，必须先单人工资生成再拉详情。
+      // 不能直接拿 id=0 调详情接口，否则会重新暴露旧的“只有已生成结果才可进入工资条”的断层。
+      const sourceResult = result.id > 0 ? result : await generateOnePayroll(result.employeeId, result.yearMonth);
+      const nextDetail = await fetchPayrollResultDetail(sourceResult.id);
       // v2 工资条是发放签收入口，必须用详情接口拿到员工、薪资项和汇总，不能用列表行直接确认。
       setPayslipDetail(nextDetail);
       setSignName("");
-      setIsCashPaid(result.calculationStatus === "confirmed");
+      setIsCashPaid(sourceResult.calculationStatus === "confirmed");
       setIsPayslipOpen(true);
+      await loadData();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "工资条加载失败");
     } finally {
@@ -363,6 +372,9 @@ export function PayrollTable({ employees }: PayrollTableProps) {
   const payslipEmployee = payslipDetail?.employee || null;
   const payslipWorkingDays = payslipResult && payslipResult.standardHours > 0 ? Math.round(payslipResult.validHours / payslipResult.standardHours) : 0;
   const payslipTaxOrDeduction = payslipResult ? Math.max(0, payslipResult.totalDeduction - payslipResult.socialSecurityAmount) : 0;
+  const payslipBaseSalary = payslipResult
+    ? (payslipResult.salaryType === "fixed" ? payslipResult.fixedSalary || 0 : payslipResult.hourlyPay)
+    : 0;
 
 
   return (
@@ -555,6 +567,8 @@ export function PayrollTable({ employees }: PayrollTableProps) {
                     // v2 原型展示“上班天数”；正式接口当前给的是月度汇总工时，因此按标准工时折算天数，后续接口若返回天数再直接替换这里。
                     const workingDays = item.standardHours > 0 ? Math.round(item.validHours / item.standardHours) : 0;
                     const isPaid = item.calculationStatus === "confirmed";
+                    const isBlocked = item.calculationStatus === "blocked";
+                    const isDraft = item.calculationStatus === "draft";
                     const baseSalary = item.salaryType === "fixed"
                       ? formatCurrency(item.fixedSalary || 0, item.currency)
                       : formatCurrency(item.hourlyPay, item.currency);
@@ -608,23 +622,30 @@ export function PayrollTable({ employees }: PayrollTableProps) {
                             <div className="flex items-center justify-center gap-1.5">
                               <span className={cn(
                                 "inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-lg border",
-                                isPaid ? "text-emerald-700 bg-emerald-50 border-emerald-100" : "text-amber-700 bg-amber-50 border-amber-100"
+                                isPaid
+                                  ? "text-emerald-700 bg-emerald-50 border-emerald-100"
+                                  : isBlocked
+                                    ? "text-rose-700 bg-rose-50 border-rose-100"
+                                    : "text-amber-700 bg-amber-50 border-amber-100"
                               )}>
                                 {isPaid ? <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse" /> : null}
-                                {isPaid ? "已发放" : "待发放"}
+                                {isPaid ? "已发放" : isBlocked ? "考勤异常" : isDraft ? "待生成" : "待发放"}
                               </span>
                               <button
                                 onClick={() => void openPayslip(item)}
-                                disabled={submitting}
+                                disabled={submitting || isBlocked}
                                 className={cn(
                                   "px-2.5 py-1 text-xs font-semibold rounded-lg transition flex items-center gap-1 disabled:opacity-50",
-                                  isPaid
+                                  isBlocked
+                                    ? "text-rose-600 bg-rose-50 border border-rose-100 cursor-not-allowed"
+                                    : isPaid
                                     ? "text-brand-700 bg-brand-50 border border-brand-100 hover:bg-brand-100"
                                     : "text-white bg-brand-600 hover:bg-brand-700 shadow-sm hover:shadow"
                                 )}
+                                title={isBlocked ? item.blockedReason || "存在未处理异常考勤记录" : undefined}
                               >
                                 <Receipt className="w-3 h-3" />
-                                <span>{isPaid ? "查看工资条" : "生成工资条"}</span>
+                                <span>{isBlocked ? "先处理考勤" : isPaid ? "查看工资条" : "生成工资条"}</span>
                               </button>
                             </div>
                           </div>
@@ -733,7 +754,8 @@ export function PayrollTable({ employees }: PayrollTableProps) {
             <div className="space-y-2 text-xs">
               <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">应纳发计算说明</p>
               <div className="space-y-2 rounded-lg bg-slate-50 p-3 font-mono">
-                <div className="flex justify-between"><span className="text-slate-500">计算基薪:</span><span className="font-bold text-slate-800 text-right">{formatCurrency(payslipResult.hourlyPay, payslipResult.currency)}</span></div>
+                {/* 工资条弹窗必须和列表共用同一基薪口径：月薪看 fixedSalary，时薪看本月标准工时工资，避免月薪员工 hourlyPay 为 0 时弹窗误显示 0。 */}
+                <div className="flex justify-between"><span className="text-slate-500">计算基薪:</span><span className="font-bold text-slate-800 text-right">{formatCurrency(payslipBaseSalary, payslipResult.currency)}</span></div>
                 <div className="flex justify-between"><span className="text-slate-500">加班应得:</span><span className="font-bold text-green-600 text-right">+ {formatCurrency(payslipResult.overtimePay, payslipResult.currency)}</span></div>
                 <div className="flex justify-between"><span className="text-slate-500">补贴/其他:</span><span className="font-bold text-slate-800 text-right">+ {formatCurrency(payslipResult.allowanceTotal + payslipResult.otherTotal, payslipResult.currency)}</span></div>
                 <div className="flex justify-between"><span className="text-slate-500">社保扣款:</span><span className="text-red-500 text-right">- {formatCurrency(payslipResult.socialSecurityAmount, payslipResult.currency)}</span></div>

@@ -161,13 +161,14 @@ export function calculateDailyAttendanceRow(employee, record, config, date, owne
     });
   }
 
-  if (record.type === "leave" || record.type === "absent") {
+  if (record.type === "leave" || record.type === "sick_leave" || record.type === "absent") {
     return buildAttendanceResultPayload({
       ownerUserId,
       employeeId,
       date,
       record,
       config: normalizedConfig,
+      // 病假和普通假期一样不参与工时/费用计算，但保留独立状态给后台列表展示，避免被混成“假期”。
       status: record.type,
       hasException: false,
       exceptionReason: null

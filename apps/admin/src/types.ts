@@ -14,11 +14,11 @@ export type SalaryAdjustmentType = 'allowance' | 'deduction' | 'other';
 export type PayrollCalculationStatus = 'draft' | 'calculated' | 'blocked' | 'confirmed';
 export type PayrollReviewStatus = 'pending' | 'approved' | 'rejected';
 
-export type AttendanceType = 'normal' | 'late' | 'early' | 'absent' | 'leave' | 'overtime';
+export type AttendanceType = 'normal' | 'late' | 'early' | 'absent' | 'leave' | 'sick_leave' | 'overtime';
 
 export type AttendanceSource = 'manual' | 'device' | 'import' | 'system';
 
-export type AttendanceCalculationStatus = 'normal' | 'leave' | 'absent' | 'manual_adjusted' | 'exception';
+export type AttendanceCalculationStatus = 'normal' | 'leave' | 'sick_leave' | 'absent' | 'manual_adjusted' | 'exception';
 
 export type EmployeeStatus = 'active' | 'on_leave' | 'probation' | 'disabled' | 'resigned';
 
@@ -59,6 +59,23 @@ export interface Employee {
   status: EmployeeStatus;
   photo: string | null;
   isDeleted: boolean;
+}
+
+export interface EmployeeAppAccount {
+  id: number;
+  employeeId: number;
+  employeeName: string;
+  account: string;
+  status: 'active' | 'disabled';
+  lastLoginAt: string | null;
+  passwordUpdatedAt: string;
+  updatedAt: string;
+}
+
+export interface EmployeeAppAccountResponse {
+  account: EmployeeAppAccount;
+  // 第一版 Admin 只展示固定初始/重置密码，后端不保存明文；复制时以该字段作为交付给员工的密码。
+  defaultPassword: string;
 }
 
 export interface SopAttachment {

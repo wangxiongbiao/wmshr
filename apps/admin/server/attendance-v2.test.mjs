@@ -36,6 +36,16 @@ function normalRecord(overrides = {}) {
   assert.equal(row.total_pay, 0);
 }
 
+// 病假属于非出勤类考勤：不产生工时和费用，但必须保留 sick_leave 状态供后台列表区分普通假期。
+{
+  const row = calculateDailyAttendanceRow(baseEmployee(), normalRecord({ type: "sick_leave", in_time: "08:30", out_time: "17:30", source: "manual" }), DEFAULT_ATTENDANCE_CONFIG, date, ownerUserId);
+  assert.equal(row.status, "sick_leave");
+  assert.equal(row.valid_hours, 0);
+  assert.equal(row.work_pay, 0);
+  assert.equal(row.overtime_pay, 0);
+  assert.equal(row.total_pay, 0);
+}
+
 // v2 加班直接使用原始超出标准工时，不再沿用旧规则里的 0.5 小时向下取整。
 {
   const row = calculateDailyAttendanceRow(baseEmployee({ hourly_rate: 80 }), normalRecord({ out_time: "18:45" }), DEFAULT_ATTENDANCE_CONFIG, date, ownerUserId);

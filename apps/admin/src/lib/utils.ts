@@ -98,7 +98,7 @@ export function calculateShiftStandardHours({
 }
 
 export function calcAttendanceDetails(rec: AttendanceRecord, config: AppConfig): AttendanceDetails {
-  if (!rec.inTime || !rec.outTime || rec.type === 'absent' || rec.type === 'leave') {
+  if (!rec.inTime || !rec.outTime || rec.type === 'absent' || rec.type === 'leave' || rec.type === 'sick_leave') {
     return { raw: 0, valid: 0, standard: config.standardHours, ot: 0 };
   }
 

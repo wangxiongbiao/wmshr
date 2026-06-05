@@ -10,3 +10,9 @@ export interface EmployeeProfile {
   dept: string;
   status: 'active' | 'on_leave' | 'probation' | 'disabled' | 'resigned';
 }
+
+export interface MobileLoginResponse {
+  token: string;
+  expiresAt: string;
+  employee: EmployeeProfile;
+}

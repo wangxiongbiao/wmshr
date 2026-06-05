@@ -16,5 +16,9 @@
     "build:home": "npm --workspace @wmshr/home run build",
     "lint": "npm run lint --workspaces --if-present",
     "build": "npm run build --workspaces --if-present"
+  },
+  "overrides": {
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
   }
 }

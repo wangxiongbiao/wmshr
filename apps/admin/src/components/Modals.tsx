@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Upload, Trash2, UserX, UserRoundMinus } from "lucide-react";
+import { Copy, RefreshCw, ToggleLeft, ToggleRight, Upload, Trash2, UserX, UserRoundMinus } from "lucide-react";
 import {
   AppConfig,
   AttendanceRecord,
@@ -11,6 +11,7 @@ import {
   AttendanceRuleFormData,
   AttendanceRuleRelatedEmployee,
   Employee,
+  EmployeeAppAccountResponse,
   EmployeeStatus,
   EmployeeUpsertPayload,
   SalaryType
@@ -323,6 +324,104 @@ export function EmployeeModal({
           </div>
         </div>
       </form>
+    </Modal>
+  );
+}
+
+interface EmployeeAppAccountModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  employee: Employee | null;
+  accountResponse: EmployeeAppAccountResponse | null;
+  loading?: boolean;
+  actionLoading?: boolean;
+  onResetPassword: () => void;
+  onToggleStatus: () => void;
+  onCopyCredential: () => void;
+}
+
+export function EmployeeAppAccountModal({
+  isOpen,
+  onClose,
+  employee,
+  accountResponse,
+  loading = false,
+  actionLoading = false,
+  onResetPassword,
+  onToggleStatus,
+  onCopyCredential
+}: EmployeeAppAccountModalProps) {
+  const account = accountResponse?.account;
+  const isDisabled = account?.status === "disabled";
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="员工 App 账号管理"
+      className="max-w-lg"
+      footer={(
+        <div className="flex w-full justify-end gap-3">
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-500 hover:bg-slate-100 rounded-lg transition">关闭</button>
+        </div>
+      )}
+    >
+      {loading ? (
+        <div className="py-10 text-center text-sm text-slate-500">正在加载员工 App 账号...</div>
+      ) : !employee || !accountResponse || !account ? (
+        <div className="py-10 text-center text-sm text-red-500">账号信息加载失败，请关闭后重试。</div>
+      ) : (
+        <div className="space-y-5">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
+            <div className="grid grid-cols-[88px_1fr] gap-y-3">
+              <span className="text-slate-500">姓名</span>
+              <span className="font-semibold text-slate-800">{employee.name}</span>
+              <span className="text-slate-500">App 账号</span>
+              <span className="font-mono font-semibold text-brand-700">{account.account}</span>
+              <span className="text-slate-500">默认密码</span>
+              <span className="font-mono font-semibold text-slate-800">{accountResponse.defaultPassword}</span>
+              <span className="text-slate-500">账号状态</span>
+              <span className={cn("font-semibold", isDisabled ? "text-amber-600" : "text-green-600")}>{isDisabled ? "已停用" : "可登录"}</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <button
+              type="button"
+              onClick={onCopyCredential}
+              className="flex items-center justify-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-sm font-medium text-brand-700 hover:bg-brand-100"
+            >
+              <Copy className="w-4 h-4" />
+              复制账号密码
+            </button>
+            <button
+              type="button"
+              onClick={onResetPassword}
+              disabled={actionLoading}
+              className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+            >
+              <RefreshCw className="w-4 h-4" />
+              重置密码
+            </button>
+            <button
+              type="button"
+              onClick={onToggleStatus}
+              disabled={actionLoading}
+              className={cn(
+                "flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium disabled:opacity-60",
+                isDisabled ? "border-green-200 bg-green-50 text-green-700 hover:bg-green-100" : "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+              )}
+            >
+              {isDisabled ? <ToggleRight className="w-4 h-4" /> : <ToggleLeft className="w-4 h-4" />}
+              {isDisabled ? "启用" : "停用"}
+            </button>
+          </div>
+
+          <p className="text-xs leading-5 text-slate-500">
+            第一版员工端登录只使用这里的 App 账号和默认/重置密码；后台 Google 管理员账号不与员工账号混用。
+          </p>
+        </div>
+      )}
     </Modal>
   );
 }

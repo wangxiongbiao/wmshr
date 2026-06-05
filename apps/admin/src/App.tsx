@@ -14,6 +14,7 @@ import { PayrollTable } from "./components/PayrollTable";
 import { SopManager } from "./components/SopManager";
 import {
   EmployeeModal,
+  EmployeeAppAccountModal,
   AttendanceRuleModal,
   AttendanceRuleRelatedEmployeesModal,
   AttendanceRuleToggleModal
@@ -25,6 +26,7 @@ import {
   AttendanceRuleFormData,
   AttendanceRuleOption,
   AttendanceRuleRelatedEmployee,
+  EmployeeAppAccountResponse,
   EmployeeUpsertPayload
 } from "./types";
 import { INITIAL_EMPLOYEES } from "./constants";
@@ -39,11 +41,14 @@ import {
   fetchAttendanceRuleDetail,
   fetchAttendanceRuleRelatedEmployees,
   fetchAttendanceRules,
+  fetchEmployeeAppAccount,
   fetchEmployeeDetail,
   fetchEmployees,
   initializeWorkspace,
+  resetEmployeeAppPassword,
   updateAttendanceRule,
   updateEmployee,
+  updateEmployeeAppAccountStatus,
   updateEmployeeStatus
 } from "./lib/api";
 import { AuthScreen } from "./components/AuthScreen";
@@ -106,6 +111,11 @@ export default function App() {
   // Modal States
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
+  const [isEmployeeAppAccountModalOpen, setIsEmployeeAppAccountModalOpen] = useState(false);
+  const [selectedEmployeeForAppAccount, setSelectedEmployeeForAppAccount] = useState<Employee | null>(null);
+  const [employeeAppAccountResponse, setEmployeeAppAccountResponse] = useState<EmployeeAppAccountResponse | null>(null);
+  const [employeeAppAccountLoading, setEmployeeAppAccountLoading] = useState(false);
+  const [employeeAppAccountActionLoading, setEmployeeAppAccountActionLoading] = useState(false);
   const [isAttendanceRuleModalOpen, setIsAttendanceRuleModalOpen] = useState(false);
   const [editingAttendanceRule, setEditingAttendanceRule] = useState<AttendanceRule | null>(null);
   const [isRelatedEmployeesModalOpen, setIsRelatedEmployeesModalOpen] = useState(false);
@@ -456,6 +466,70 @@ export default function App() {
     }
   };
 
+  const openEmployeeAppAccountModal = async (employee: Employee) => {
+    setSelectedEmployeeForAppAccount(employee);
+    setEmployeeAppAccountResponse(null);
+    setIsEmployeeAppAccountModalOpen(true);
+    setEmployeeAppAccountLoading(true);
+    try {
+      const response = await fetchEmployeeAppAccount(employee.id);
+      setEmployeeAppAccountResponse(response);
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : "员工 App 账号加载失败");
+    } finally {
+      setEmployeeAppAccountLoading(false);
+    }
+  };
+
+  const handleResetEmployeeAppPassword = async () => {
+    if (!selectedEmployeeForAppAccount) {
+      return;
+    }
+
+    setEmployeeAppAccountActionLoading(true);
+    try {
+      const response = await resetEmployeeAppPassword(selectedEmployeeForAppAccount.id);
+      setEmployeeAppAccountResponse(response);
+      addToast("员工 App 密码已重置为 Aa123456");
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : "重置员工 App 密码失败");
+    } finally {
+      setEmployeeAppAccountActionLoading(false);
+    }
+  };
+
+  const handleToggleEmployeeAppAccountStatus = async () => {
+    if (!selectedEmployeeForAppAccount || !employeeAppAccountResponse?.account) {
+      return;
+    }
+
+    setEmployeeAppAccountActionLoading(true);
+    try {
+      const nextStatus = employeeAppAccountResponse.account.status === "disabled" ? "active" : "disabled";
+      const response = await updateEmployeeAppAccountStatus(selectedEmployeeForAppAccount.id, nextStatus);
+      setEmployeeAppAccountResponse(response);
+      addToast(nextStatus === "active" ? "员工 App 账号已启用" : "员工 App 账号已停用");
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : "员工 App 账号状态更新失败");
+    } finally {
+      setEmployeeAppAccountActionLoading(false);
+    }
+  };
+
+  const handleCopyEmployeeAppCredential = async () => {
+    if (!employeeAppAccountResponse?.account) {
+      return;
+    }
+
+    const message = `姓名：${selectedEmployeeForAppAccount?.name || employeeAppAccountResponse.account.employeeName}\nApp账号：${employeeAppAccountResponse.account.account}\n密码：${employeeAppAccountResponse.defaultPassword}`;
+    try {
+      await navigator.clipboard.writeText(message);
+      addToast("已复制员工 App 账号密码");
+    } catch {
+      addToast("复制失败，请手动复制弹窗中的账号和密码");
+    }
+  };
+
   const handleSaveEmployee = async (payload: EmployeeUpsertPayload) => {
     setEmployeeSaving(true);
     try {
@@ -703,6 +777,7 @@ export default function App() {
                   loading={employeesLoading}
                   onAddEmployee={openCreateEmployee}
                   onEditEmployee={(employee) => void openEditEmployee(employee)}
+                  onManageAppAccount={(employee) => void openEmployeeAppAccountModal(employee)}
                   onDeleteEmployee={(employee) => void handleDeleteEmployee(employee)}
                 />
               )}
@@ -728,6 +803,18 @@ export default function App() {
         onSave={handleSaveEmployee}
         employee={editingEmployee}
         saving={employeeSaving}
+      />
+
+      <EmployeeAppAccountModal
+        isOpen={isEmployeeAppAccountModalOpen}
+        onClose={() => setIsEmployeeAppAccountModalOpen(false)}
+        employee={selectedEmployeeForAppAccount}
+        accountResponse={employeeAppAccountResponse}
+        loading={employeeAppAccountLoading}
+        actionLoading={employeeAppAccountActionLoading}
+        onResetPassword={() => void handleResetEmployeeAppPassword()}
+        onToggleStatus={() => void handleToggleEmployeeAppAccountStatus()}
+        onCopyCredential={() => void handleCopyEmployeeAppCredential()}
       />
 
       <AttendanceRuleModal

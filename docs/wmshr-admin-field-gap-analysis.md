@@ -398,7 +398,7 @@ export interface AttendanceRecord {
 当前 `AttendanceType`：
 
 ```ts
-export type AttendanceType = 'normal' | 'late' | 'early' | 'absent' | 'leave' | 'overtime';
+export type AttendanceType = 'normal' | 'late' | 'early' | 'absent' | 'leave' | 'sick_leave' | 'overtime';
 ```
 
 当前计算结果 `AttendanceDetails`：

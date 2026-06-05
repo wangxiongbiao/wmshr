@@ -27,12 +27,16 @@ interface AttendanceTableProps {
   employees: Employee[];
 }
 
+const DEFAULT_CREATE_IN_TIME = "08:30";
+const DEFAULT_CREATE_OUT_TIME = "17:30";
+
 const STATUS_META: Record<string, { label: string; className: string }> = {
   normal: { label: "正常", className: "bg-green-100 text-green-700" },
   late: { label: "迟到", className: "bg-yellow-100 text-yellow-700" },
   early: { label: "早退", className: "bg-orange-100 text-orange-700" },
   absent: { label: "缺勤", className: "bg-red-100 text-red-700" },
   leave: { label: "假期", className: "bg-blue-100 text-blue-700" },
+  sick_leave: { label: "病假", className: "bg-cyan-100 text-cyan-700" },
   overtime: { label: "加班", className: "bg-purple-100 text-purple-700" },
   manual_adjusted: { label: "人工调整", className: "bg-amber-100 text-amber-700" },
   exception: { label: "异常", className: "bg-red-100 text-red-700" }
@@ -48,6 +52,10 @@ function getDefaultMonth() {
 
 function formatCurrency(value: number, currency: string) {
   return `${Number(value || 0).toFixed(2)} ${currency || "THB"}`;
+}
+
+function formatEmployeeDisplayName(employee: Pick<Employee, "name" | "nickname">) {
+  return employee.nickname ? `${employee.name}(${employee.nickname})` : employee.name;
 }
 
 function getStatusMeta(item: AttendanceCalculationResult) {
@@ -102,8 +110,8 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
     employeeId: "",
     date: getDefaultDate(),
     type: "normal" as AttendanceRecordUpdatePayload["type"],
-    inTime: "08:30",
-    outTime: "17:30",
+    inTime: DEFAULT_CREATE_IN_TIME,
+    outTime: DEFAULT_CREATE_OUT_TIME,
     note: ""
   });
   const [adjustForm, setAdjustForm] = useState<AttendanceRecordUpdatePayload>({
@@ -119,6 +127,10 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
   const loadRequestIdRef = useRef(0);
 
   const isFiltered = selectedEmployeeId !== "all" || timeFilterType !== "all";
+  const selectedCreateEmployee = useMemo(() => {
+    const employeeId = Number(createForm.employeeId);
+    return employees.find((employee) => Number(employee.id) === employeeId) || null;
+  }, [createForm.employeeId, employees]);
 
   const loadData = async () => {
     const requestId = ++loadRequestIdRef.current;
@@ -203,6 +215,17 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
       setSelectedMonth(sortedRows[0]?.date.slice(0, 7) || getDefaultMonth());
     }
   };
+
+  const applyDefaultTimeWhenNormal = <T extends { type: AttendanceRecordUpdatePayload["type"]; inTime: string | null; outTime: string | null }>(
+    prev: T,
+    nextType: AttendanceRecordUpdatePayload["type"]
+  ): T => ({
+    ...prev,
+    type: nextType,
+    // 只在切回“正常”时恢复业务默认上下班时间；其他考勤类型保留用户已填时间，避免病假/缺勤等记录被强塞默认时间。
+    inTime: nextType === "normal" ? DEFAULT_CREATE_IN_TIME : prev.inTime,
+    outTime: nextType === "normal" ? DEFAULT_CREATE_OUT_TIME : prev.outTime
+  });
 
   const handleExportCSV = () => {
     const headers = [
@@ -295,9 +318,11 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
   const handleOpenCreate = () => {
     setCreateForm((prev) => ({
       ...prev,
-      // 新增记录默认沿用当前筛选员工和日期，减少从列表补卡时的重复选择；无筛选时保留用户上次输入。
+      // 新增记录只沿用当前筛选员工和日期；上下班时间每次打开都回到业务默认值，避免上次补卡的临时时间污染下一条新增记录。
       employeeId: selectedEmployeeId === "all" ? prev.employeeId : String(selectedEmployeeId),
-      date: timeFilterType === "day" && selectedDate ? selectedDate : prev.date || getDefaultDate()
+      date: timeFilterType === "day" && selectedDate ? selectedDate : prev.date || getDefaultDate(),
+      inTime: DEFAULT_CREATE_IN_TIME,
+      outTime: DEFAULT_CREATE_OUT_TIME
     }));
     setIsCreateOpen(true);
   };
@@ -598,17 +623,34 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
               <select required value={createForm.employeeId} onChange={(event) => setCreateForm((prev) => ({ ...prev, employeeId: event.target.value }))} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500">
                 <option value="">请选择员工</option>
                 {employees.map((employee) => (
-                  <option key={employee.id} value={employee.id}>{employee.name} ({employee.role})</option>
+                  <option key={employee.id} value={employee.id}>{formatEmployeeDisplayName(employee)} ({employee.role})</option>
                 ))}
               </select>
             </Field>
+            {selectedCreateEmployee ? (
+              <div className="md:col-span-2 flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="h-10 w-10 shrink-0 overflow-hidden rounded-full border-2 border-white bg-slate-200 shadow-sm flex items-center justify-center text-sm font-bold text-slate-600">
+                  {selectedCreateEmployee.photo ? (
+                    <img src={selectedCreateEmployee.photo} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <span>{selectedCreateEmployee.name.charAt(0)}</span>
+                  )}
+                </div>
+                <div className="min-w-0">
+                  {/* 新增补卡时要给用户明确二次确认选中的员工，姓名必须按姓名(昵称)展示，避免同名员工误录考勤。 */}
+                  <p className="truncate text-sm font-semibold text-slate-800">{formatEmployeeDisplayName(selectedCreateEmployee)}</p>
+                  <p className="truncate text-xs text-slate-500">{selectedCreateEmployee.dept || "未分配"} · {selectedCreateEmployee.role || "未设置职位"}</p>
+                </div>
+              </div>
+            ) : null}
             <Field label="考勤类型">
-              <select value={createForm.type} onChange={(event) => setCreateForm((prev) => ({ ...prev, type: event.target.value as AttendanceRecordUpdatePayload["type"] }))} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500">
+              <select value={createForm.type} onChange={(event) => setCreateForm((prev) => applyDefaultTimeWhenNormal(prev, event.target.value as AttendanceRecordUpdatePayload["type"]))} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500">
                 <option value="normal">正常</option>
                 <option value="late">迟到</option>
                 <option value="early">早退</option>
                 <option value="absent">缺勤</option>
                 <option value="leave">假期</option>
+                <option value="sick_leave">病假</option>
                 <option value="overtime">加班</option>
               </select>
             </Field>
@@ -640,12 +682,13 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <Field label="日期"><input type="date" value={adjustForm.date} onChange={(event) => setAdjustForm((prev) => ({ ...prev, date: event.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500" /></Field>
             <Field label="考勤类型">
-              <select value={adjustForm.type} onChange={(event) => setAdjustForm((prev) => ({ ...prev, type: event.target.value as AttendanceRecordUpdatePayload["type"] }))} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500">
+              <select value={adjustForm.type} onChange={(event) => setAdjustForm((prev) => applyDefaultTimeWhenNormal(prev, event.target.value as AttendanceRecordUpdatePayload["type"]))} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500">
                 <option value="normal">正常</option>
                 <option value="late">迟到</option>
                 <option value="early">早退</option>
                 <option value="absent">缺勤</option>
                 <option value="leave">假期</option>
+                <option value="sick_leave">病假</option>
                 <option value="overtime">加班</option>
               </select>
             </Field>

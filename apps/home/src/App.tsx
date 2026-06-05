@@ -47,6 +47,11 @@ const languages = [
   { code: 'pt', name: 'Português' },
 ];
 
+function DutylixLogoMark({ className = "w-6 h-6" }: { className?: string }) {
+  // 门户页、后台、favicon 共用同一品牌图形；后续换 Logo 时优先替换 public/dutylix-icon.svg，避免各入口视觉不一致。
+  return <img src="/dutylix-icon.svg" alt="" aria-hidden="true" className={className} />;
+}
+
 const LanguageSelector = () => {
   const { i18n } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
@@ -128,8 +133,8 @@ const Nav = ({
           onClick={onNavigateHome}
           className="flex items-center gap-2 cursor-pointer group"
         >
-          <div className="w-10 h-10 bg-brand-accent rounded-xl flex items-center justify-center rotate-12 group-hover:rotate-0 transition-transform">
-            <Globe className="text-white w-6 h-6" />
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center rotate-12 group-hover:rotate-0 transition-transform shadow-lg shadow-brand-accent/20">
+            <DutylixLogoMark className="w-10 h-10" />
           </div>
           <span className="font-display font-bold text-2xl tracking-tighter text-brand-accent">DUTYLIX</span>
         </div>
@@ -722,8 +727,8 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-6 lg:flex justify-between">
           <div className="mb-16 lg:mb-0">
             <div className="flex items-center gap-3 mb-8">
-              <div className="w-10 h-10 bg-brand-accent rounded-xl flex items-center justify-center">
-                <Globe className="text-white w-6 h-6" />
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center shadow-lg shadow-brand-accent/20">
+                <DutylixLogoMark className="w-10 h-10" />
               </div>
               <span className="font-display font-bold text-2xl tracking-tighter text-brand-accent">DUTYLIX</span>
             </div>

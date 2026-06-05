@@ -163,7 +163,7 @@ const resources = {
       },
       hero: {
         badge: '智能化劳动力管理平台',
-        title: '考勤与薪资。自动运行。',
+        title: 'DUTYLIX考勤与薪资自动运行',
         description: 'Dutylix 为出海企业提供一站式员工考勤、定位追踪、自动计算加班及薪资发放的合规管理平台。',
         getStarted: '预约演示',
         watchDemo: '查看平台',
@@ -277,7 +277,7 @@ const resources = {
       },
       hero: {
         badge: '智能化勞動力管理平台',
-        title: '考勤與薪酬。化繁為簡。',
+        title: 'DUTYLIX考勤與薪酬自動運行',
         description: '海外企業管理考勤、自動化薪酬並發放、確保 150 多個國家全球稅務合規的一站式平台。',
         getStarted: '預約演示',
         watchDemo: '查看平台',
