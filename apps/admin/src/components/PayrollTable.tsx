@@ -296,7 +296,7 @@ export function PayrollTable({ employees }: PayrollTableProps) {
   };
 
   const handleExportCSV = () => {
-    const headers = ["年月", "员工", "员工编号", "所属部门", "职位", "计薪方式", "有效工时", "加班时长", "加班费", "应发", "扣款", "实发", "发放状态", "币种"];
+    const headers = ["年月", "员工", "员工编号", "所属部门", "职位", "计薪方式", "有效工时", "加班时长", "加班费", "应发", "社保扣款", "扣款", "实发", "发放状态", "币种"];
     const rows = results.map((item) => [
       item.yearMonth,
       `"${item.employeeName}"`,
@@ -308,6 +308,7 @@ export function PayrollTable({ employees }: PayrollTableProps) {
       item.overtimePayHours.toFixed(2),
       item.overtimePay.toFixed(2),
       item.grossPay.toFixed(2),
+      item.socialSecurityAmount.toFixed(2),
       item.totalDeduction.toFixed(2),
       item.netPay.toFixed(2),
       item.calculationStatus === "confirmed" ? "已发放" : "待发放",
@@ -361,11 +362,11 @@ export function PayrollTable({ employees }: PayrollTableProps) {
   const payslipResult = payslipDetail?.result || null;
   const payslipEmployee = payslipDetail?.employee || null;
   const payslipWorkingDays = payslipResult && payslipResult.standardHours > 0 ? Math.round(payslipResult.validHours / payslipResult.standardHours) : 0;
-  const payslipTaxOrDeduction = payslipResult ? Math.max(0, payslipResult.grossPay - payslipResult.netPay) : 0;
+  const payslipTaxOrDeduction = payslipResult ? Math.max(0, payslipResult.totalDeduction - payslipResult.socialSecurityAmount) : 0;
 
 
   return (
-    <div className="space-y-6">
+    <div className="h-full min-h-0 flex flex-col gap-6">
       <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-lg bg-green-50 text-green-600 flex items-center justify-center font-bold shadow-inner">
@@ -483,7 +484,8 @@ export function PayrollTable({ employees }: PayrollTableProps) {
         </div>
       </div>
 
-      <div className="glass-panel rounded-xl overflow-hidden">
+      <div className="glass-panel rounded-xl overflow-hidden min-h-0 flex flex-1 flex-col">
+        {/* 薪资列表同样按 Header / Content 分层：筛选搜索条固定，长表格只在内容区滚动，避免搜索入口被表格行顶走。 */}
         <div className="p-4 bg-slate-50 border-b border-slate-100 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-2.5">
             <button
@@ -522,6 +524,7 @@ export function PayrollTable({ employees }: PayrollTableProps) {
           </div>
         </div>
 
+        <div className="min-h-0 flex-1 overflow-y-auto">
         {loading ? (
           <div className="px-6 py-10 text-center text-sm text-slate-500">正在加载薪酬结果...</div>
         ) : results.length === 0 ? (
@@ -643,6 +646,7 @@ export function PayrollTable({ employees }: PayrollTableProps) {
             </div>
           </div>
         )}
+        </div>
       </div>
 
 
@@ -732,7 +736,8 @@ export function PayrollTable({ employees }: PayrollTableProps) {
                 <div className="flex justify-between"><span className="text-slate-500">计算基薪:</span><span className="font-bold text-slate-800 text-right">{formatCurrency(payslipResult.hourlyPay, payslipResult.currency)}</span></div>
                 <div className="flex justify-between"><span className="text-slate-500">加班应得:</span><span className="font-bold text-green-600 text-right">+ {formatCurrency(payslipResult.overtimePay, payslipResult.currency)}</span></div>
                 <div className="flex justify-between"><span className="text-slate-500">补贴/其他:</span><span className="font-bold text-slate-800 text-right">+ {formatCurrency(payslipResult.allowanceTotal + payslipResult.otherTotal, payslipResult.currency)}</span></div>
-                <div className="flex justify-between"><span className="text-slate-500">扣款/代扣:</span><span className="text-red-500 text-right">- {formatCurrency(payslipTaxOrDeduction, payslipResult.currency)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-500">社保扣款:</span><span className="text-red-500 text-right">- {formatCurrency(payslipResult.socialSecurityAmount, payslipResult.currency)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-500">其他扣款:</span><span className="text-red-500 text-right">- {formatCurrency(payslipTaxOrDeduction, payslipResult.currency)}</span></div>
               </div>
             </div>
 

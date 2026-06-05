@@ -46,20 +46,23 @@ export function EmployeeList({ employees, loading = false, onAddEmployee, onEdit
 
     return employees.filter((emp) =>
       emp.name.toLowerCase().includes(normalizedQuery) ||
+      emp.nickname.toLowerCase().includes(normalizedQuery) ||
       emp.role.toLowerCase().includes(normalizedQuery) ||
       emp.dept.toLowerCase().includes(normalizedQuery)
     );
   }, [employees, query]);
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+    <div className="h-full min-h-0 flex flex-col">
+      <div className="shrink-0 pb-4">
+        {/* 员工列表按 Header / Content 分层：筛选和新增按钮固定在顶部，只有下面的卡片区域滚动，避免长列表把操作入口顶出视口。 */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div className="relative w-full sm:w-72">
           <input
             type="text"
             value={query}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="搜索姓名、职位或区域..."
+            placeholder="搜索姓名、昵称、职位或区域..."
             className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none text-sm bg-white"
           />
           <Search className="w-5 h-5 absolute left-3 top-2.5 text-slate-400" />
@@ -70,23 +73,25 @@ export function EmployeeList({ employees, loading = false, onAddEmployee, onEdit
         >
           <Plus className="w-4 h-4" /> 新增员工
         </button>
+        </div>
       </div>
 
-      {loading ? (
-        <div className="glass-panel rounded-xl p-10 text-center text-sm text-slate-500">正在加载员工数据...</div>
-      ) : filteredEmployees.length === 0 ? (
-        <div className="glass-panel rounded-xl p-10 text-center text-sm text-slate-500">当前筛选条件下没有员工数据</div>
-      ) : (
-        // v2 员工卡片包含头像、标签和薪资字段；常规大屏保持三列，避免一行四列时字段被挤压换行。
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5">
-          {filteredEmployees.map((emp) => {
+      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+        {loading ? (
+          <div className="glass-panel rounded-xl p-10 text-center text-sm text-slate-500">正在加载员工数据...</div>
+        ) : filteredEmployees.length === 0 ? (
+          <div className="glass-panel rounded-xl p-10 text-center text-sm text-slate-500">当前筛选条件下没有员工数据</div>
+        ) : (
+          // v2 员工卡片包含头像、标签和薪资字段；常规大屏保持三列，避免一行四列时字段被挤压换行。
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5">
+            {filteredEmployees.map((emp) => {
             const monthlyWage = getV2MonthlyWage(emp);
             const hourlyRate = getV2HourlyRate(emp);
             const statusLabel = getV2StatusLabel(emp);
 
             return (
               <div key={emp.id} className="glass-panel rounded-xl p-5 hover:shadow-md transition-all duration-300 flex flex-col relative group">
-                <div className="absolute top-4 right-4 flex gap-2 z-10">
+                <div className="absolute top-4 right-4 flex gap-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
                     onClick={() => onEditEmployee(emp)}
                     className="p-1.5 bg-white rounded-lg shadow-sm border border-slate-200 hover:bg-slate-50 text-slate-600"
@@ -114,6 +119,9 @@ export function EmployeeList({ employees, loading = false, onAddEmployee, onEdit
                   </div>
                   <div className="flex-1 min-w-0 pr-8">
                     <h3 className="text-base font-bold text-slate-800 truncate">{emp.name}</h3>
+                    {emp.nickname ? (
+                      <p className="text-xs text-slate-400 truncate mt-0.5">{emp.nickname}</p>
+                    ) : null}
                     <div className="flex items-center gap-2 mt-1 flex-wrap">
                       <span className="text-lg" title={COUNTRY_NAMES[emp.country]}>{COUNTRY_FLAGS[emp.country]}</span>
                       <span className="text-[10px] text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">{COUNTRY_NAMES[emp.country]}</span>
@@ -170,10 +178,11 @@ export function EmployeeList({ employees, loading = false, onAddEmployee, onEdit
                 </div>
               </div>
             );
-          })}
-        </div>
-      )}
-      <div className="mt-6 text-center text-sm text-slate-400">共 {employees.length} 名员工</div>
+            })}
+          </div>
+        )}
+        <div className="mt-6 text-center text-sm text-slate-400">共 {employees.length} 名员工</div>
+      </div>
     </div>
   );
 }

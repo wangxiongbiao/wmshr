@@ -92,8 +92,10 @@ export function AttendanceRuleList({
   }, [page, totalPages]);
 
   return (
-    <div className="space-y-6">
-      <div className="glass-panel rounded-xl p-5">
+    <div className="h-full min-h-0 flex flex-col">
+      <div className="shrink-0 pb-4">
+        {/* 考勤规则列表使用固定 Header + 滚动 Content：搜索/筛选和新增入口保留在顶部，规则卡片在下方独立滚动。 */}
+        <div className="glass-panel rounded-xl p-5">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div className="grid flex-1 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-[minmax(320px,1.4fr)_180px_180px]">
             <div>
@@ -170,8 +172,10 @@ export function AttendanceRuleList({
             </div>
           </div>
         </div>
+        </div>
       </div>
 
+      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
       {loading ? (
         <div className="glass-panel rounded-xl p-10 text-center text-sm text-slate-500">正在加载考勤规则...</div>
       ) : filteredRules.length === 0 ? (
@@ -275,6 +279,7 @@ export function AttendanceRuleList({
           />
         </div>
       )}
+      </div>
     </div>
   );
 }

@@ -11,6 +11,7 @@ import { EmployeeList } from "./components/EmployeeList";
 import { AttendanceRuleList } from "./components/AttendanceRuleList";
 import { AttendanceTable } from "./components/AttendanceTable";
 import { PayrollTable } from "./components/PayrollTable";
+import { SopManager } from "./components/SopManager";
 import {
   EmployeeModal,
   AttendanceRuleModal,
@@ -605,7 +606,8 @@ export default function App() {
       dashboard: '数据看板',
       employees: '员工管理',
       attendance: '考勤计算',
-      payroll: '薪资核算'
+      payroll: '薪资核算',
+      sop: 'SOP管理'
     };
     return titles[activeTab];
   }, [activeTab]);
@@ -681,6 +683,8 @@ export default function App() {
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}
+              // 业务页需要拿到主内容区高度；员工列表内部按 Header / Content 分层，只有 Content 滚动。
+              className="h-full min-h-0"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
@@ -707,6 +711,10 @@ export default function App() {
               )}
               {activeTab === 'payroll' && (
                 <PayrollTable employees={employees} />
+              )}
+              {activeTab === 'sop' && (
+                // SOP 先按 v2 可见模块原样挂载，当前版本仍使用组件内 localStorage；后续按迁移方案替换为 owner_user_id 隔离的真实接口。
+                <SopManager employees={employees} addToast={addToast} />
               )}
             </motion.div>
           </AnimatePresence>

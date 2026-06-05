@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export type TabId = 'dashboard' | 'employees' | 'attendance' | 'payroll';
+export type TabId = 'dashboard' | 'employees' | 'attendance' | 'payroll' | 'sop';
 
 export type Gender = 'male' | 'female';
 
@@ -41,6 +41,7 @@ export interface Employee {
   id: number;
   employeeNo: string;
   name: string;
+  nickname: string;
   gender: Gender;
   country: CountryCode;
   phone: string;
@@ -58,6 +59,26 @@ export interface Employee {
   status: EmployeeStatus;
   photo: string | null;
   isDeleted: boolean;
+}
+
+export interface SopAttachment {
+  name: string;
+  url: string;
+  size: string;
+}
+
+export interface SopDocument {
+  id: string;
+  title: string;
+  content: string;
+  images: string[];
+  attachments: SopAttachment[];
+  targetType: 'all' | 'specific';
+  targetEmployeeIds?: number[];
+  createdAt: string;
+  creator: string;
+  status: 'draft' | 'published';
+  reads: Record<number, string>;
 }
 
 export interface AttendanceRuleOption {
@@ -157,6 +178,7 @@ export interface EmployeeListPage {
 
 export interface EmployeeUpsertPayload {
   name: string;
+  nickname: string;
   gender: Gender;
   country: CountryCode;
   phone: string;
@@ -312,6 +334,7 @@ export interface MonthlyPayrollResult {
   allowanceTotal: number;
   deductionTotal: number;
   otherTotal: number;
+  socialSecurityAmount: number;
   grossPay: number;
   totalDeduction: number;
   netPay: number;
@@ -358,6 +381,10 @@ export interface AttendanceRecordUpdatePayload {
   note: string;
 }
 
+export interface AttendanceRecordCreatePayload extends AttendanceRecordUpdatePayload {
+  employeeId: number;
+}
+
 export interface RecalculateBatchItem {
   employeeId: number;
   date: string;
@@ -392,6 +419,7 @@ export interface DashboardEmployeeStat {
   employeeId: number;
   employeeNo?: string;
   employeeName: string;
+  employeeNickname: string;
   employeeDept: string;
   employeeRole: string;
   employeePhoto: string | null;

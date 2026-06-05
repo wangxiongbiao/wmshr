@@ -4,7 +4,7 @@
  */
 
 import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { Download, Edit, Settings } from "lucide-react";
+import { Download, Edit, Plus, Settings } from "lucide-react";
 import type {
   AppConfig,
   AttendanceCalculationResult,
@@ -94,9 +94,18 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
   const [calculations, setCalculations] = useState<AttendanceCalculationResult[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [configForm, setConfigForm] = useState<AppConfig | null>(null);
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAdjustmentOpen, setIsAdjustmentOpen] = useState(false);
   const [adjustingResult, setAdjustingResult] = useState<AttendanceCalculationResult | null>(null);
+  const [createForm, setCreateForm] = useState({
+    employeeId: "",
+    date: getDefaultDate(),
+    type: "normal" as AttendanceRecordUpdatePayload["type"],
+    inTime: "08:30",
+    outTime: "17:30",
+    note: ""
+  });
   const [adjustForm, setAdjustForm] = useState<AttendanceRecordUpdatePayload>({
     date: "",
     type: "normal",
@@ -272,12 +281,51 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
       if (adjustingResult.attendanceRecordId) {
         await updateAttendanceRecord(adjustingResult.attendanceRecordId, adjustForm);
       } else {
-        await createAttendanceRecord(adjustingResult.employeeId, adjustForm);
+        await createAttendanceRecord({ employeeId: adjustingResult.employeeId, ...adjustForm });
       }
       setIsAdjustmentOpen(false);
       await loadData();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "考勤调整失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleOpenCreate = () => {
+    setCreateForm((prev) => ({
+      ...prev,
+      // 新增记录默认沿用当前筛选员工和日期，减少从列表补卡时的重复选择；无筛选时保留用户上次输入。
+      employeeId: selectedEmployeeId === "all" ? prev.employeeId : String(selectedEmployeeId),
+      date: timeFilterType === "day" && selectedDate ? selectedDate : prev.date || getDefaultDate()
+    }));
+    setIsCreateOpen(true);
+  };
+
+  const handleSaveCreate = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const employeeId = Number(createForm.employeeId);
+    if (!employeeId) {
+      setError("请选择员工后再新增考勤记录");
+      return;
+    }
+
+    setSubmitting(true);
+    setError("");
+    try {
+      // 新增考勤记录使用后端 upsert + 重算流程，保证列表、月汇总和薪资前置数据同步更新。
+      await createAttendanceRecord({
+        employeeId,
+        date: createForm.date,
+        type: createForm.type,
+        inTime: createForm.inTime || null,
+        outTime: createForm.outTime || null,
+        note: createForm.note
+      });
+      setIsCreateOpen(false);
+      await loadData();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "新增考勤记录失败");
     } finally {
       setSubmitting(false);
     }
@@ -306,8 +354,10 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
   };
 
   return (
-    <div className="space-y-4 animate-fade-in">
-      <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col md:flex-row gap-4 items-end md:items-center text-sm">
+    <div className="h-full min-h-0 flex flex-col gap-4 animate-fade-in">
+      <div className="shrink-0">
+        {/* 考勤明细按固定 Header + 滚动 Content 组织：员工/时间筛选不随长表格滚走，表格区域独立滚动。 */}
+        <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col md:flex-row gap-4 items-end md:items-center text-sm">
         <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-4 w-full">
           <div>
             <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">筛选员工</label>
@@ -374,11 +424,12 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
             </button>
           )}
         </div>
+        </div>
       </div>
 
       {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 
-      <div className="glass-panel rounded-xl shadow-sm overflow-hidden">
+      <div className="glass-panel rounded-xl shadow-sm overflow-hidden min-h-0 flex flex-1 flex-col">
         <div className="p-4 border-b border-slate-100 bg-white flex justify-between items-center">
           <h3 className="font-semibold text-slate-800 text-sm flex items-center gap-2">
             <span>考勤明细与自动计算</span>
@@ -389,6 +440,15 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
             )}
           </h3>
           <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleOpenCreate}
+              className="bg-brand-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-brand-700 transition flex items-center gap-1.5"
+              title="选择日期、员工、上下班时间新增一条考勤记录"
+            >
+              <Plus className="w-4 h-4" />
+              新增考勤记录
+            </button>
             <button
               type="button"
               onClick={handleExportCSV}
@@ -409,7 +469,7 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
           </div>
         </div>
 
-        <div className="overflow-x-auto overflow-y-auto max-h-[580px] relative">
+        <div className="min-h-0 flex-1 overflow-x-auto overflow-y-auto relative">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="text-slate-500 text-xs uppercase border-b border-slate-100">
@@ -508,7 +568,7 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
         </div>
       </div>
 
-      <div className="mt-4 flex items-center justify-between text-sm">
+      <div className="shrink-0 flex items-center justify-between text-sm">
         <div className="flex items-center gap-4 text-slate-400 flex-wrap">
           <span>共 {sortedRows.length} 条已显示考勤</span>
           <span>•</span>
@@ -517,6 +577,51 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-400" /> 假期 = 员工休假状态</span>
         </div>
       </div>
+
+      <Modal
+        isOpen={isCreateOpen}
+        title="新增考勤记录"
+        onClose={() => setIsCreateOpen(false)}
+        footer={(
+          <div className="flex justify-end gap-3">
+            <button type="button" onClick={() => setIsCreateOpen(false)} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100">取消</button>
+            <button type="submit" form="attendance-create-form" disabled={submitting} className="rounded-lg bg-brand-600 px-6 py-2 text-sm text-white transition hover:bg-brand-700 disabled:opacity-60">
+              {submitting ? "保存中..." : "新增并重算"}
+            </button>
+          </div>
+        )}
+      >
+        <form id="attendance-create-form" onSubmit={handleSaveCreate} className="space-y-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Field label="日期"><input type="date" required value={createForm.date} onChange={(event) => setCreateForm((prev) => ({ ...prev, date: event.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500" /></Field>
+            <Field label="员工">
+              <select required value={createForm.employeeId} onChange={(event) => setCreateForm((prev) => ({ ...prev, employeeId: event.target.value }))} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500">
+                <option value="">请选择员工</option>
+                {employees.map((employee) => (
+                  <option key={employee.id} value={employee.id}>{employee.name} ({employee.role})</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="考勤类型">
+              <select value={createForm.type} onChange={(event) => setCreateForm((prev) => ({ ...prev, type: event.target.value as AttendanceRecordUpdatePayload["type"] }))} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500">
+                <option value="normal">正常</option>
+                <option value="late">迟到</option>
+                <option value="early">早退</option>
+                <option value="absent">缺勤</option>
+                <option value="leave">假期</option>
+                <option value="overtime">加班</option>
+              </select>
+            </Field>
+            <div className="hidden md:block" />
+            <Field label="上班时间"><input type="time" value={createForm.inTime} onChange={(event) => setCreateForm((prev) => ({ ...prev, inTime: event.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500" /></Field>
+            <Field label="下班时间"><input type="time" value={createForm.outTime} onChange={(event) => setCreateForm((prev) => ({ ...prev, outTime: event.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500" /></Field>
+          </div>
+          <Field label="备注"><textarea value={createForm.note} onChange={(event) => setCreateForm((prev) => ({ ...prev, note: event.target.value }))} rows={3} className="w-full resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500" /></Field>
+          <div className="rounded-lg border border-brand-100 bg-brand-50 px-4 py-3 text-sm text-brand-700">
+            新增后会立即按当前全局规则重算该员工当天和所在月份；如果已有同员工同日期记录，会覆盖为本次填写内容。
+          </div>
+        </form>
+      </Modal>
 
       <Modal
         isOpen={isAdjustmentOpen}
@@ -572,10 +677,18 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
               <Field label="休息开始"><input type="time" value={configForm.breakStart} onChange={(event) => setConfigForm((prev) => prev ? { ...prev, breakStart: event.target.value } : prev)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500" /></Field>
               <Field label="休息结束"><input type="time" value={configForm.breakEnd} onChange={(event) => setConfigForm((prev) => prev ? { ...prev, breakEnd: event.target.value } : prev)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500" /></Field>
               <Field label="标准工时"><input type="number" min="0" step="0.25" value={configForm.standardHours} onChange={(event) => setConfigForm((prev) => prev ? { ...prev, standardHours: Number(event.target.value) } : prev)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500" /></Field>
-              <Field label="加班费标准（泰铢/小时）"><input type="number" min="0" step="0.01" value={configForm.otHourlyFee} onChange={(event) => setConfigForm((prev) => prev ? { ...prev, otHourlyFee: Number(event.target.value) } : prev)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500" /></Field>
+              <Field label={`加班费标准（${configForm.currency || "THB"}/小时）`}><input type="number" min="0" step="0.01" value={configForm.otHourlyFee} onChange={(event) => setConfigForm((prev) => prev ? { ...prev, otHourlyFee: Number(event.target.value) } : prev)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500" /></Field>
+              <Field label="加班费币种">
+                <select value={configForm.currency || "THB"} onChange={(event) => setConfigForm((prev) => prev ? { ...prev, currency: event.target.value as AppConfig["currency"] } : prev)} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500">
+                  <option value="THB">THB - 泰铢</option>
+                  <option value="USD">USD - 美元</option>
+                  <option value="MYR">MYR - 马币</option>
+                  <option value="IDR">IDR - 印尼盾</option>
+                </select>
+              </Field>
             </div>
             <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-              保存后将自动刷新当前月份的考勤结果，请确认时间和加班费标准填写正确。
+              保存后将自动刷新当前月份的考勤结果。加班费默认使用 THB；个人考勤行会按员工薪资币种展示，服务端会把全局规则币种转换到员工币种后再计算。
             </div>
           </form>
         ) : (

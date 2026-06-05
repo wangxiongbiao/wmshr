@@ -198,6 +198,7 @@ function mapEmployeeRow(row, ruleMap = new Map()) {
     id: Number(row.id),
     employeeNo: row.employee_no,
     name: row.name,
+    nickname: row.nickname || "",
     gender: row.gender,
     country: row.country,
     phone: row.phone,
@@ -517,7 +518,8 @@ function mapAttendanceConfigRow(row) {
     breakStart: row.break_start ? row.break_start.slice(0, 5) : DEFAULT_ATTENDANCE_CONFIG.break_start,
     breakEnd: row.break_end ? row.break_end.slice(0, 5) : DEFAULT_ATTENDANCE_CONFIG.break_end,
     standardHours: Number(row.standard_hours ?? DEFAULT_ATTENDANCE_CONFIG.standard_hours),
-    otHourlyFee: Number(row.ot_hourly_fee ?? DEFAULT_ATTENDANCE_CONFIG.ot_hourly_fee)
+    otHourlyFee: Number(row.ot_hourly_fee ?? DEFAULT_ATTENDANCE_CONFIG.ot_hourly_fee),
+    currency: row.currency || DEFAULT_ATTENDANCE_CONFIG.currency
   };
 }
 
@@ -530,6 +532,7 @@ function normalizeAttendanceConfigPayload(body = {}) {
     break_end: String(body.breakEnd || DEFAULT_ATTENDANCE_CONFIG.break_end).slice(0, 5),
     standard_hours: Number(body.standardHours ?? DEFAULT_ATTENDANCE_CONFIG.standard_hours),
     ot_hourly_fee: Number(body.otHourlyFee ?? DEFAULT_ATTENDANCE_CONFIG.ot_hourly_fee),
+    currency: ["THB", "USD", "MYR", "IDR"].includes(body.currency) ? body.currency : DEFAULT_ATTENDANCE_CONFIG.currency,
     updated_at: new Date().toISOString()
   };
 }
@@ -673,6 +676,7 @@ function mapPayrollResultRow(row, employeeMap = new Map()) {
     allowanceTotal: Number(row.allowance_total),
     deductionTotal: Number(row.deduction_total),
     otherTotal: Number(row.other_total),
+    socialSecurityAmount: row.social_security_amount === null || row.social_security_amount === undefined ? 0 : Number(row.social_security_amount),
     grossPay: Number(row.gross_pay),
     totalDeduction: Number(row.total_deduction),
     netPay: Number(row.net_pay),
@@ -813,6 +817,31 @@ async function resolveAttendanceConfig(ownerUserId) {
 
 function isInactiveEmployeeStatus(status) {
   return status === "disabled" || status === "resigned";
+}
+
+function isEmployeeAvailableForAttendanceAndPayroll(employee) {
+  // “删除员工”在当前业务里是离职/禁用或软删除，不物理清历史记录；
+  // 考勤展示与薪资计算必须统一用这个判断过滤，避免历史员工继续出现在当期业务流里。
+  return Boolean(employee) && employee.is_deleted !== true && !isInactiveEmployeeStatus(employee.status);
+}
+
+async function assertEmployeeAvailableForAttendanceAndPayroll(employeeId, ownerUserId) {
+  const { data, error } = await supabase
+    .from("employees")
+    .select("id, status, is_deleted")
+    .eq("owner_user_id", ownerUserId)
+    .eq("id", Number(employeeId))
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+  if (!data) {
+    throw new Error("EMPLOYEE_NOT_FOUND");
+  }
+  if (!isEmployeeAvailableForAttendanceAndPayroll(data)) {
+    throw new Error("员工已离职或停用，不参与考勤与薪资计算");
+  }
 }
 
 function shouldCalculateEmployeeDate(employee, date) {
@@ -967,9 +996,10 @@ async function recalculateDailyAttendance(employeeId, date, ownerUserId, context
 
 async function recalculateMonthlyAttendance(yearMonth, ownerUserId, targetEmployeeId = null) {
   const context = await fetchCalculationContext(yearMonth, ownerUserId);
+  // 指定员工重算也不能绕过离职/禁用过滤；删除员工后只保留历史数据，不再进入当期考勤刷新。
   const employees = targetEmployeeId
-    ? context.employees.filter((row) => Number(row.id) === Number(targetEmployeeId))
-    : context.employees.filter((row) => !isInactiveEmployeeStatus(row.status));
+    ? context.employees.filter((row) => Number(row.id) === Number(targetEmployeeId) && isEmployeeAvailableForAttendanceAndPayroll(row))
+    : context.employees.filter(isEmployeeAvailableForAttendanceAndPayroll);
   const dates = enumerateMonthDates(yearMonth);
 
   for (const employee of employees) {
@@ -1190,6 +1220,20 @@ function getNonNegativePayrollAmount(value) {
   return Number.isFinite(amount) && amount > 0 ? amount : 0;
 }
 
+const MYANMAR_WORKER_DAILY_SOCIAL_SECURITY_THB = 20;
+
+function calculateEmployeeSocialSecurity(employee, dailyCalculations) {
+  if (employee.country === "MM") {
+    // 缅甸外劳社保按当月有效出勤天数扣除：薪资生成前已刷新 dailyCalculations，所以这里用 valid_hours > 0 作为计天口径。
+    // 如果以后要调整每日金额，只改 MYANMAR_WORKER_DAILY_SOCIAL_SECURITY_THB，不要在薪资公式里散落硬编码。
+    const workedDays = dailyCalculations.filter((row) => Number(row.valid_hours || 0) > 0).length;
+    return roundToTwo(workedDays * MYANMAR_WORKER_DAILY_SOCIAL_SECURITY_THB);
+  }
+
+  // 泰国本地员工社保按员工档案的月固定金额扣除；其他国家暂沿用固定金额，避免误套缅甸外劳规则。
+  return getNonNegativePayrollAmount(employee.social_security);
+}
+
 function buildPayrollSalaryConfig(employee, salaryProfile) {
   const salaryType = (salaryProfile?.salary_type || employee.salary_type) === "fixed" ? "fixed" : "hourly";
   const fixedSalary = salaryType === "fixed"
@@ -1214,7 +1258,7 @@ async function getPayrollSourceContext(employeeId, yearMonth, ownerUserId) {
     supabase.from("employees").select("*").eq("owner_user_id", ownerUserId).eq("id", Number(employeeId)).maybeSingle(),
     supabase.from("monthly_attendance_summaries").select("*").eq("owner_user_id", ownerUserId).eq("employee_id", Number(employeeId)).eq("year_month", yearMonth).limit(1),
     supabase.from("salary_adjustment_items").select("*").eq("owner_user_id", ownerUserId).eq("employee_id", Number(employeeId)).eq("year_month", yearMonth).order("created_at", { ascending: false }),
-    supabase.from("attendance_calculation_results").select("attendance_rule_id, overtime_pay_hours").eq("owner_user_id", ownerUserId).eq("employee_id", Number(employeeId)).gte("date", `${yearMonth}-01`).lte("date", monthEndDate),
+    supabase.from("attendance_calculation_results").select("attendance_rule_id, valid_hours, overtime_pay_hours").eq("owner_user_id", ownerUserId).eq("employee_id", Number(employeeId)).gte("date", `${yearMonth}-01`).lte("date", monthEndDate),
     supabase.from("attendance_rules").select("id, ot_hourly_fee").eq("owner_user_id", ownerUserId),
     supabase.from("monthly_payroll_results").select("*").eq("owner_user_id", ownerUserId).eq("employee_id", Number(employeeId)).eq("year_month", yearMonth).maybeSingle()
   ]);
@@ -1302,6 +1346,8 @@ async function upsertMonthlyPayrollResult(payload) {
 }
 
 async function calculateMonthlyPayroll(employeeId, yearMonth, ownerUserId, { skipExisting = false, forceRecalculate = false } = {}) {
+  // 薪资生成入口先校验员工状态，防止前端或历史按钮显式传 employeeId 时绕过批量接口过滤。
+  await assertEmployeeAvailableForAttendanceAndPayroll(employeeId, ownerUserId);
   await recalculateMonthlyAttendance(yearMonth, ownerUserId, Number(employeeId));
 
   const context = await getPayrollSourceContext(employeeId, yearMonth, ownerUserId);
@@ -1329,7 +1375,7 @@ async function calculateMonthlyPayroll(employeeId, yearMonth, ownerUserId, { ski
   // 全勤奖仍读取员工档案配置，但必须受当月考勤汇总约束：只要出现缺勤，本月全勤奖归零。
   // 这里依赖 recalculateMonthlyAttendance 先刷新 monthly_attendance_summaries，避免薪资生成继续沿用员工档案里的固定全勤奖。
   const attendanceBonus = monthlyAbsentCount > 0 ? 0 : getNonNegativePayrollAmount(employee.attendance_bonus);
-  const socialSecurity = getNonNegativePayrollAmount(employee.social_security);
+  const socialSecurity = calculateEmployeeSocialSecurity(employee, dailyCalculations);
   const validHours = Number(attendanceSummary?.total_valid_hours || 0);
   const standardHours = Number(attendanceSummary?.total_standard_hours || 0);
   const overtimePayHours = Number(attendanceSummary?.total_overtime_pay_hours || 0);
@@ -1362,6 +1408,7 @@ async function calculateMonthlyPayroll(employeeId, yearMonth, ownerUserId, { ski
     allowance_total: allowanceTotal,
     deduction_total: deductionTotal,
     other_total: otherTotal,
+    social_security_amount: socialSecurity,
     gross_pay: grossPay,
     total_deduction: totalDeduction,
     net_pay: netPay,
@@ -1416,6 +1463,7 @@ async function fetchPayrollResultDetail(resultId, ownerUserId) {
 function normalizeEmployeePayload(body, authUser) {
   return {
     name: body.name,
+    nickname: String(body.nickname || "").trim(),
     gender: body.gender,
     country: body.country,
     phone: body.phone,
@@ -1435,6 +1483,15 @@ function normalizeEmployeePayload(body, authUser) {
   };
 }
 
+function validateEmployeeAmountPayload(payload) {
+  // v2 员工弹窗只要求金额不小于 0、不设最大值；后端同步校验，避免绕过前端时触发数据库约束错误。
+  const amounts = [payload.hourlyRate, payload.fixedSalary, payload.attendanceBonus, payload.socialSecurity];
+  if (amounts.some((amount) => amount !== null && (Number.isNaN(Number(amount)) || Number(amount) < 0))) {
+    return "金额必须大于等于 0";
+  }
+  return null;
+}
+
 async function createEmployeeRecord(payload, authUser) {
   const ownerUserId = authUser.id;
   const compatibilityRuleId = payload.attendanceRuleId || await getEmployeeCompatibilityAttendanceRuleId(ownerUserId);
@@ -1442,6 +1499,7 @@ async function createEmployeeRecord(payload, authUser) {
     owner_user_id: ownerUserId,
     employee_no: generateEmployeeNo(),
     name: payload.name,
+    nickname: payload.nickname,
     gender: payload.gender,
     country: payload.country,
     phone: payload.phone,
@@ -1495,6 +1553,7 @@ async function updateEmployeeRecord(employeeId, payload, authUser) {
 
   const updatePayload = {
     name: payload.name,
+    nickname: payload.nickname,
     gender: payload.gender,
     country: payload.country,
     phone: payload.phone,
@@ -1974,6 +2033,8 @@ app.get("/api/admin/dashboard", async (req, res) => {
           employeeId: Number(employee.id),
           employeeNo: employee.employee_no || undefined,
           employeeName: employee.name || `员工 #${employee.id}`,
+          // 数据看板员工行按业务名片展示“姓名(昵称)”；昵称随接口返回，避免前端额外依赖员工列表接口拼装。
+          employeeNickname: employee.nickname || "",
           employeeDept: employee.dept || "未分配",
           employeeRole: employee.role || "",
           employeePhoto: employee.photo || null,
@@ -2409,7 +2470,8 @@ app.get("/api/admin/attendance-calculations", async (req, res) => {
       .map((row) => mapAttendanceCalculationRow(row, employeeMap))
       .filter((row) => {
         const employee = employeeMap.get(row.employeeId);
-        if (!employee || !shouldCalculateEmployeeDate(employee, row.date)) {
+        // 离职/禁用员工保留历史计算表数据，但当前考勤明细不再展示，避免“删除员工”后仍进入业务核对流。
+        if (!isEmployeeAvailableForAttendanceAndPayroll(employee) || !shouldCalculateEmployeeDate(employee, row.date)) {
           return false;
         }
         if (employeeId && row.employeeId !== employeeId) {
@@ -2863,10 +2925,11 @@ app.post("/api/admin/payroll-results/generate-monthly", async (req, res) => {
     }
 
     const targetEmployees = employeesResult.data.filter((row) => {
+      // 即使前端显式传 employeeIds，也不能把删除/离职/停用员工重新纳入薪资批量计算。
       if (requestedIds?.length) {
-        return requestedIds.includes(Number(row.id));
+        return requestedIds.includes(Number(row.id)) && isEmployeeAvailableForAttendanceAndPayroll(row);
       }
-      return !isInactiveEmployeeStatus(row.status);
+      return isEmployeeAvailableForAttendanceAndPayroll(row);
     });
 
     let successCount = 0;
@@ -2938,10 +3001,11 @@ app.post("/api/admin/payroll-results/recalculate-monthly", async (req, res) => {
     }
 
     const targetEmployees = employeesResult.data.filter((row) => {
+      // 即使前端显式传 employeeIds，也不能把删除/离职/停用员工重新纳入薪资批量计算。
       if (requestedIds?.length) {
-        return requestedIds.includes(Number(row.id));
+        return requestedIds.includes(Number(row.id)) && isEmployeeAvailableForAttendanceAndPayroll(row);
       }
-      return !isInactiveEmployeeStatus(row.status);
+      return isEmployeeAvailableForAttendanceAndPayroll(row);
     });
 
     let successCount = 0;
@@ -3263,6 +3327,354 @@ app.patch("/api/admin/payroll-results/:id/confirm", async (req, res) => {
   }
 });
 
+function normalizeSopPayload(body = {}, authUser) {
+  const targetType = body.targetType === "specific" ? "specific" : "all";
+  const targetEmployeeIds = Array.isArray(body.targetEmployeeIds)
+    ? Array.from(new Set(body.targetEmployeeIds.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0)))
+    : [];
+  const attachments = Array.isArray(body.attachments) ? body.attachments : [];
+  const images = Array.isArray(body.images) ? body.images : [];
+
+  return {
+    title: String(body.title || "").trim(),
+    contentHtml: String(body.content || body.contentHtml || "").trim(),
+    targetType,
+    targetEmployeeIds: targetType === "specific" ? targetEmployeeIds : [],
+    creator: String(body.creator || authUser.email || "仓库安全处 · Admin Office").trim(),
+    status: body.status === "draft" ? "draft" : "published",
+    attachments: attachments
+      .map((item) => ({
+        name: String(item?.name || "").trim(),
+        url: String(item?.url || "").trim(),
+        size: String(item?.size || item?.sizeLabel || "").trim()
+      }))
+      .filter((item) => item.name && item.url),
+    images: images.map((url) => String(url || "").trim()).filter(Boolean)
+  };
+}
+
+function validateSopPayload(payload) {
+  if (!payload.title) {
+    return "SOP标题不能为空";
+  }
+  if (!payload.contentHtml) {
+    return "SOP正文不能为空";
+  }
+  if (payload.targetType === "specific" && payload.targetEmployeeIds.length === 0) {
+    return "指定员工下发时至少选择一名员工";
+  }
+  return null;
+}
+
+function mapSopDocument(row, { targetIds = [], assets = [], reads = [] } = {}) {
+  const imageAssets = assets.filter((asset) => asset.kind === "image").sort((a, b) => Number(a.sort_order) - Number(b.sort_order));
+  const attachmentAssets = assets.filter((asset) => asset.kind === "attachment").sort((a, b) => Number(a.sort_order) - Number(b.sort_order));
+  const readMap = reads.reduce((acc, read) => {
+    acc[Number(read.employee_id)] = String(read.read_at || "").replace("T", " ").slice(0, 16);
+    return acc;
+  }, {});
+
+  return {
+    id: String(row.id),
+    title: row.title,
+    content: row.content_html,
+    images: imageAssets.map((asset) => asset.url),
+    attachments: attachmentAssets.map((asset) => ({
+      name: asset.name,
+      url: asset.url,
+      size: asset.size_label || ""
+    })),
+    targetType: row.target_type === "specific" ? "specific" : "all",
+    targetEmployeeIds: row.target_type === "specific" ? targetIds.map(Number) : undefined,
+    createdAt: String(row.created_at || "").replace("T", " ").slice(0, 16),
+    creator: row.creator,
+    status: row.status === "draft" ? "draft" : "published",
+    reads: readMap
+  };
+}
+
+async function fetchSopDocuments(ownerUserId, { keyword = "", publishedOnly = false, employeeId = null } = {}) {
+  let query = supabase
+    .from("sop_documents")
+    .select("*")
+    .eq("owner_user_id", ownerUserId)
+    .order("created_at", { ascending: false });
+
+  if (publishedOnly) {
+    query = query.eq("status", "published");
+  }
+  if (keyword) {
+    const escapedKeyword = escapeLikeKeyword(keyword);
+    query = query.or([
+      `title.ilike.%${escapedKeyword}%`,
+      `creator.ilike.%${escapedKeyword}%`,
+      `content_html.ilike.%${escapedKeyword}%`
+    ].join(","));
+  }
+
+  const { data: documents, error } = await query;
+  if (error) {
+    throw error;
+  }
+
+  const ids = (documents || []).map((row) => Number(row.id));
+  if (ids.length === 0) {
+    return [];
+  }
+
+  const [targetsResult, assetsResult, readsResult] = await Promise.all([
+    supabase.from("sop_document_targets").select("sop_id, employee_id").eq("owner_user_id", ownerUserId).in("sop_id", ids),
+    supabase.from("sop_assets").select("*").eq("owner_user_id", ownerUserId).in("sop_id", ids).order("sort_order", { ascending: true }),
+    supabase.from("sop_reads").select("sop_id, employee_id, read_at").eq("owner_user_id", ownerUserId).in("sop_id", ids)
+  ]);
+
+  if (targetsResult.error) throw targetsResult.error;
+  if (assetsResult.error) throw assetsResult.error;
+  if (readsResult.error) throw readsResult.error;
+
+  const targetMap = new Map();
+  for (const target of targetsResult.data || []) {
+    const sopId = Number(target.sop_id);
+    targetMap.set(sopId, [...(targetMap.get(sopId) || []), Number(target.employee_id)]);
+  }
+  const assetMap = new Map();
+  for (const asset of assetsResult.data || []) {
+    const sopId = Number(asset.sop_id);
+    assetMap.set(sopId, [...(assetMap.get(sopId) || []), asset]);
+  }
+  const readMap = new Map();
+  for (const read of readsResult.data || []) {
+    const sopId = Number(read.sop_id);
+    readMap.set(sopId, [...(readMap.get(sopId) || []), read]);
+  }
+
+  return (documents || [])
+    .filter((row) => {
+      if (!employeeId) return true;
+      if (row.target_type !== "specific") return true;
+      return (targetMap.get(Number(row.id)) || []).includes(Number(employeeId));
+    })
+    .map((row) => mapSopDocument(row, {
+      targetIds: targetMap.get(Number(row.id)) || [],
+      assets: assetMap.get(Number(row.id)) || [],
+      reads: readMap.get(Number(row.id)) || []
+    }));
+}
+
+async function assertSopTargetEmployeesBelongToOwner(ownerUserId, targetEmployeeIds) {
+  if (targetEmployeeIds.length === 0) {
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from("employees")
+    .select("id")
+    .eq("owner_user_id", ownerUserId)
+    .in("id", targetEmployeeIds);
+  if (error) {
+    throw error;
+  }
+
+  // SOP 受众只能选择当前账号员工；服务端使用 service role，必须显式校验 owner_user_id，不能只依赖 employee_id 外键。
+  const validIds = new Set((data || []).map((row) => Number(row.id)));
+  const missingIds = targetEmployeeIds.filter((employeeId) => !validIds.has(Number(employeeId)));
+  if (missingIds.length > 0) {
+    throw new Error("SOP指定员工不属于当前后台账号");
+  }
+}
+
+async function fetchSopDocumentById(ownerUserId, sopId) {
+  const rows = await fetchSopDocuments(ownerUserId);
+  return rows.find((row) => row.id === String(sopId)) || null;
+}
+
+async function replaceSopRelations(ownerUserId, sopId, payload) {
+  // SOP 正文保存是“整份发布物”的替换语义：受众、图片、附件必须跟文档版本同步，避免旧附件或旧指定员工残留。
+  await assertSopTargetEmployeesBelongToOwner(ownerUserId, payload.targetEmployeeIds);
+  const [deleteTargets, deleteAssets] = await Promise.all([
+    supabase.from("sop_document_targets").delete().eq("owner_user_id", ownerUserId).eq("sop_id", sopId),
+    supabase.from("sop_assets").delete().eq("owner_user_id", ownerUserId).eq("sop_id", sopId)
+  ]);
+  if (deleteTargets.error) throw deleteTargets.error;
+  if (deleteAssets.error) throw deleteAssets.error;
+
+  const targetRows = payload.targetEmployeeIds.map((employeeId) => ({
+    owner_user_id: ownerUserId,
+    sop_id: sopId,
+    employee_id: employeeId
+  }));
+  if (targetRows.length > 0) {
+    const { error } = await supabase.from("sop_document_targets").insert(targetRows);
+    if (error) throw error;
+  }
+
+  const assetRows = [
+    ...payload.images.map((url, index) => ({
+      owner_user_id: ownerUserId,
+      sop_id: sopId,
+      kind: "image",
+      name: `SOP插图 ${index + 1}`,
+      url,
+      size_label: "",
+      sort_order: index
+    })),
+    ...payload.attachments.map((item, index) => ({
+      owner_user_id: ownerUserId,
+      sop_id: sopId,
+      kind: "attachment",
+      name: item.name,
+      url: item.url,
+      size_label: item.size,
+      sort_order: index
+    }))
+  ];
+  if (assetRows.length > 0) {
+    const { error } = await supabase.from("sop_assets").insert(assetRows);
+    if (error) throw error;
+  }
+}
+
+app.get("/api/admin/sops", async (req, res) => {
+  try {
+    const keyword = String(req.query.keyword || "").trim();
+    const employeeId = req.query.employeeId ? Number(req.query.employeeId) : null;
+    const publishedOnly = req.query.publishedOnly === "true" || Boolean(employeeId);
+    const rows = await fetchSopDocuments(req.authUser.id, { keyword, publishedOnly, employeeId });
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "SOP列表加载失败" });
+  }
+});
+
+app.get("/api/admin/sops/:id", async (req, res) => {
+  try {
+    const detail = await fetchSopDocumentById(req.authUser.id, Number(req.params.id));
+    if (!detail) {
+      return res.status(404).json({ error: "SOP不存在" });
+    }
+    res.json(detail);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "SOP详情加载失败" });
+  }
+});
+
+app.post("/api/admin/sops", async (req, res) => {
+  try {
+    const payload = normalizeSopPayload(req.body, req.authUser);
+    const validationError = validateSopPayload(payload);
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
+    }
+
+    const { data, error } = await supabase
+      .from("sop_documents")
+      .insert({
+        owner_user_id: req.authUser.id,
+        title: payload.title,
+        content_html: payload.contentHtml,
+        target_type: payload.targetType,
+        creator: payload.creator,
+        status: payload.status,
+        updated_at: new Date().toISOString()
+      })
+      .select("*")
+      .single();
+    if (error) throw error;
+
+    await replaceSopRelations(req.authUser.id, Number(data.id), payload);
+    const detail = await fetchSopDocumentById(req.authUser.id, Number(data.id));
+    res.status(201).json(detail || mapSopDocument(data));
+  } catch (error) {
+    res.status(500).json({ error: error.message || "SOP创建失败" });
+  }
+});
+
+app.put("/api/admin/sops/:id", async (req, res) => {
+  try {
+    const sopId = Number(req.params.id);
+    const payload = normalizeSopPayload(req.body, req.authUser);
+    const validationError = validateSopPayload(payload);
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
+    }
+
+    const { data, error } = await supabase
+      .from("sop_documents")
+      .update({
+        title: payload.title,
+        content_html: payload.contentHtml,
+        target_type: payload.targetType,
+        creator: payload.creator,
+        status: payload.status,
+        updated_at: new Date().toISOString()
+      })
+      .eq("owner_user_id", req.authUser.id)
+      .eq("id", sopId)
+      .select("*")
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) {
+      return res.status(404).json({ error: "SOP不存在" });
+    }
+
+    await replaceSopRelations(req.authUser.id, sopId, payload);
+    const detail = await fetchSopDocumentById(req.authUser.id, sopId);
+    res.json(detail || mapSopDocument(data));
+  } catch (error) {
+    res.status(500).json({ error: error.message || "SOP更新失败" });
+  }
+});
+
+app.delete("/api/admin/sops/:id", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("sop_documents")
+      .delete()
+      .eq("owner_user_id", req.authUser.id)
+      .eq("id", Number(req.params.id))
+      .select("id")
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) {
+      return res.status(404).json({ error: "SOP不存在" });
+    }
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "SOP删除失败" });
+  }
+});
+
+app.post("/api/admin/sops/:id/read", async (req, res) => {
+  try {
+    const employeeId = Number(req.body.employeeId);
+    if (!Number.isFinite(employeeId) || employeeId <= 0) {
+      return res.status(400).json({ error: "请选择员工" });
+    }
+
+    const visibleSops = await fetchSopDocuments(req.authUser.id, { publishedOnly: true, employeeId });
+    if (!visibleSops.some((row) => row.id === String(req.params.id))) {
+      return res.status(404).json({ error: "该员工不可见此SOP" });
+    }
+
+    const { error } = await supabase
+      .from("sop_reads")
+      .upsert({
+        owner_user_id: req.authUser.id,
+        sop_id: Number(req.params.id),
+        employee_id: employeeId,
+        read_at: new Date().toISOString()
+      }, {
+        onConflict: "owner_user_id,sop_id,employee_id"
+      });
+    if (error) throw error;
+
+    const detail = await fetchSopDocumentById(req.authUser.id, Number(req.params.id));
+    res.json(detail);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "SOP签收失败" });
+  }
+});
+
 app.get("/api/admin/employees", async (req, res) => {
   try {
     const ownerUserId = req.authUser.id;
@@ -3307,6 +3719,7 @@ app.get("/api/admin/employees", async (req, res) => {
       const escapedKeyword = escapeLikeKeyword(keyword);
       employeeQuery = employeeQuery.or([
         `name.ilike.%${escapedKeyword}%`,
+        `nickname.ilike.%${escapedKeyword}%`,
         `employee_no.ilike.%${escapedKeyword}%`,
         `phone.ilike.%${escapedKeyword}%`,
         `role.ilike.%${escapedKeyword}%`,
@@ -3365,6 +3778,10 @@ app.get("/api/admin/employees/:id", async (req, res) => {
 app.post("/api/admin/employees", async (req, res) => {
   try {
     const payload = normalizeEmployeePayload(req.body, req.authUser);
+    const validationError = validateEmployeeAmountPayload(payload);
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
+    }
     const employeeId = await createEmployeeRecord(payload, req.authUser);
     const detail = await fetchEmployeeDetail(Number(employeeId), req.authUser.id);
     res.status(201).json(detail);
@@ -3376,6 +3793,10 @@ app.post("/api/admin/employees", async (req, res) => {
 app.put("/api/admin/employees/:id", async (req, res) => {
   try {
     const payload = normalizeEmployeePayload(req.body, req.authUser);
+    const validationError = validateEmployeeAmountPayload(payload);
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
+    }
     const employeeId = await updateEmployeeRecord(Number(req.params.id), payload, req.authUser);
     const detail = await fetchEmployeeDetail(Number(employeeId), req.authUser.id);
     res.json(detail);

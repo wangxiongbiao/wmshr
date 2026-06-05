@@ -240,9 +240,9 @@ function EmployeePerformanceList({ stats, maxRegHour }: { stats: DashboardEmploy
   return (
     <div className="space-y-4">
       <div className="bg-slate-50 p-3 rounded-xl flex items-center justify-between text-xs text-slate-500 border border-slate-100 mb-1">
-        <span className="whitespace-nowrap font-extrabold text-slate-700">员工姓名 (职位 · 部门)</span>
-        <div className="flex gap-6 xl:gap-8">
-          <span className="whitespace-nowrap font-extrabold text-slate-700 w-32 text-right">工时分配 (正常/加班)</span>
+        <span className="flex-1 min-w-0 whitespace-nowrap font-extrabold text-slate-700">员工姓名 (职位 · 部门)</span>
+        <div className="flex flex-shrink-0 gap-6 xl:gap-8">
+          <span className="whitespace-nowrap font-extrabold text-slate-700 w-44 text-right">工时分配 (正常/加班)</span>
           <span className="whitespace-nowrap font-extrabold text-slate-700 w-20 text-center">工时饱和率</span>
         </div>
       </div>
@@ -261,21 +261,24 @@ function EmployeePerformanceList({ stats, maxRegHour }: { stats: DashboardEmploy
               : stat.satiety > 0
                 ? "bg-slate-100 text-slate-600"
                 : "bg-blue-50 text-blue-700";
+          // 数据看板员工名片需要把昵称直接并入主姓名，便于在紧凑列表里识别员工；接口已返回 employeeNickname，不要额外拉员工列表拼装。
+          const displayName = stat.employeeNickname ? `${stat.employeeName}(${stat.employeeNickname})` : stat.employeeName;
 
           return (
             <div key={stat.employeeId} className="flex items-center justify-between pt-3.5 pb-2 first:pt-0 group hover:bg-slate-50/50 rounded-lg px-2 transition">
-              <div className="flex items-center gap-3 w-[220px] min-w-0">
+              {/* 姓名列必须用剩余空间自然撑开；右侧指标列保持固定宽度，避免长姓名时重新引入固定姓名列导致看板横向拥挤。 */}
+              <div className="flex flex-1 items-center gap-3 min-w-0">
                 <div className="w-9 h-9 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center font-black text-indigo-600 text-sm overflow-hidden flex-shrink-0">
-                  {stat.employeePhoto ? <img src={stat.employeePhoto} className="w-full h-full object-cover" alt="" referrerPolicy="no-referrer" /> : <span>{stat.employeeName.charAt(0)}</span>}
+                  {stat.employeePhoto ? <img src={stat.employeePhoto} className="w-full h-full object-cover" alt="" referrerPolicy="no-referrer" /> : <span>{displayName.charAt(0)}</span>}
                 </div>
                 <div className="truncate">
-                  <h4 className="text-sm font-bold text-slate-800 truncate">{stat.employeeName}</h4>
+                  <h4 className="text-sm font-bold text-slate-800 truncate">{displayName}</h4>
                   <span className="text-[10px] text-slate-400 font-medium">{stat.employeeDept || "未分配"} · {stat.employeeRole || "未设置职位"}</span>
                 </div>
               </div>
 
-              <div className="flex-1 flex items-center justify-end gap-6 xl:gap-8">
-                <div className="w-full max-w-[170px] flex flex-col gap-1 items-end">
+              <div className="flex flex-shrink-0 items-center justify-end gap-6 xl:gap-8">
+                <div className="w-[220px] flex flex-col gap-1 items-end flex-shrink-0">
                   <div className="flex text-[10px] text-slate-500 font-semibold gap-2">
                     <span>标准:{regH.toFixed(0)}h</span>
                     {otH > 0 && <span className="text-amber-600 font-bold">加班:{otH.toFixed(0)}h</span>}

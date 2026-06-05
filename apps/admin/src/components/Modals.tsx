@@ -47,6 +47,7 @@ function Modal({ isOpen, onClose, children, title, className, bodyClassName, foo
 
 interface EmployeeFormState {
   name: string;
+  nickname: string;
   gender: Employee["gender"];
   country: Employee["country"];
   role: string;
@@ -62,6 +63,7 @@ interface EmployeeFormState {
 
 const DEFAULT_EMPLOYEE_FORM: EmployeeFormState = {
   name: "",
+  nickname: "",
   gender: "female",
   country: "MM",
   role: "拣货员",
@@ -78,6 +80,7 @@ const DEFAULT_EMPLOYEE_FORM: EmployeeFormState = {
 function normalizeEmployeeToForm(employee: Employee): EmployeeFormState {
   return {
     name: employee.name,
+    nickname: employee.nickname || "",
     gender: employee.gender,
     country: employee.country,
     role: employee.role,
@@ -173,6 +176,11 @@ export function EmployeeModal({
 
     const hasBaseWage = formData.baseMonthlyWage !== undefined && formData.baseMonthlyWage > 0;
     const hasHourlyRate = formData.hourlyRate !== undefined && formData.hourlyRate > 0;
+    const amountFields = [formData.hourlyRate, formData.baseMonthlyWage, formData.attendanceBonus, formData.socialSecurity];
+    if (amountFields.some((value) => value !== undefined && value < 0)) {
+      setError("金额不能小于 0");
+      return;
+    }
     if (!hasBaseWage && !hasHourlyRate) {
       setError("请至少输入“时薪”或“基础工资（为月工资）”其中的一项！");
       return;
@@ -183,6 +191,7 @@ export function EmployeeModal({
     // 员工管理界面完全按 v2 原型展示；phone/status/salaryEffectiveStartDate 是现有后端契约需要的隐藏字段，不允许重新显示到 v2 弹窗里。
     onSave({
       name: formData.name.trim(),
+      nickname: formData.nickname.trim(),
       gender: formData.gender,
       country: formData.country,
       phone: employee?.phone || "未填写",
@@ -245,9 +254,13 @@ export function EmployeeModal({
             ) : null}
           </div>
           <div className="flex-1 grid grid-cols-2 gap-4">
-            <div className="col-span-2">
+            <div>
               <FieldLabel>姓名</FieldLabel>
               <input type="text" name="name" value={formData.name} onChange={handleChange} required className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none text-sm" placeholder="请输入员工姓名" />
+            </div>
+            <div>
+              <FieldLabel>昵称</FieldLabel>
+              <input type="text" name="nickname" value={formData.nickname} onChange={handleChange} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none text-sm" placeholder="可选，如：阿明" />
             </div>
             <div>
               <FieldLabel>性别</FieldLabel>
@@ -281,11 +294,11 @@ export function EmployeeModal({
           </div>
           <div>
             <FieldLabel>时薪 (不输则根据基础薪资折算)</FieldLabel>
-            <input type="number" name="hourlyRate" step="0.5" value={formData.hourlyRate ?? ""} onChange={handleChange} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" placeholder="如: 300" />
+            <input type="number" name="hourlyRate" step="0.5" min="0" value={formData.hourlyRate ?? ""} onChange={handleChange} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" placeholder="如: 300" />
           </div>
           <div>
             <FieldLabel>基础工资（为月工资，如果不输，则按时薪计）</FieldLabel>
-            <input type="number" name="baseMonthlyWage" step="100" value={formData.baseMonthlyWage ?? ""} onChange={handleChange} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" placeholder="如: 60000" />
+            <input type="number" name="baseMonthlyWage" step="100" min="0" value={formData.baseMonthlyWage ?? ""} onChange={handleChange} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" placeholder="如: 60000" />
           </div>
           <div>
             <FieldLabel>全勤奖</FieldLabel>

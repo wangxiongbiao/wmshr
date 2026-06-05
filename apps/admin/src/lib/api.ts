@@ -4,6 +4,7 @@ import {
   AttendanceCalculationDetail,
   AttendanceCalculationResult,
   AttendanceRecord,
+  AttendanceRecordCreatePayload,
   AttendanceRecordUpdatePayload,
   AttendanceRule,
   AttendanceRuleDetail,
@@ -24,6 +25,7 @@ import {
   RecalculateBatchResponse,
   SalaryAdjustmentItem,
   SalaryAdjustmentPayload,
+  SopDocument,
   WorkspaceBootstrapResponse,
   EmployeeUpsertPayload
 } from "../types";
@@ -55,6 +57,48 @@ export async function fetchEmployees(): Promise<Employee[]> {
 export async function fetchDashboardData(): Promise<DashboardData> {
   // v2 数据看板不再由前端日期筛选驱动；后端按当前账号最后一次考勤结果周期返回完整看板契约。
   return request<DashboardData>("/api/admin/dashboard");
+}
+
+export async function fetchSops(params: { keyword?: string; employeeId?: number | null; publishedOnly?: boolean } = {}): Promise<SopDocument[]> {
+  const search = new URLSearchParams();
+  if (params.keyword?.trim()) {
+    search.set("keyword", params.keyword.trim());
+  }
+  if (params.employeeId) {
+    search.set("employeeId", String(params.employeeId));
+  }
+  if (params.publishedOnly) {
+    search.set("publishedOnly", "true");
+  }
+  const query = search.toString();
+  return request<SopDocument[]>(`/api/admin/sops${query ? `?${query}` : ""}`);
+}
+
+export async function createSop(payload: Omit<SopDocument, "id" | "createdAt" | "reads">): Promise<SopDocument> {
+  return request<SopDocument>("/api/admin/sops", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateSop(sopId: string, payload: Omit<SopDocument, "id" | "createdAt" | "reads">): Promise<SopDocument> {
+  return request<SopDocument>(`/api/admin/sops/${sopId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function deleteSop(sopId: string): Promise<{ success: true }> {
+  return request<{ success: true }>(`/api/admin/sops/${sopId}`, {
+    method: "DELETE"
+  });
+}
+
+export async function markSopRead(sopId: string, employeeId: number): Promise<SopDocument> {
+  return request<SopDocument>(`/api/admin/sops/${sopId}/read`, {
+    method: "POST",
+    body: JSON.stringify({ employeeId })
+  });
 }
 
 export async function fetchEmployeesPage(params: EmployeeListFilters & {
@@ -181,6 +225,14 @@ export async function fetchAttendanceCalculations(params: {
 
 export async function fetchAttendanceCalculationDetail(resultId: number): Promise<AttendanceCalculationDetail> {
   return request<AttendanceCalculationDetail>(`/api/admin/attendance-calculations/${resultId}`);
+}
+
+export async function createAttendanceRecord(payload: AttendanceRecordCreatePayload): Promise<AttendanceCalculationResult> {
+  // 新增考勤记录复用后端补卡接口；后端会 upsert 同员工同日期记录，并立即重算日/月考勤。
+  return request<AttendanceCalculationResult>("/api/admin/attendance-records", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
 }
 
 export async function fetchAttendanceSummaries(params: {
@@ -337,12 +389,6 @@ export async function updateAttendanceRecord(recordId: number, payload: Attendan
   });
 }
 
-export async function createAttendanceRecord(employeeId: number, payload: AttendanceRecordUpdatePayload): Promise<AttendanceCalculationResult> {
-  return request<AttendanceCalculationResult>("/api/admin/attendance-records", {
-    method: "POST",
-    body: JSON.stringify({ employeeId, ...payload })
-  });
-}
 
 export async function recalculateDailyAttendance(employeeId: number, date: string): Promise<AttendanceCalculationResult> {
   return request<AttendanceCalculationResult>("/api/admin/attendance-calculations/recalculate-daily", {

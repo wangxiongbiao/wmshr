@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Clock, LayoutDashboard, Users, Wallet } from "lucide-react";
+import { Clock, FileText, LayoutDashboard, Users, Wallet } from "lucide-react";
 import { TabId } from "../types";
 import { cn } from "../lib/utils";
 
@@ -19,6 +19,7 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
     { id: 'employees' as TabId, label: '员工管理', icon: Users },
     { id: 'attendance' as TabId, label: '考勤计算', icon: Clock },
     { id: 'payroll' as TabId, label: '薪资核算', icon: Wallet },
+    { id: 'sop' as TabId, label: 'SOP管理', icon: FileText },
   ];
 
   return (

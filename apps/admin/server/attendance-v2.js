@@ -4,8 +4,24 @@ export const DEFAULT_ATTENDANCE_CONFIG = {
   break_start: "12:00",
   break_end: "13:00",
   standard_hours: 8,
-  ot_hourly_fee: 50
+  ot_hourly_fee: 50,
+  currency: "THB"
 };
+
+const CURRENCY_TO_THB_RATE = {
+  THB: 1,
+  USD: 36,
+  MYR: 7.7,
+  IDR: 0.0023
+};
+
+export function convertAttendanceRuleAmount(amount, fromCurrency = "THB", toCurrency = "THB") {
+  // 考勤全局规则的加班费可以用不同币种维护；结果必须落到员工薪资币种，避免个人调整后同一行出现混合币种金额。
+  // 当前项目没有独立汇率表，先使用稳定服务端汇率表；如果后续要改为实时/可配置汇率，应先替换这里并同步设置弹窗说明。
+  const sourceRate = CURRENCY_TO_THB_RATE[fromCurrency] || CURRENCY_TO_THB_RATE.THB;
+  const targetRate = CURRENCY_TO_THB_RATE[toCurrency] || CURRENCY_TO_THB_RATE.THB;
+  return roundToTwo((Number(amount || 0) * sourceRate) / targetRate);
+}
 
 export function roundToTwo(value) {
   return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
@@ -55,7 +71,8 @@ function normalizeConfig(config = {}) {
     ...DEFAULT_ATTENDANCE_CONFIG,
     ...config,
     standard_hours: Number(config.standard_hours ?? DEFAULT_ATTENDANCE_CONFIG.standard_hours),
-    ot_hourly_fee: Number(config.ot_hourly_fee ?? DEFAULT_ATTENDANCE_CONFIG.ot_hourly_fee)
+    ot_hourly_fee: Number(config.ot_hourly_fee ?? DEFAULT_ATTENDANCE_CONFIG.ot_hourly_fee),
+    currency: config.currency || DEFAULT_ATTENDANCE_CONFIG.currency
   };
 }
 
@@ -217,10 +234,15 @@ export function calculateDailyAttendanceRow(employee, record, config, date, owne
   const overtimePayHours = overtimeRawHours;
   const hasFixedSalary = Number(employee.fixed_salary || 0) > 0;
   const hourlyRate = Number(employee.hourly_rate || 0);
+  const overtimeFeeInEmployeeCurrency = convertAttendanceRuleAmount(
+    normalizedConfig.ot_hourly_fee,
+    normalizedConfig.currency,
+    employee.currency || "THB"
+  );
   const workPay = hasFixedSalary
     ? Number(employee.fixed_salary) / 30
     : Math.max(0, validHours - overtimePayHours) * hourlyRate;
-  const overtimePay = overtimePayHours * Number(normalizedConfig.ot_hourly_fee);
+  const overtimePay = overtimePayHours * overtimeFeeInEmployeeCurrency;
 
   return buildAttendanceResultPayload({
     ownerUserId,

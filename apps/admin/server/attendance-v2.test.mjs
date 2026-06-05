@@ -56,3 +56,12 @@ function normalRecord(overrides = {}) {
   assert.equal(row.overtime_pay, 50);
   assert.equal(row.total_pay, 350);
 }
+
+// 全局规则币种可以不是员工币种；服务端必须先换算到员工薪资币种，再计算个人考勤行金额。
+{
+  const config = { ...DEFAULT_ATTENDANCE_CONFIG, ot_hourly_fee: 2, currency: "USD" };
+  const row = calculateDailyAttendanceRow(baseEmployee({ hourly_rate: 80, currency: "THB" }), normalRecord({ out_time: "18:30" }), config, date, ownerUserId);
+  assert.equal(row.overtime_pay_hours, 1);
+  assert.equal(row.overtime_pay, 72);
+  assert.equal(row.total_pay, 712);
+}
