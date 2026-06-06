@@ -919,6 +919,8 @@ function mapSalaryProfileRow(row) {
     salaryType: row.salary_type,
     fixedSalary: row.fixed_salary === null ? null : Number(row.fixed_salary),
     hourlyRate: row.hourly_rate === null ? null : Number(row.hourly_rate),
+    // 服务费比例现在随薪资档案一起返回：工资条说明要展示本次核算使用的比例，而不是员工当前档案的可能新值。
+    serviceFeeRate: row.service_fee_rate === null || row.service_fee_rate === undefined ? 0 : Number(row.service_fee_rate),
     currency: row.currency,
     isActive: row.is_active,
     effectiveStartDate: row.effective_start_date,
@@ -1615,6 +1617,8 @@ function buildSalaryProfilePayload(employee, ownerUserId, effectiveStartDate) {
     salary_type: employee.salary_type,
     fixed_salary: normalizeSalaryAmount(employee.fixed_salary),
     hourly_rate: normalizeSalaryAmount(employee.hourly_rate),
+    // 服务费比例会影响工资结果，必须进入 effective-dated salary_profiles；否则编辑员工比例后，历史/当月核算无法说明本次使用的比例。
+    service_fee_rate: getNonNegativePayrollAmount(employee.service_fee_rate),
     currency: employee.currency,
     is_active: true,
     effective_start_date: effectiveStartDate,
@@ -1628,6 +1632,8 @@ function isSameSalaryProfile(profile, payload) {
     profile.salary_type === payload.salary_type &&
     normalizeSalaryAmount(profile.fixed_salary) === normalizeSalaryAmount(payload.fixed_salary) &&
     normalizeSalaryAmount(profile.hourly_rate) === normalizeSalaryAmount(payload.hourly_rate) &&
+    // 服务费比例属于计薪口径的一部分；不比较会导致只改比例时薪资档案不更新，后续工资条无法追溯比例来源。
+    getNonNegativePayrollAmount(profile.service_fee_rate) === getNonNegativePayrollAmount(payload.service_fee_rate) &&
     profile.currency === payload.currency
   );
 }
@@ -1778,11 +1784,14 @@ function buildPayrollSalaryConfig(employee, salaryProfile) {
   const hourlyRate = salaryType === "hourly"
     ? getNonNegativePayrollAmount(salaryProfile?.hourly_rate ?? employee.hourly_rate)
     : null;
+  // 服务费比例优先读取当月薪资档案，保证工资结果按生效档案快照计算；老库/旧档案没有该列时再回退员工档案，避免线上迁移前后断算。
+  const serviceFeeRate = getNonNegativePayrollAmount(salaryProfile?.service_fee_rate ?? employee.service_fee_rate);
 
   return {
     salaryType,
     fixedSalary,
     hourlyRate,
+    serviceFeeRate,
     currency: salaryProfile?.currency || employee.currency || "THB"
   };
 }
@@ -1900,8 +1909,8 @@ function buildMonthlyPayrollPayloadFromContext(context, yearMonth, ownerUserId, 
   const standardPaidHours = Math.max(0, validHours - overtimePayHours);
   const hourlyPay = salaryConfig.salaryType === "hourly" ? roundToTwo(standardPaidHours * Number(hourlyRate || 0)) : 0;
   const basePay = salaryConfig.salaryType === "fixed" ? Number(fixedSalary || 0) : hourlyPay;
-  // 服务费比例维护在员工档案，薪资结果必须沉淀计算后的金额：时薪员工按本月标准工时工资计费，固定薪员工按固定工资计费。
-  const serviceFeeAmount = roundToTwo(basePay * getNonNegativePayrollAmount(employee.service_fee_rate) / 100);
+  // 服务费比例使用当月薪资档案快照；生成结果沉淀金额，列表/工资条都读 service_fee_amount，避免员工后续改比例影响历史工资。
+  const serviceFeeAmount = roundToTwo(basePay * salaryConfig.serviceFeeRate / 100);
   const overtimePay = attendanceSummary ? roundToTwo(dailyCalculations.reduce((sum, row) => {
     const fee = row.attendance_rule_id ? Number(ruleFeeMap.get(Number(row.attendance_rule_id)) || 0) : 0;
     return sum + Number(row.overtime_pay_hours || 0) * fee;

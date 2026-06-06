@@ -416,6 +416,10 @@ export function PayrollTable({ employees }: PayrollTableProps) {
   const payslipBaseSalary = payslipResult
     ? (payslipResult.salaryType === "fixed" ? payslipResult.fixedSalary || 0 : payslipResult.hourlyPay)
     : 0;
+  const payslipServiceFeeRate = payslipDetail?.salaryProfile?.serviceFeeRate ?? payslipEmployee?.serviceFeeRate ?? 0;
+  const payslipAllowanceItems = payslipDetail?.adjustmentItems.filter((item) => item.type === "allowance") || [];
+  const payslipOtherItems = payslipDetail?.adjustmentItems.filter((item) => item.type === "other") || [];
+  const payslipDeductionItems = payslipDetail?.adjustmentItems.filter((item) => item.type === "deduction") || [];
 
 
   return (
@@ -787,10 +791,23 @@ export function PayrollTable({ employees }: PayrollTableProps) {
                 {/* 工资条弹窗必须和列表共用同一基薪口径：月薪看 fixedSalary，时薪看本月标准工时工资，避免月薪员工 hourlyPay 为 0 时弹窗误显示 0。 */}
                 <div className="flex justify-between"><span className="text-slate-500">{tAdmin("计算基薪:")}</span><span className="font-bold text-slate-800 text-right">{formatCurrency(payslipBaseSalary, payslipResult.currency)}</span></div>
                 <div className="flex justify-between"><span className="text-slate-500">{tAdmin("加班应得:")}</span><span className="font-bold text-green-600 text-right">+ {formatCurrency(payslipResult.overtimePay, payslipResult.currency)}</span></div>
-                <div className="flex justify-between"><span className="text-slate-500">{tAdmin("服务费:")}</span><span className="font-bold text-amber-600 text-right">+ {formatCurrency(payslipResult.serviceFeeAmount, payslipResult.currency)}</span></div>
+                {/* 服务费必须显示本次工资结果使用的比例和金额；比例来自 salary_profiles 快照，金额来自 monthly_payroll_results 沉淀值。 */}
+                <div className="flex justify-between"><span className="text-slate-500">{tAdmin("服务费:")} <span className="text-[10px]">{tAdmin("{{rate}}%", { rate: payslipServiceFeeRate.toFixed(2) })}</span></span><span className="font-bold text-amber-600 text-right">+ {formatCurrency(payslipResult.serviceFeeAmount, payslipResult.currency)}</span></div>
                 <div className="flex justify-between"><span className="text-slate-500">{tAdmin("补贴/其他:")}</span><span className="font-bold text-slate-800 text-right">+ {formatCurrency(payslipResult.allowanceTotal + payslipResult.otherTotal, payslipResult.currency)}</span></div>
+                {payslipAllowanceItems.concat(payslipOtherItems).map((item) => (
+                  <div key={item.id} className="flex justify-between gap-3 pl-3 text-[11px] text-slate-500">
+                    <span className="min-w-0 truncate">+ {item.name}{item.note ? ` · ${item.note}` : ""}</span>
+                    <span className="shrink-0 text-slate-700">{formatCurrency(item.amount, payslipResult.currency)}</span>
+                  </div>
+                ))}
                 <div className="flex justify-between"><span className="text-slate-500">{tAdmin("社保扣款:")}</span><span className="text-red-500 text-right">- {formatCurrency(payslipResult.socialSecurityAmount, payslipResult.currency)}</span></div>
                 <div className="flex justify-between"><span className="text-slate-500">{tAdmin("其他扣款:")}</span><span className="text-red-500 text-right">- {formatCurrency(payslipTaxOrDeduction, payslipResult.currency)}</span></div>
+                {payslipDeductionItems.map((item) => (
+                  <div key={item.id} className="flex justify-between gap-3 pl-3 text-[11px] text-red-500/80">
+                    <span className="min-w-0 truncate">- {item.name}{item.note ? ` · ${item.note}` : ""}</span>
+                    <span className="shrink-0">{formatCurrency(item.amount, payslipResult.currency)}</span>
+                  </div>
+                ))}
               </div>
             </div>
 

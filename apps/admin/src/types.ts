@@ -323,6 +323,8 @@ export interface SalaryProfile {
   salaryType: SalaryType;
   fixedSalary: number | null;
   hourlyRate: number | null;
+  // 服务费比例随薪资档案快照返回，工资条用它解释本次服务费金额，不能回读员工当前比例。
+  serviceFeeRate: number;
   currency: CurrencyCode;
   isActive: boolean;
   effectiveStartDate: string | null;
