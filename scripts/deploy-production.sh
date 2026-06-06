@@ -3,9 +3,10 @@ set -euo pipefail
 
 # WMSHR / Dutylix production release script.
 # Keep this file aligned with the deployment runbook in the Hermes github-operations skill:
-# root vercel.json builds apps/admin, apps/home must be deployed from its own directory
-# with the explicit dutylix Vercel project, and post-release verification must test the
-# custom domains instead of only the generated Vercel URLs.
+# root vercel.json builds apps/admin. The portal must still be deployed from the
+# monorepo root because it imports the private workspace package @wmshr/i18n; use
+# a temporary portal Vercel config during that one step so dutylix.com never gets
+# the admin build.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PROJECT_MANAGER_DIR="/Users/admin/Desktop/GitHub-Project-Manager"
@@ -14,7 +15,6 @@ PROJECT_INDEX="${PROJECT_MANAGER_DIR}/public/data/project-index.json"
 CUSTOM_DOMAIN="admin.dutylix.com"
 CUSTOM_ORIGIN="https://${CUSTOM_DOMAIN}"
 HOME_APP_DIR="${REPO_ROOT}/apps/home"
-HOME_VERCEL_CONFIG="${REPO_ROOT}/vercel.home.json"
 HOME_VERCEL_PROJECT="dutylix"
 HOME_CUSTOM_DOMAIN="dutylix.com"
 HOME_CUSTOM_ORIGIN="https://${HOME_CUSTOM_DOMAIN}"
@@ -142,6 +142,42 @@ PY
     echo "Portal bundle still contains removed Google-login CTA text." >&2
     exit 1
   fi
+}
+
+deploy_home_production() {
+  local home_deploy_log="$1"
+  local admin_config_backup deploy_status
+  admin_config_backup="$(mktemp -t wmshr-admin-vercel-config.XXXXXX.json)"
+
+  # Vercel only receives one root vercel.json during a monorepo root deploy.
+  # The admin config is restored even when the portal deploy fails, because leaving
+  # a portal config at the root would make the next admin release publish the wrong app.
+  cp "${REPO_ROOT}/vercel.json" "$admin_config_backup"
+  cat >"${REPO_ROOT}/vercel.json" <<'JSON'
+{
+  "buildCommand": "npm --workspace @wmshr/home run build",
+  "outputDirectory": "apps/home/dist",
+  "installCommand": "npm install --include=optional",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
+JSON
+
+  echo "+ vercel deploy ${REPO_ROOT} --prod --yes --project ${HOME_VERCEL_PROJECT}"
+  # Deploy from the monorepo root so @wmshr/i18n resolves as a workspace package.
+  # The temporary root config above forces this deploy to build apps/home, not admin.
+  set +e
+  vercel deploy "$REPO_ROOT" --prod --yes --project "$HOME_VERCEL_PROJECT" | tee "$home_deploy_log"
+  deploy_status=${PIPESTATUS[0]}
+  set -e
+
+  cp "$admin_config_backup" "${REPO_ROOT}/vercel.json"
+  rm -f "$admin_config_backup"
+  return "$deploy_status"
 }
 
 update_project_manager_log() {
@@ -301,11 +337,7 @@ main() {
 
   local home_deploy_log home_deployment_url
   home_deploy_log="$(mktemp -t wmshr-home-vercel-deploy.XXXXXX.log)"
-  echo "+ vercel deploy ${REPO_ROOT} --prod --yes --project ${HOME_VERCEL_PROJECT} -A ${HOME_VERCEL_CONFIG}"
-  # The portal imports the workspace package @wmshr/i18n, so deploy from the monorepo
-  # root with a portal-specific Vercel config. Deploying only apps/home would make
-  # Vercel install @wmshr/i18n from npm, where this private workspace package does not exist.
-  vercel deploy "$REPO_ROOT" --prod --yes --project "$HOME_VERCEL_PROJECT" -A "$HOME_VERCEL_CONFIG" | tee "$home_deploy_log"
+  deploy_home_production "$home_deploy_log"
   home_deployment_url="$(extract_home_deployment_url "$home_deploy_log")"
   if [[ -z "$home_deployment_url" ]]; then
     echo "Could not parse portal Vercel production deployment URL from $home_deploy_log" >&2
