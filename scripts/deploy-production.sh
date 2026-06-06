@@ -14,6 +14,7 @@ PROJECT_INDEX="${PROJECT_MANAGER_DIR}/public/data/project-index.json"
 CUSTOM_DOMAIN="admin.dutylix.com"
 CUSTOM_ORIGIN="https://${CUSTOM_DOMAIN}"
 HOME_APP_DIR="${REPO_ROOT}/apps/home"
+HOME_VERCEL_CONFIG="${REPO_ROOT}/vercel.home.json"
 HOME_VERCEL_PROJECT="dutylix"
 HOME_CUSTOM_DOMAIN="dutylix.com"
 HOME_CUSTOM_ORIGIN="https://${HOME_CUSTOM_DOMAIN}"
@@ -300,10 +301,11 @@ main() {
 
   local home_deploy_log home_deployment_url
   home_deploy_log="$(mktemp -t wmshr-home-vercel-deploy.XXXXXX.log)"
-  echo "+ cd ${HOME_APP_DIR} && vercel deploy --prod --yes --project ${HOME_VERCEL_PROJECT}"
-  # The repository root is linked to dutylix-admin; deploy the portal from apps/home with
-  # an explicit Vercel project so dutylix.com never receives the admin build by mistake.
-  (cd "$HOME_APP_DIR" && vercel deploy --prod --yes --project "$HOME_VERCEL_PROJECT") | tee "$home_deploy_log"
+  echo "+ vercel deploy ${REPO_ROOT} --prod --yes --project ${HOME_VERCEL_PROJECT} -A ${HOME_VERCEL_CONFIG}"
+  # The portal imports the workspace package @wmshr/i18n, so deploy from the monorepo
+  # root with a portal-specific Vercel config. Deploying only apps/home would make
+  # Vercel install @wmshr/i18n from npm, where this private workspace package does not exist.
+  vercel deploy "$REPO_ROOT" --prod --yes --project "$HOME_VERCEL_PROJECT" -A "$HOME_VERCEL_CONFIG" | tee "$home_deploy_log"
   home_deployment_url="$(extract_home_deployment_url "$home_deploy_log")"
   if [[ -z "$home_deployment_url" ]]; then
     echo "Could not parse portal Vercel production deployment URL from $home_deploy_log" >&2
