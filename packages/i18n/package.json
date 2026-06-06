@@ -1,0 +1,16 @@
+{
+  "name": "@wmshr/i18n",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./web": "./src/web.ts",
+    "./mobile": "./src/mobile.ts"
+  },
+  "dependencies": {
+    "i18next": "^26.2.0",
+    "i18next-browser-languagedetector": "^8.2.1",
+    "react-i18next": "^17.0.8"
+  }
+}

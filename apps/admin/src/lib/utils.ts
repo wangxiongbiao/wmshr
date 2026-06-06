@@ -4,6 +4,7 @@
  */
 
 import { type ClassValue, clsx } from "clsx";
+import { tAdmin } from "../lib/i18nText";
 import { twMerge } from "tailwind-merge";
 import { AppConfig, AttendanceDetails, AttendanceRecord, AttendanceRule, CurrencyCode, Employee, EmployeeStatus, SalaryType } from "../types";
 
@@ -18,13 +19,17 @@ export const CURRENCY_SYMBOLS: Record<CurrencyCode, string> = {
   IDR: 'Rp'
 };
 
-export const COUNTRY_NAMES: Record<string, string> = {
-  MM: '缅甸',
-  TH: '泰国',
-  CN: '中国',
-  VN: '越南',
-  KH: '柬埔寨'
-};
+export function getCountryName(countryCode: string) {
+  // 国家名称随语言切换动态翻译；不要在模块顶层缓存 tAdmin(...) 的结果。
+  switch (countryCode) {
+    case "MM": return tAdmin("缅甸");
+    case "TH": return tAdmin("泰国");
+    case "CN": return tAdmin("中国");
+    case "VN": return tAdmin("越南");
+    case "KH": return tAdmin("柬埔寨");
+    default: return countryCode;
+  }
+}
 
 export const COUNTRY_FLAGS: Record<string, string> = {
   MM: '🇲🇲',
@@ -34,18 +39,28 @@ export const COUNTRY_FLAGS: Record<string, string> = {
   KH: '🇰🇭'
 };
 
-export const EMPLOYEE_STATUS_META: Record<EmployeeStatus, { label: string; className: string }> = {
-  active: { label: '在职', className: 'bg-green-100 text-green-700' },
-  on_leave: { label: '休假', className: 'bg-sky-100 text-sky-700' },
-  probation: { label: '试用', className: 'bg-blue-100 text-blue-700' },
-  disabled: { label: '停用', className: 'bg-slate-100 text-slate-700' },
-  resigned: { label: '离职', className: 'bg-slate-200 text-slate-700' }
+const EMPLOYEE_STATUS_CLASS_NAMES: Record<EmployeeStatus, string> = {
+  active: 'bg-green-100 text-green-700',
+  on_leave: 'bg-sky-100 text-sky-700',
+  probation: 'bg-blue-100 text-blue-700',
+  disabled: 'bg-slate-100 text-slate-700',
+  resigned: 'bg-slate-200 text-slate-700'
 };
 
-export const SALARY_TYPE_LABELS: Record<SalaryType, string> = {
-  fixed: '固定工资',
-  hourly: '时薪'
-};
+export function getEmployeeStatusMeta(status: EmployeeStatus) {
+  // 状态样式可静态保存，状态文案必须动态翻译以响应语言切换。
+  const label = status === "on_leave" ? tAdmin("休假")
+    : status === "probation" ? tAdmin("试用")
+    : status === "disabled" ? tAdmin("停用")
+    : status === "resigned" ? tAdmin("离职")
+    : tAdmin("在职");
+  return { label, className: EMPLOYEE_STATUS_CLASS_NAMES[status] };
+}
+
+export function getSalaryTypeLabel(salaryType: SalaryType) {
+  // 薪资类型显示值同样不能顶层缓存，否则语言切换后工资条仍显示旧语言。
+  return salaryType === "hourly" ? tAdmin("时薪") : tAdmin("固定工资");
+}
 
 export function parseTimeToHours(str: string): number {
   if (!str) return 0;
@@ -153,26 +168,26 @@ export function getAttendanceRuleEffectiveStatus(rule: Pick<AttendanceRule, "eff
 
   if (today < rule.effectiveStartDate) {
     return {
-      label: "未开始",
+      label: tAdmin("未开始"),
       className: "bg-blue-50 text-blue-700 border border-blue-100"
     };
   }
 
   if (rule.effectiveEndDate && today > rule.effectiveEndDate) {
     return {
-      label: "已过期",
+      label: tAdmin("已过期"),
       className: "bg-slate-100 text-slate-700 border border-slate-200"
     };
   }
 
   return {
-    label: "生效中",
+    label: tAdmin("生效中"),
     className: "bg-emerald-50 text-emerald-700 border border-emerald-100"
   };
 }
 
 export function formatDateRange(startDate: string, endDate: string | null) {
-  return `${startDate} 至 ${endDate || "长期有效"}`;
+  return `${startDate} 至 ${endDate || tAdmin("长期有效")}`;
 }
 
 export function formatDateTime(value: string | null | undefined) {

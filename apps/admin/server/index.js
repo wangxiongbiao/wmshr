@@ -193,7 +193,7 @@ async function fetchWorkspaceDataCounts(ownerUserId) {
 }
 
 function hasWorkspaceData(counts) {
-  // 员工或考勤规则任一存在即视为已有业务数据，防止初始化重复写入演示数据。
+  // 员工或考勤规则任一存在即视为已有业务数据，防止初始化重复写入初始化数据。
   return counts.employeesCount > 0 || counts.rulesCount > 0;
 }
 
@@ -217,6 +217,8 @@ function mapEmployeeRow(row, ruleMap = new Map()) {
     fixedSalary: row.fixed_salary === null ? null : Number(row.fixed_salary),
     attendanceBonus: row.attendance_bonus === null || row.attendance_bonus === undefined ? 0 : Number(row.attendance_bonus),
     socialSecurity: row.social_security === null || row.social_security === undefined ? 0 : Number(row.social_security),
+    mealAllowance: row.meal_allowance === null || row.meal_allowance === undefined ? 0 : Number(row.meal_allowance),
+    serviceFeeRate: row.service_fee_rate === null || row.service_fee_rate === undefined ? 0 : Number(row.service_fee_rate),
     currency: row.currency,
     photo: row.photo,
     isDeleted: row.is_deleted
@@ -260,6 +262,72 @@ function signEmployeeAppToken(payload) {
   return `${body}.${signature}`;
 }
 
+function verifyEmployeeAppToken(token) {
+  const [body, signature] = String(token || "").split(".");
+  if (!body || !signature) {
+    throw new Error("员工端登录状态无效，请重新登录");
+  }
+
+  const expectedSignature = crypto.createHmac("sha256", EMPLOYEE_APP_TOKEN_SECRET).update(body).digest("base64url");
+  const actualBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expectedSignature);
+  // token 签名校验必须使用 timingSafeEqual，并先判断长度；否则恶意 token 可通过异常差异探测签名实现细节。
+  if (actualBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(actualBuffer, expectedBuffer)) {
+    throw new Error("员工端登录状态无效，请重新登录");
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
+  } catch {
+    throw new Error("员工端登录状态无效，请重新登录");
+  }
+
+  const expiresAt = Number(payload?.expiresAt);
+  // 过期时间必须是有限数值；缺失或被篡改成 NaN 时不能被当成未过期 token 放行。
+  if (!payload?.accountId || !payload?.ownerUserId || !payload?.employeeId || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+    throw new Error("员工端登录已过期，请重新登录");
+  }
+
+  return payload;
+}
+
+async function requireEmployeeAppAuth(req, res, next) {
+  try {
+    const token = getAccessToken(req);
+    if (!token) {
+      return res.status(401).json({ error: "请先登录员工端" });
+    }
+
+    const payload = verifyEmployeeAppToken(token);
+    const { data: accountRow, error } = await supabase
+      .from("employee_app_accounts")
+      .select("*, employees(*)")
+      .eq("id", Number(payload.accountId))
+      .eq("owner_user_id", payload.ownerUserId)
+      .eq("employee_id", Number(payload.employeeId))
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+    if (!accountRow || accountRow.status !== "active" || ["disabled", "resigned"].includes(accountRow.employees?.status)) {
+      return res.status(401).json({ error: "员工端账号已失效，请重新登录" });
+    }
+
+    // 移动端业务接口统一从 req.employeeApp 取 owner/employee，禁止相信请求体里的员工 ID，避免越权读取 SOP 或代打卡。
+    req.employeeApp = {
+      accountId: Number(accountRow.id),
+      ownerUserId: accountRow.owner_user_id,
+      employeeId: Number(accountRow.employee_id),
+      employee: accountRow.employees
+    };
+    next();
+  } catch (error) {
+    res.status(401).json({ error: error.message || "员工端登录状态校验失败" });
+  }
+}
+
 function generateEmployeeAppToken(accountRow) {
   const expiresAt = Date.now() + EMPLOYEE_APP_TOKEN_TTL_MS;
   // token 只承载员工账号定位字段；所有敏感状态仍以后端数据库为准，后续需要鉴权接口时必须复查 account status。
@@ -274,14 +342,27 @@ function generateEmployeeAppToken(accountRow) {
   };
 }
 
-function buildEmployeeAppAccountName(employeeRow) {
-  // 第一版默认用员工编号作为 App 账号，保证 Admin 看到的账号和员工列表中的员工编号稳定对应。
-  return String(employeeRow.employee_no || `emp-${employeeRow.id}`).trim();
+async function buildNextEmployeeAppAccountName() {
+  // 员工端登录入口没有先选择租户，因此账号本身必须全局唯一；继续使用 wms0001 这种短编号，隔离仍由 token 和 owner_user_id 绑定保护。
+  const { data, error } = await supabase
+    .from("employee_app_accounts")
+    .select("account")
+    .like("account", "wms%")
+    .order("account", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  const lastNumber = Number(String(data?.account || "").match(/^wms(\d+)$/i)?.[1] || 0);
+  return `wms${String(lastNumber + 1).padStart(4, "0")}`;
 }
 
 async function ensureEmployeeAppAccount(employeeRow, ownerUserId) {
   const now = new Date().toISOString();
-  const account = buildEmployeeAppAccountName(employeeRow);
+  const account = await buildNextEmployeeAppAccountName();
   const { data, error } = await supabase
     .from("employee_app_accounts")
     .upsert({
@@ -745,6 +826,8 @@ function normalizeAttendanceConfigPayload(body = {}) {
 function getV2AttendanceStatusLabel(row) {
   const statusLabelMap = {
     normal: "正常",
+    pending: "待打卡",
+    checked_in: "已上班",
     leave: "假期",
     sick_leave: "病假",
     absent: "缺勤",
@@ -784,6 +867,7 @@ function mapAttendanceCalculationRow(row, employeeMap = new Map()) {
     overtimeRawHours: Number(row.overtime_raw_hours),
     overtimePayHours,
     workPay: Number(row.work_pay || 0),
+    mealAllowanceAmount: row.meal_allowance_amount === null || row.meal_allowance_amount === undefined ? 0 : Number(row.meal_allowance_amount),
     overtimePay: Number(row.overtime_pay || 0),
     totalPay: Number(row.total_pay || 0),
     status: row.status,
@@ -883,6 +967,7 @@ function mapPayrollResultRow(row, employeeMap = new Map()) {
     deductionTotal: Number(row.deduction_total),
     otherTotal: Number(row.other_total),
     socialSecurityAmount: row.social_security_amount === null || row.social_security_amount === undefined ? 0 : Number(row.social_security_amount),
+    serviceFeeAmount: row.service_fee_amount === null || row.service_fee_amount === undefined ? 0 : Number(row.service_fee_amount),
     grossPay: Number(row.gross_pay),
     totalDeduction: Number(row.total_deduction),
     netPay: Number(row.net_pay),
@@ -998,6 +1083,102 @@ function getTodayDateKey() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function getBangkokDateKey(now = new Date()) {
+  // 考勤自动任务按业务地（泰国/缅甸）日期运行；不要用服务器 UTC 日期，否则 Vercel 17:00 UTC 触发时会落错业务日。
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(now);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+  return `${year}-${month}-${day}`;
+}
+
+function addDaysToDateKey(dateKey, dayDelta) {
+  const date = new Date(`${dateKey}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + dayDelta);
+  return date.toISOString().slice(0, 10);
+}
+
+function getAttendanceCronDates(now = new Date()) {
+  const todayDate = getBangkokDateKey(now);
+  return {
+    todayDate,
+    previousDate: addDaysToDateKey(todayDate, -1)
+  };
+}
+
+function getPayrollCronYearMonth(now = new Date()) {
+  // Vercel Cron 只能按 UTC 调度；生产配置用 17:00 UTC 触发，对应泰国/缅甸 00:00。
+  // 这里减 1 分钟取“刚结束那一天”的月份：例如 7/1 00:00 会结算 6 月，避免月初零点误切到新月份。
+  const payrollDate = new Date(now.getTime() - 60 * 1000);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit"
+  }).formatToParts(payrollDate);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  return `${year}-${month}`;
+}
+
+function isAuthorizedCronRequest(req) {
+  const expectedSecret = process.env.CRON_SECRET;
+  const authorization = req.headers.authorization || "";
+  // Vercel Cron 在配置 CRON_SECRET 后会带 Bearer token；没有密钥时拒绝执行，防止公开 API 被手动刷薪资重算。
+  return Boolean(expectedSecret) && authorization === `Bearer ${expectedSecret}`;
+}
+
+async function runNightlyPayrollCalculation(yearMonth, ownerUserId = null) {
+  let employeesQuery = supabase
+    .from("employees")
+    .select("*")
+    .eq("is_deleted", false);
+
+  if (ownerUserId) {
+    employeesQuery = employeesQuery.eq("owner_user_id", ownerUserId);
+  }
+
+  const employeesResult = await employeesQuery
+    .order("owner_user_id", { ascending: true })
+    .order("id", { ascending: true });
+
+  if (employeesResult.error) {
+    throw employeesResult.error;
+  }
+
+  const targetEmployees = (employeesResult.data || []).filter(isEmployeeAvailableForAttendanceAndPayroll);
+  const ownerIds = new Set(targetEmployees.map((employee) => employee.owner_user_id));
+  const failures = [];
+  let successCount = 0;
+
+  for (const employee of targetEmployees) {
+    try {
+      // 夜间任务使用 forceRecalculate，让月内每天新增/修改的考勤自动反映到工资；已确认/已核对通过的工资仍会被锁保护。
+      await calculateMonthlyPayroll(Number(employee.id), yearMonth, employee.owner_user_id, { forceRecalculate: true });
+      successCount += 1;
+    } catch (error) {
+      failures.push({
+        ownerUserId: employee.owner_user_id,
+        employeeId: Number(employee.id),
+        error: error.message || "夜间薪资计算失败"
+      });
+    }
+  }
+
+  return {
+    yearMonth,
+    ownerCount: ownerIds.size,
+    targetEmployeeCount: targetEmployees.length,
+    successCount,
+    failureCount: failures.length,
+    failures
+  };
+}
+
 async function resolveAttendanceConfig(ownerUserId) {
   const { data, error } = await supabase
     .from("attendance_config")
@@ -1061,15 +1242,14 @@ async function assertEmployeeAvailableForAttendanceAndPayroll(employeeId, ownerU
   }
 }
 
-function shouldCalculateEmployeeDate(employee, date) {
+function shouldCalculateEmployeeDate(employee, date, maxDate = getBangkokDateKey()) {
   const joinDate = employee?.join_date ? toDateKey(employee.join_date) : null;
-  const today = getTodayDateKey();
 
   if (joinDate && date < joinDate) {
     return false;
   }
 
-  if (date > today) {
+  if (date > maxDate) {
     return false;
   }
 
@@ -1109,6 +1289,16 @@ async function fetchCalculationContext(yearMonth, ownerUserId) {
 }
 
 
+function omitUnsupportedAttendanceMetadataForLegacySchema(payload) {
+  const { meal_allowance_amount, calculation_phase, generated_by, settled_at, ...legacyPayload } = payload;
+  return legacyPayload;
+}
+
+function isMissingAttendanceMetadataSchemaError(error) {
+  const message = String(error?.message || error || "");
+  return ["meal_allowance_amount", "calculation_phase", "generated_by", "settled_at"].some((column) => message.includes(column));
+}
+
 async function upsertAttendanceCalculation(payload) {
   const existing = await supabase
     .from("attendance_calculation_results")
@@ -1122,27 +1312,33 @@ async function upsertAttendanceCalculation(payload) {
     throw existing.error;
   }
 
-  if (existing.data?.id) {
-    const { data, error } = await supabase
+  async function writeCalculation(writePayload) {
+    if (existing.data?.id) {
+      return supabase
+        .from("attendance_calculation_results")
+        .update(writePayload)
+        .eq("id", existing.data.id)
+        .select("*")
+        .single();
+    }
+
+    return supabase
       .from("attendance_calculation_results")
-      .update(payload)
-      .eq("id", existing.data.id)
+      .insert({
+        ...writePayload,
+        created_at: new Date().toISOString()
+      })
       .select("*")
       .single();
-    if (error) {
-      throw error;
-    }
-    return data;
   }
 
-  const { data, error } = await supabase
-    .from("attendance_calculation_results")
-    .insert({
-      ...payload,
-      created_at: new Date().toISOString()
-    })
-    .select("*")
-    .single();
+  let { data, error } = await writeCalculation(payload);
+
+  if (error && isMissingAttendanceMetadataSchemaError(error)) {
+    // 当前测试库可能尚未应用最新考勤元数据迁移；这里仅降级写入旧表已有字段，保证打卡/重算不中断。
+    // 迁移落库后会自动写入 draft/settled 元数据，不要长期依赖这个兼容分支。
+    ({ data, error } = await writeCalculation(omitUnsupportedAttendanceMetadataForLegacySchema(payload)));
+  }
 
   if (error) {
     throw error;
@@ -1193,7 +1389,7 @@ async function upsertMonthlySummary(payload) {
   return data;
 }
 
-async function recalculateDailyAttendance(employeeId, date, ownerUserId, context = null) {
+async function recalculateDailyAttendance(employeeId, date, ownerUserId, context = null, options = {}) {
   const effectiveContext = context || await fetchCalculationContext(date.slice(0, 7), ownerUserId);
   const employee = effectiveContext.employeeMap.get(Number(employeeId));
 
@@ -1204,7 +1400,12 @@ async function recalculateDailyAttendance(employeeId, date, ownerUserId, context
   const record = effectiveContext.recordMap.get(`${employeeId}:${date}`) || null;
   // v2 日计算只依赖当前账号唯一 attendance_config，不再读取员工规则历史或多条 attendance_rules。
   // 这是考勤计算模块的唯一入口；不要为兼容旧规则模型在这里恢复规则匹配逻辑。
-  const payload = calculateV2DailyAttendanceRow(employee, record, effectiveContext.attendanceConfig, date, ownerUserId);
+  const payload = calculateV2DailyAttendanceRow(employee, record, effectiveContext.attendanceConfig, date, ownerUserId, options);
+  const isDraftPhase = payload.status === "pending" || payload.status === "checked_in";
+  // 底稿/结算元数据在服务边界统一补齐，避免纯计算函数为了不同调用方分叉出多套 payload 结构。
+  payload.calculation_phase = isDraftPhase ? "draft" : "settled";
+  payload.generated_by = options.generatedBy || (isDraftPhase ? "draft_job" : "calculation");
+  payload.settled_at = isDraftPhase ? null : new Date().toISOString();
 
   const row = await upsertAttendanceCalculation(payload);
   effectiveContext.calculationMap.set(`${employeeId}:${date}`, row);
@@ -1241,7 +1442,13 @@ async function recalculateMonthlyAttendance(yearMonth, ownerUserId, targetEmploy
     }
 
     for (const date of applicableDates) {
-      await recalculateDailyAttendance(Number(employee.id), date, ownerUserId, context);
+      await recalculateDailyAttendance(Number(employee.id), date, ownerUserId, context, {
+        // 月度刷新也服务考勤页当天过程跟踪；业务地今天没有打卡记录时保持 pending，昨天及以前才正式落为 absent。
+        // 薪资和月汇总只读取沉淀结果，不应在前端再把 pending 二次推导成缺勤。
+        pendingIfNoRecord: date === getBangkokDateKey(),
+        inProgressIfMissingOut: date === getBangkokDateKey(),
+        generatedBy: date === getBangkokDateKey() ? "draft_job" : "manual_recalculate"
+      });
     }
   }
 
@@ -1252,7 +1459,9 @@ async function recalculateMonthlyAttendance(yearMonth, ownerUserId, targetEmploy
     const rows = dates
       .filter((date) => shouldCalculateEmployeeDate(employee, date))
       .map((date) => context.calculationMap.get(`${employeeId}:${date}`))
-      .filter(Boolean);
+      .filter(Boolean)
+      // pending/checked_in 是当天过程态，只服务考勤列表跟踪；月汇总和薪资输入必须排除，避免把未结算底稿当成可发薪结果。
+      .filter((row) => row.status !== "pending" && row.status !== "checked_in");
 
     const summaryPayload = {
       owner_user_id: ownerUserId,
@@ -1284,6 +1493,115 @@ async function recalculateMonthlyAttendance(yearMonth, ownerUserId, targetEmploy
   }
 
   return summaries;
+}
+
+async function fetchAttendanceTargetEmployees(ownerUserId = null) {
+  let query = supabase
+    .from("employees")
+    .select("*")
+    .eq("is_deleted", false)
+    // 历史 demo 数据可能没有 owner_user_id；跨账号 cron 只能处理已绑定账号的数据，避免 null 被传入账号级配置查询导致整批任务中断。
+    .not("owner_user_id", "is", null)
+    .order("owner_user_id", { ascending: true })
+    .order("id", { ascending: true });
+
+  if (ownerUserId) {
+    query = query.eq("owner_user_id", ownerUserId);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    throw error;
+  }
+
+  return (data || []).filter(isEmployeeAvailableForAttendanceAndPayroll);
+}
+
+async function generateAttendanceDraftsForDate(date, ownerUserId = null) {
+  const employees = (await fetchAttendanceTargetEmployees(ownerUserId))
+    .filter((employee) => shouldCalculateEmployeeDate(employee, date, date));
+  const ownerIds = [...new Set(employees.map((employee) => employee.owner_user_id))];
+  const failures = [];
+  let successCount = 0;
+
+  for (const ownerId of ownerIds) {
+    const context = await fetchCalculationContext(date.slice(0, 7), ownerId);
+    for (const employee of employees.filter((row) => row.owner_user_id === ownerId)) {
+      try {
+        // 当天底稿通过同一个日计算入口生成，保证后续打卡/结算不会出现另一套隐藏口径；只传 pending 选项表示过程态。
+        await recalculateDailyAttendance(Number(employee.id), date, ownerId, context, {
+          pendingIfNoRecord: true,
+          inProgressIfMissingOut: true,
+          generatedBy: "draft_job"
+        });
+        successCount += 1;
+      } catch (error) {
+        failures.push({ ownerUserId: ownerId, employeeId: Number(employee.id), date, error: error.message || "底稿生成失败" });
+      }
+    }
+  }
+
+  return {
+    date,
+    ownerCount: ownerIds.length,
+    targetEmployeeCount: employees.length,
+    successCount,
+    failureCount: failures.length,
+    failures
+  };
+}
+
+async function settleAttendanceForDate(date, ownerUserId = null) {
+  const employees = (await fetchAttendanceTargetEmployees(ownerUserId))
+    .filter((employee) => shouldCalculateEmployeeDate(employee, date, date));
+  const ownerIds = [...new Set(employees.map((employee) => employee.owner_user_id))];
+  const failures = [];
+  let successCount = 0;
+
+  for (const ownerId of ownerIds) {
+    const context = await fetchCalculationContext(date.slice(0, 7), ownerId);
+    for (const employee of employees.filter((row) => row.owner_user_id === ownerId)) {
+      try {
+        // 正式结算不传 pending/checked_in 过程态选项：无打卡会落缺勤，缺下班会落异常，人工记录仍按 source/manual 保护。
+        await recalculateDailyAttendance(Number(employee.id), date, ownerId, context, {
+          generatedBy: "settlement_job"
+        });
+        successCount += 1;
+      } catch (error) {
+        failures.push({ ownerUserId: ownerId, employeeId: Number(employee.id), date, error: error.message || "前日结算失败" });
+      }
+    }
+
+    try {
+      await recalculateMonthlyAttendance(date.slice(0, 7), ownerId);
+    } catch (error) {
+      failures.push({ ownerUserId: ownerId, date, error: error.message || "月度汇总刷新失败" });
+    }
+  }
+
+  return {
+    date,
+    ownerCount: ownerIds.length,
+    targetEmployeeCount: employees.length,
+    successCount,
+    failureCount: failures.length,
+    failures
+  };
+}
+
+async function runDailyAttendanceMaintenance({ previousDate, todayDate, ownerUserId = null } = {}) {
+  const cronDates = getAttendanceCronDates();
+  const targetPreviousDate = previousDate || cronDates.previousDate;
+  const targetTodayDate = todayDate || cronDates.todayDate;
+  // 每日任务顺序固定为先结算昨天、再生成今天底稿；不要反过来，否则月初零点补跑时可能把过程态误带入历史汇总。
+  const settlement = await settleAttendanceForDate(targetPreviousDate, ownerUserId);
+  const draft = await generateAttendanceDraftsForDate(targetTodayDate, ownerUserId);
+  return {
+    previousDate: targetPreviousDate,
+    todayDate: targetTodayDate,
+    settlement,
+    draft
+  };
 }
 
 function normalizeSalaryAmount(value) {
@@ -1582,11 +1900,13 @@ function buildMonthlyPayrollPayloadFromContext(context, yearMonth, ownerUserId, 
   const standardPaidHours = Math.max(0, validHours - overtimePayHours);
   const hourlyPay = salaryConfig.salaryType === "hourly" ? roundToTwo(standardPaidHours * Number(hourlyRate || 0)) : 0;
   const basePay = salaryConfig.salaryType === "fixed" ? Number(fixedSalary || 0) : hourlyPay;
+  // 服务费比例维护在员工档案，薪资结果必须沉淀计算后的金额：时薪员工按本月标准工时工资计费，固定薪员工按固定工资计费。
+  const serviceFeeAmount = roundToTwo(basePay * getNonNegativePayrollAmount(employee.service_fee_rate) / 100);
   const overtimePay = attendanceSummary ? roundToTwo(dailyCalculations.reduce((sum, row) => {
     const fee = row.attendance_rule_id ? Number(ruleFeeMap.get(Number(row.attendance_rule_id)) || 0) : 0;
     return sum + Number(row.overtime_pay_hours || 0) * fee;
   }, 0)) : 0;
-  const grossPay = roundToTwo(basePay + overtimePay + attendanceBonus + allowanceTotal + otherTotal);
+  const grossPay = roundToTwo(basePay + serviceFeeAmount + overtimePay + attendanceBonus + allowanceTotal + otherTotal);
   const totalDeduction = roundToTwo(socialSecurity + deductionTotal);
   const netPay = roundToTwo(grossPay - totalDeduction);
   const isBlockedByAttendance = attendanceSummary?.can_generate_payroll === false;
@@ -1608,6 +1928,7 @@ function buildMonthlyPayrollPayloadFromContext(context, yearMonth, ownerUserId, 
     deduction_total: deductionTotal,
     other_total: otherTotal,
     social_security_amount: socialSecurity,
+    service_fee_amount: serviceFeeAmount,
     gross_pay: grossPay,
     total_deduction: totalDeduction,
     net_pay: netPay,
@@ -1705,6 +2026,8 @@ function normalizeEmployeePayload(body, authUser) {
     fixedSalary: body.fixedSalary === null || body.fixedSalary === "" ? null : Number(body.fixedSalary),
     attendanceBonus: body.attendanceBonus === null || body.attendanceBonus === "" || body.attendanceBonus === undefined ? 0 : Number(body.attendanceBonus),
     socialSecurity: body.socialSecurity === null || body.socialSecurity === "" || body.socialSecurity === undefined ? 0 : Number(body.socialSecurity),
+    mealAllowance: body.mealAllowance === null || body.mealAllowance === "" || body.mealAllowance === undefined ? 0 : Number(body.mealAllowance),
+    serviceFeeRate: body.serviceFeeRate === null || body.serviceFeeRate === "" || body.serviceFeeRate === undefined ? 0 : Number(body.serviceFeeRate),
     salaryEffectiveStartDate: body.salaryEffectiveStartDate || body.joinDate,
     currency: body.currency,
     photo: body.photo || null,
@@ -1714,7 +2037,7 @@ function normalizeEmployeePayload(body, authUser) {
 
 function validateEmployeeAmountPayload(payload) {
   // v2 员工弹窗只要求金额不小于 0、不设最大值；后端同步校验，避免绕过前端时触发数据库约束错误。
-  const amounts = [payload.hourlyRate, payload.fixedSalary, payload.attendanceBonus, payload.socialSecurity];
+  const amounts = [payload.hourlyRate, payload.fixedSalary, payload.attendanceBonus, payload.socialSecurity, payload.mealAllowance, payload.serviceFeeRate];
   if (amounts.some((amount) => amount !== null && (Number.isNaN(Number(amount)) || Number(amount) < 0))) {
     return "金额必须大于等于 0";
   }
@@ -1744,6 +2067,8 @@ async function createEmployeeRecord(payload, authUser) {
     fixed_salary: payload.fixedSalary,
     attendance_bonus: payload.attendanceBonus,
     social_security: payload.socialSecurity,
+    meal_allowance: payload.mealAllowance,
+    service_fee_rate: payload.serviceFeeRate,
     currency: payload.currency,
     photo: payload.photo,
     is_deleted: false
@@ -1798,6 +2123,8 @@ async function updateEmployeeRecord(employeeId, payload, authUser) {
     fixed_salary: payload.fixedSalary,
     attendance_bonus: payload.attendanceBonus,
     social_security: payload.socialSecurity,
+    meal_allowance: payload.mealAllowance,
+    service_fee_rate: payload.serviceFeeRate,
     currency: payload.currency,
     photo: payload.photo
   };
@@ -1852,7 +2179,7 @@ async function bootstrapWorkspaceData(ownerUserId, authUser) {
       employeesCreated: 0,
       rulesCreated: 0,
       message: bootstrapState.created_demo_data
-        ? "当前 Google 账号的演示数据已初始化过"
+        ? "当前 Google 账号的业务数据已初始化过"
         : "当前 Google 账号已有后台数据，已跳过初始化"
     };
   }
@@ -1872,7 +2199,7 @@ async function bootstrapWorkspaceData(ownerUserId, authUser) {
   }
 
   // 如果状态表已有记录但员工和规则都为空，说明之前只写入了初始化状态或数据被清空；
-  // 此时继续创建演示数据，保证“一键初始化”以真实业务表是否为空作为最终判定。
+  // 此时继续创建初始化数据，保证“一键初始化”以真实业务表是否为空作为最终判定。
 
   const yearMonth = getTodayDateKey().slice(0, 7);
   const dates = enumerateMonthDates(yearMonth).filter((date) => date <= getTodayDateKey()).slice(0, 3);
@@ -1924,7 +2251,7 @@ async function bootstrapWorkspaceData(ownerUserId, authUser) {
   const [dayRule, nightRule] = rules;
   const employeePayloads = [
     {
-      name: "演示员工 A",
+      name: "员工 A",
       gender: "female",
       country: "TH",
       phone: "0800000001",
@@ -1944,7 +2271,7 @@ async function bootstrapWorkspaceData(ownerUserId, authUser) {
       createdBy: authUser.email || null
     },
     {
-      name: "演示员工 B",
+      name: "员工 B",
       gender: "male",
       country: "MM",
       phone: "0800000002",
@@ -1982,7 +2309,7 @@ async function bootstrapWorkspaceData(ownerUserId, authUser) {
         out_time: "18:10",
         type: "normal",
         source: "device",
-        note: "初始化示例-正常加班",
+        note: "初始化记录-正常加班",
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       }, ownerUserId),
@@ -1993,7 +2320,7 @@ async function bootstrapWorkspaceData(ownerUserId, authUser) {
         out_time: "22:00",
         type: "normal",
         source: "device",
-        note: "初始化示例-正常班次",
+        note: "初始化记录-正常班次",
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       }, ownerUserId)
@@ -2008,7 +2335,7 @@ async function bootstrapWorkspaceData(ownerUserId, authUser) {
         out_time: null,
         type: "normal",
         source: "device",
-        note: "初始化示例-异常缺下班卡",
+        note: "初始化记录-异常缺下班卡",
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       }, ownerUserId),
@@ -2019,7 +2346,7 @@ async function bootstrapWorkspaceData(ownerUserId, authUser) {
         out_time: null,
         type: "leave",
         source: "manual",
-        note: "初始化示例-请假",
+        note: "初始化记录-请假",
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       }, ownerUserId)
@@ -2034,7 +2361,7 @@ async function bootstrapWorkspaceData(ownerUserId, authUser) {
         out_time: "17:35",
         type: "normal",
         source: "device",
-        note: "初始化示例-标准工时",
+        note: "初始化记录-标准工时",
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       }, ownerUserId)
@@ -2060,7 +2387,7 @@ async function bootstrapWorkspaceData(ownerUserId, authUser) {
         type: "allowance",
         name: "餐补",
         amount: 350,
-        note: "初始化示例",
+        note: "初始化记录",
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       }, ownerUserId),
@@ -2070,7 +2397,7 @@ async function bootstrapWorkspaceData(ownerUserId, authUser) {
         type: "other",
         name: "绩效奖金",
         amount: 500,
-        note: "初始化示例",
+        note: "初始化记录",
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       }, ownerUserId)
@@ -2095,12 +2422,45 @@ async function bootstrapWorkspaceData(ownerUserId, authUser) {
     yearMonth,
     employeesCreated: employeeIds.length,
     rulesCreated: rules.length,
-    message: "已为当前账号创建默认规则、示例员工、考勤和薪酬演示数据"
+    message: "已为当前账号创建默认规则、员工、考勤和薪酬数据"
   };
 }
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
+});
+
+app.get("/api/cron/payroll-nightly", async (req, res) => {
+  try {
+    if (!isAuthorizedCronRequest(req)) {
+      return res.status(401).json({ error: "未授权的定时任务请求" });
+    }
+
+    const requestedYearMonth = String(req.query.yearMonth || "");
+    const yearMonth = /^\d{4}-\d{2}$/.test(requestedYearMonth) ? requestedYearMonth : getPayrollCronYearMonth();
+    const result = await runNightlyPayrollCalculation(yearMonth);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "夜间薪资计算失败" });
+  }
+});
+
+app.get("/api/cron/attendance-nightly", async (req, res) => {
+  try {
+    if (!isAuthorizedCronRequest(req)) {
+      return res.status(401).json({ error: "未授权的定时任务请求" });
+    }
+
+    const requestedPreviousDate = String(req.query.previousDate || "");
+    const requestedTodayDate = String(req.query.todayDate || "");
+    const result = await runDailyAttendanceMaintenance({
+      previousDate: /^\d{4}-\d{2}-\d{2}$/.test(requestedPreviousDate) ? requestedPreviousDate : undefined,
+      todayDate: /^\d{4}-\d{2}-\d{2}$/.test(requestedTodayDate) ? requestedTodayDate : undefined
+    });
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "夜间考勤结算失败" });
+  }
 });
 
 app.post("/api/public/lead-requests", async (req, res) => {
@@ -2181,6 +2541,279 @@ app.post("/api/mobile/auth/login", async (req, res) => {
     res.json(result);
   } catch (error) {
     res.status(401).json({ error: error.message || "员工端登录失败" });
+  }
+});
+
+app.get("/api/mobile/auth/me", requireEmployeeAppAuth, async (req, res) => {
+  // 员工端后续 SOP/打卡接口都依赖同一套 req.employeeApp 鉴权上下文；先提供 me 接口作为 token 校验的可观察验收点。
+  res.json({
+    employee: mapEmployeeRow(req.employeeApp.employee),
+    account: {
+      id: req.employeeApp.accountId,
+      employeeId: req.employeeApp.employeeId,
+      ownerUserId: req.employeeApp.ownerUserId
+    }
+  });
+});
+
+
+function normalizeMobileDate(value) {
+  const raw = String(value || "").slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : getTodayDateKey();
+}
+
+function normalizeMobileTime(value) {
+  const candidate = String(value || "").slice(11, 16);
+  return /^\d{2}:\d{2}$/.test(candidate) ? candidate : new Date().toISOString().slice(11, 16);
+}
+
+function buildMobileAttendanceNote({ action, locationName, latitude, longitude, accuracy, description }) {
+  const parts = [
+    `员工端${action === "check_in" ? "上班" : "下班"}打卡`,
+    locationName ? `位置：${locationName}` : null,
+    Number.isFinite(latitude) && Number.isFinite(longitude) ? `坐标：${latitude},${longitude}` : null,
+    Number.isFinite(accuracy) ? `精度：${accuracy}m` : null,
+    description ? `说明：${description}` : null
+  ].filter(Boolean);
+  // 当前 attendance_records 表没有独立定位列；移动端定位和异常说明先写入 note，保持 Admin 现有考勤计算和展示链路不被破坏。
+  return parts.join("；");
+}
+
+function isMobileAttendanceDescriptionRequired(action, time, config) {
+  const startShift = String(config.start_shift || DEFAULT_ATTENDANCE_CONFIG.start_shift).slice(0, 5);
+  const endShift = String(config.end_shift || DEFAULT_ATTENDANCE_CONFIG.end_shift).slice(0, 5);
+  // 用户已确认“上班时间内打卡需要描述”；这里由后端统一校验，移动端提示只是辅助，不能绕过服务端规则。
+  return time >= startShift && time <= endShift && (action === "check_in" || action === "check_out");
+}
+
+function mapMobileAttendanceStatus(record, config, date) {
+  const checkInTime = record?.in_time ? String(record.in_time).slice(0, 5) : null;
+  const checkOutTime = record?.out_time ? String(record.out_time).slice(0, 5) : null;
+  const status = checkInTime && checkOutTime ? "checked_out" : checkInTime ? "checked_in" : "not_checked_in";
+  return {
+    date,
+    status,
+    checkInTime,
+    checkOutTime,
+    locationName: record?.note || null,
+    locationAccuracy: null,
+    canCheckIn: status === "not_checked_in",
+    canCheckOut: status === "checked_in",
+    requiresDescriptionInWorkTime: true,
+    rule: {
+      startShift: String(config.start_shift || DEFAULT_ATTENDANCE_CONFIG.start_shift).slice(0, 5),
+      endShift: String(config.end_shift || DEFAULT_ATTENDANCE_CONFIG.end_shift).slice(0, 5)
+    }
+  };
+}
+
+async function fetchMobileAttendanceRecord(ownerUserId, employeeId, date) {
+  const { data, error } = await supabase
+    .from("attendance_records")
+    .select("*")
+    .eq("owner_user_id", ownerUserId)
+    .eq("employee_id", Number(employeeId))
+    .eq("date", date)
+    .order("id", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+async function fetchMobileAttendanceStatus(ownerUserId, employeeId, date) {
+  const [record, config] = await Promise.all([
+    fetchMobileAttendanceRecord(ownerUserId, employeeId, date),
+    resolveAttendanceConfig(ownerUserId)
+  ]);
+  return mapMobileAttendanceStatus(record, config, date);
+}
+
+async function upsertMobileAttendancePunch({ ownerUserId, employeeId, action, body }) {
+  const clientTime = String(body.clientTime || new Date().toISOString());
+  const date = normalizeMobileDate(clientTime);
+  const time = normalizeMobileTime(clientTime);
+  const config = await resolveAttendanceConfig(ownerUserId);
+  const existingRecord = await fetchMobileAttendanceRecord(ownerUserId, employeeId, date);
+  const currentStatus = mapMobileAttendanceStatus(existingRecord, config, date);
+
+  if (action === "check_in" && currentStatus.status !== "not_checked_in") {
+    throw new Error("当前状态不允许上班打卡");
+  }
+  if (action === "check_out" && currentStatus.status !== "checked_in") {
+    throw new Error("当前状态不允许下班打卡");
+  }
+
+  const latitude = Number(body.latitude);
+  const longitude = Number(body.longitude);
+  const accuracy = Number(body.accuracy);
+  const locationName = String(body.locationName || "").trim();
+  const description = String(body.description || "").trim();
+  if (isMobileAttendanceDescriptionRequired(action, time, config) && !description) {
+    throw new Error("上班时间内打卡需要填写说明");
+  }
+
+  const payload = {
+    owner_user_id: ownerUserId,
+    employee_id: Number(employeeId),
+    date,
+    type: "normal",
+    in_time: action === "check_in" ? time : existingRecord?.in_time || null,
+    out_time: action === "check_out" ? time : existingRecord?.out_time || null,
+    note: buildMobileAttendanceNote({ action, locationName, latitude, longitude, accuracy, description }),
+    // 员工端打卡写入 mobile 来源，后台人工补卡仍写 manual；计算层据此避免把移动端真实打卡误标为“人工调整”。
+    // 若数据库还未应用 20260606035000 迁移，接口会明确报约束错误，不能再静默伪装成 manual。
+    source: "mobile",
+    updated_at: new Date().toISOString()
+  };
+
+  if (existingRecord) {
+    const { error } = await supabase
+      .from("attendance_records")
+      .update(payload)
+      .eq("owner_user_id", ownerUserId)
+      .eq("id", Number(existingRecord.id));
+    if (error) throw error;
+  } else {
+    const { error } = await supabase
+      .from("attendance_records")
+      .insert({ ...payload, created_at: new Date().toISOString() });
+    if (error) throw error;
+  }
+
+  await recalculateDailyAttendance(Number(employeeId), date, ownerUserId, null, {
+    // 员工端上班打卡后当天仍是过程态；下班前展示 checked_in，不能按历史结算口径标成缺下班异常。
+    pendingIfNoRecord: date === getBangkokDateKey(),
+    inProgressIfMissingOut: date === getBangkokDateKey(),
+    generatedBy: "draft_job"
+  });
+  await recalculateMonthlyAttendance(date.slice(0, 7), ownerUserId, Number(employeeId));
+  return fetchMobileAttendanceStatus(ownerUserId, employeeId, date);
+}
+
+function mapMobileAttendanceRecord(row) {
+  const inTime = row.in_time ? String(row.in_time).slice(0, 5) : "--:--";
+  const outTime = row.out_time ? String(row.out_time).slice(0, 5) : "--:--";
+  return {
+    id: String(row.id),
+    date: toDateKey(row.date),
+    checkInTime: inTime,
+    checkOutTime: outTime,
+    type: row.type === "overtime" ? "overtime" : "normal",
+    hours: inTime !== "--:--" && outTime !== "--:--" ? `${inTime} - ${outTime}` : "未完整",
+    note: row.note || ""
+  };
+}
+
+function mapMobileSopDocument(row, employeeId) {
+  const readAt = row.reads?.[Number(employeeId)] || null;
+  return {
+    id: row.id,
+    title: row.title,
+    version: row.createdAt ? `V${row.id}` : "V1",
+    updatedAt: row.createdAt || "",
+    readStatus: readAt ? "read" : "unread",
+    readAt,
+    content: row.content,
+    images: row.images || [],
+    attachments: row.attachments || []
+  };
+}
+
+app.get("/api/mobile/attendance/today", requireEmployeeAppAuth, async (req, res) => {
+  try {
+    const date = normalizeMobileDate(req.query.date || getTodayDateKey());
+    const result = await fetchMobileAttendanceStatus(req.employeeApp.ownerUserId, req.employeeApp.employeeId, date);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "员工端今日考勤加载失败" });
+  }
+});
+
+app.get("/api/mobile/attendance/records", requireEmployeeAppAuth, async (req, res) => {
+  try {
+    const limit = Math.min(31, Math.max(1, Number(req.query.limit || 7)));
+    const { data, error } = await supabase
+      .from("attendance_records")
+      .select("*")
+      .eq("owner_user_id", req.employeeApp.ownerUserId)
+      .eq("employee_id", req.employeeApp.employeeId)
+      .order("date", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    res.json((data || []).map(mapMobileAttendanceRecord));
+  } catch (error) {
+    res.status(500).json({ error: error.message || "员工端考勤记录加载失败" });
+  }
+});
+
+app.post("/api/mobile/attendance/check-in", requireEmployeeAppAuth, async (req, res) => {
+  try {
+    const result = await upsertMobileAttendancePunch({ ownerUserId: req.employeeApp.ownerUserId, employeeId: req.employeeApp.employeeId, action: "check_in", body: req.body || {} });
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "上班打卡失败" });
+  }
+});
+
+app.post("/api/mobile/attendance/check-out", requireEmployeeAppAuth, async (req, res) => {
+  try {
+    const result = await upsertMobileAttendancePunch({ ownerUserId: req.employeeApp.ownerUserId, employeeId: req.employeeApp.employeeId, action: "check_out", body: req.body || {} });
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "下班打卡失败" });
+  }
+});
+
+app.get("/api/mobile/sops", requireEmployeeAppAuth, async (req, res) => {
+  try {
+    const keyword = String(req.query.keyword || "").trim();
+    const rows = await fetchSopDocuments(req.employeeApp.ownerUserId, { keyword, publishedOnly: true, employeeId: req.employeeApp.employeeId });
+    res.json(rows.map((row) => mapMobileSopDocument(row, req.employeeApp.employeeId)));
+  } catch (error) {
+    res.status(500).json({ error: error.message || "员工端SOP列表加载失败" });
+  }
+});
+
+app.get("/api/mobile/sops/:id", requireEmployeeAppAuth, async (req, res) => {
+  try {
+    const rows = await fetchSopDocuments(req.employeeApp.ownerUserId, { publishedOnly: true, employeeId: req.employeeApp.employeeId });
+    const detail = rows.find((row) => row.id === String(req.params.id));
+    if (!detail) {
+      return res.status(404).json({ error: "SOP不存在或不可见" });
+    }
+    res.json(mapMobileSopDocument(detail, req.employeeApp.employeeId));
+  } catch (error) {
+    res.status(500).json({ error: error.message || "员工端SOP详情加载失败" });
+  }
+});
+
+app.post("/api/mobile/sops/:id/read", requireEmployeeAppAuth, async (req, res) => {
+  try {
+    const rows = await fetchSopDocuments(req.employeeApp.ownerUserId, { publishedOnly: true, employeeId: req.employeeApp.employeeId });
+    const detail = rows.find((row) => row.id === String(req.params.id));
+    if (!detail) {
+      return res.status(404).json({ error: "SOP不存在或不可见" });
+    }
+
+    const { error } = await supabase
+      .from("sop_reads")
+      .upsert({
+        owner_user_id: req.employeeApp.ownerUserId,
+        sop_id: Number(req.params.id),
+        employee_id: req.employeeApp.employeeId,
+        read_at: new Date().toISOString()
+      }, {
+        onConflict: "owner_user_id,sop_id,employee_id"
+      });
+    if (error) throw error;
+
+    const refreshedRows = await fetchSopDocuments(req.employeeApp.ownerUserId, { publishedOnly: true, employeeId: req.employeeApp.employeeId });
+    const refreshed = refreshedRows.find((row) => row.id === String(req.params.id));
+    res.json(mapMobileSopDocument(refreshed || detail, req.employeeApp.employeeId));
+  } catch (error) {
+    res.status(500).json({ error: error.message || "员工端SOP阅读确认失败" });
   }
 });
 
@@ -2995,6 +3628,57 @@ app.post("/api/admin/attendance-calculations/recalculate-monthly", async (req, r
   }
 });
 
+app.post("/api/admin/attendance-calculations/run-daily-maintenance", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const previousDate = String(req.body.previousDate || "");
+    const todayDate = String(req.body.todayDate || "");
+    if (previousDate && !/^\d{4}-\d{2}-\d{2}$/.test(previousDate)) {
+      return res.status(400).json({ error: "previousDate 必须为 YYYY-MM-DD" });
+    }
+    if (todayDate && !/^\d{4}-\d{2}-\d{2}$/.test(todayDate)) {
+      return res.status(400).json({ error: "todayDate 必须为 YYYY-MM-DD" });
+    }
+
+    const result = await runDailyAttendanceMaintenance({
+      previousDate: previousDate || undefined,
+      todayDate: todayDate || undefined,
+      ownerUserId
+    });
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "考勤每日维护补跑失败" });
+  }
+});
+
+app.post("/api/admin/attendance-calculations/generate-drafts", async (req, res) => {
+  try {
+    const date = String(req.body.date || getBangkokDateKey());
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: "date 必须为 YYYY-MM-DD" });
+    }
+
+    const result = await generateAttendanceDraftsForDate(date, req.authUser.id);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "考勤底稿生成失败" });
+  }
+});
+
+app.post("/api/admin/attendance-calculations/settle-date", async (req, res) => {
+  try {
+    const date = String(req.body.date || "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: "date 必须为 YYYY-MM-DD" });
+    }
+
+    const result = await settleAttendanceForDate(date, req.authUser.id);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "考勤日期结算失败" });
+  }
+});
+
 app.get("/api/admin/attendance-summaries", async (req, res) => {
   try {
     const ownerUserId = req.authUser.id;
@@ -3130,6 +3814,20 @@ app.get("/api/admin/payroll-results", async (req, res) => {
     res.json(filteredRows);
   } catch (error) {
     res.status(500).json({ error: error.message || "薪酬结果加载失败" });
+  }
+});
+
+app.post("/api/admin/payroll-results/run-nightly", async (req, res) => {
+  try {
+    const yearMonth = String(req.body.yearMonth || "");
+    if (!/^\d{4}-\d{2}$/.test(yearMonth)) {
+      return res.status(400).json({ error: "yearMonth 必须为 YYYY-MM" });
+    }
+
+    const result = await runNightlyPayrollCalculation(yearMonth, req.authUser.id);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "手动触发薪资核算失败" });
   }
 });
 

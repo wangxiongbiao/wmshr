@@ -1,27 +1,46 @@
 import React from 'react';
 import {Ionicons} from '@expo/vector-icons';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
+import {useTranslation} from 'react-i18next';
 import {TodayAttendanceStatus} from '../../attendance/types';
 import {colors} from '../../../shared/constants/colors';
 import {sharedStyles} from '../../../shared/constants/styles';
+
+export type CheckInPhase = 'idle' | 'description_required' | 'requesting_permission' | 'locating' | 'reverse_geocoding' | 'submitting' | 'success' | 'failed';
 
 type Props = {
   currentTime: string;
   currentDate: string;
   status: TodayAttendanceStatus;
   onCheckIn: () => void;
+  phase?: CheckInPhase;
+  disabled?: boolean;
+  helperText?: string | null;
 };
 
-export function CheckInCard({currentTime, currentDate, status, onCheckIn}: Props) {
-  const statusText = status.status === 'checked_in' ? '在勤中' : status.status === 'checked_out' ? '已完成' : '未打卡';
-  const buttonText = status.status === 'not_checked_in' ? '上班打卡' : status.status === 'checked_in' ? '下班打卡' : '重置演示';
-  const gpsText = `${status.locationName ?? '未知地点'} · 精度 ${status.locationAccuracy ?? '--'}m`;
+function getButtonText(status: TodayAttendanceStatus, phase: CheckInPhase, t: (value: string) => string) {
+  if (phase === 'requesting_permission') return t('请求定位权限...');
+  if (phase === 'locating') return t('正在定位...');
+  if (phase === 'reverse_geocoding') return t('正在获取地址...');
+  if (phase === 'submitting') return t('正在提交...');
+  if (phase === 'failed') return t('重试打卡');
+  if (status.status === 'not_checked_in') return t('上班打卡');
+  if (status.status === 'checked_in') return t('下班打卡');
+  return t('今日已完成');
+}
+
+export function CheckInCard({currentTime, currentDate, status, onCheckIn, phase = 'idle', disabled = false, helperText = null}: Props) {
+  const { t } = useTranslation('app');
+  const statusText = status.status === 'checked_in' ? t('在勤中') : status.status === 'checked_out' ? t('已完成') : t('未打卡');
+  const buttonText = getButtonText(status, phase, t);
+  const gpsText = `${status.locationName ?? t('未知地点')} · ${t('精度 {{value}}m', { value: status.locationAccuracy ?? '--' })}`;
+  const isDisabled = disabled || status.status === 'checked_out';
 
   return (
     <View style={styles.clockCard}>
       <View style={styles.clockHeader}>
         <View>
-          <Text style={sharedStyles.overline}>系统时间</Text>
+          <Text style={sharedStyles.overline}>{t('系统时间')}</Text>
           <Text style={styles.clock}>{currentTime}</Text>
           <Text style={sharedStyles.muted}>{currentDate}</Text>
         </View>
@@ -31,8 +50,8 @@ export function CheckInCard({currentTime, currentDate, status, onCheckIn}: Props
       </View>
 
       <View style={styles.timeGrid}>
-        <TimeBox label="上班时间" value={status.checkInTime ?? '--:--'} active={Boolean(status.checkInTime)} />
-        <TimeBox label="下班时间" value={status.checkOutTime ?? '--:--'} active={Boolean(status.checkOutTime)} />
+        <TimeBox label={t('上班时间')} value={status.checkInTime ?? '--:--'} active={Boolean(status.checkInTime)} />
+        <TimeBox label={t('下班时间')} value={status.checkOutTime ?? '--:--'} active={Boolean(status.checkOutTime)} />
       </View>
 
       <View style={styles.locationRow}>
@@ -40,7 +59,9 @@ export function CheckInCard({currentTime, currentDate, status, onCheckIn}: Props
         <Text style={styles.locationText}>{gpsText}</Text>
       </View>
 
-      <Pressable style={({pressed}) => [styles.primaryButton, pressed && styles.buttonPressed]} onPress={onCheckIn}>
+      {helperText ? <Text style={styles.helperText}>{helperText}</Text> : null}
+
+      <Pressable disabled={isDisabled} style={({pressed}) => [styles.primaryButton, isDisabled && styles.buttonDisabled, pressed && styles.buttonPressed]} onPress={onCheckIn}>
         <Ionicons name="finger-print-outline" size={22} color={colors.white} />
         <Text style={styles.primaryButtonText}>{buttonText}</Text>
       </Pressable>
@@ -72,7 +93,9 @@ const styles = StyleSheet.create({
   inactiveText: {color: '#cbd5e1'},
   locationRow: {flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 18, padding: 12, backgroundColor: '#eff6ff', borderRadius: 18},
   locationText: {color: '#1d4ed8', fontWeight: '700'},
+  helperText: {marginTop: 10, color: colors.textMuted, fontSize: 12, fontWeight: '700', lineHeight: 18},
   primaryButton: {marginTop: 18, height: 58, borderRadius: 22, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 10},
   buttonPressed: {opacity: 0.82},
+  buttonDisabled: {backgroundColor: colors.textMuted},
   primaryButtonText: {color: colors.white, fontWeight: '900', fontSize: 17},
 });

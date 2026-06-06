@@ -16,28 +16,6 @@ interface EmailFormPageProps {
   onOpenAdmin: () => void;
 }
 
-interface ContactTranslation {
-  formTitle: string;
-  nameLabel: string;
-  namePlaceholder: string;
-  emailLabel: string;
-  emailPlaceholder: string;
-  companyLabel: string;
-  companyPlaceholder: string;
-  subjectLabel: string;
-  subjectDefault: string;
-  detailsLabel: string;
-  detailsPlaceholder: string;
-  submitBtn: string;
-  sslNote: string;
-  successTitle: string;
-  successDesc: string;
-  backHome: string;
-  goAdmin: string;
-  validationRequired: string;
-  validationEmail: string;
-}
-
 async function submitLeadRequest(payload: {
   name: string;
   email: string;
@@ -71,183 +49,40 @@ async function submitLeadRequest(payload: {
   return result;
 }
 
-const contactTranslations: Record<string, ContactTranslation> = {
-  en: {
-    formTitle: "Submit Secure Inquiry",
-    nameLabel: "Full Name",
-    namePlaceholder: "Please enter your name",
-    emailLabel: "Corporate Email",
-    emailPlaceholder: "name@company.com",
-    companyLabel: "Company/Organization Name",
-    companyPlaceholder: "Please enter your company name",
-    subjectLabel: "Email Subject",
-    subjectDefault: "Global Attendance & Automated Payroll Consultation",
-    detailsLabel: "Detailed Business Requirements",
-    detailsPlaceholder: "Please describe your global compliance, payroll or warehousing requirements in detail...",
-    submitBtn: "Transmit Secure Request",
-    sslNote: "Your data is protected by SSL protocol & AES-256 grade encryption",
-    successTitle: "MESSAGE TRANSMITTED SECURELY",
-    successDesc: "Your secure transmission packet has been received regarding global operations. Our experts will respond via your corporate registry within 24 hours.",
-    backHome: "Return to Home Platform",
-    goAdmin: "Go to Admin Login",
-    validationRequired: "This field is required",
-    validationEmail: "Please enter a valid email address"
-  },
-  zh: {
-    formTitle: "高安全性安全需求端点",
-    nameLabel: "完整姓名",
-    namePlaceholder: "请输入您的姓名",
-    emailLabel: "企业电子邮箱",
-    emailPlaceholder: "name@company.com",
-    companyLabel: "公司/机构名称",
-    companyPlaceholder: "请输入您的公司名称",
-    subjectLabel: "邮件主题",
-    subjectDefault: "全球考勤、薪酬与合规服务咨询",
-    detailsLabel: "详细业务需求",
-    detailsPlaceholder: "请简单描述您的货物类目、预计仓储规模及主要目标市场...",
-    submitBtn: "建立安全连接并提交",
-    sslNote: "您的商业及通信数据受 SSL 与高级算法加密保护并严格保密",
-    successTitle: "加密提交成功！",
-    successDesc: "您的业务需求已成功安全提交。解决方案专家与专属顾问将在 24 小时内通过预留的企业邮箱与您取得联系。",
-    backHome: "返回主面板",
-    goAdmin: "前往后台登录",
-    validationRequired: "此项为必填项",
-    validationEmail: "请输入正确的电子邮箱"
-  },
-  zht: {
-    formTitle: "高安全性安全需求端點",
-    nameLabel: "完整姓名",
-    namePlaceholder: "請輸入您的姓名",
-    emailLabel: "企業電子郵箱",
-    emailPlaceholder: "name@company.com",
-    companyLabel: "公司/機構名稱",
-    companyPlaceholder: "請輸入您的公司名稱",
-    subjectLabel: "郵件主題",
-    subjectDefault: "全球考勤、薪疇與合規服務諮詢",
-    detailsLabel: "詳細業務需求",
-    detailsPlaceholder: "請簡單描述您的貨物類目、預計倉儲規模及主要目標市場...",
-    submitBtn: "建立安全連接並提交",
-    sslNote: "您的商業及通信數據受 SSL 與高級算法加密保護並嚴格保密",
-    successTitle: "加密提交成功！",
-    successDesc: "您的業務需求已成功安全提交。解決方案專家與專屬顧問將在 24 小時內通過預留的企業郵箱與您取得聯繫。",
-    backHome: "返回主面板",
-    goAdmin: "前往後台登入",
-    validationRequired: "此項為必填",
-    validationEmail: "請輸入正確的電子郵箱"
-  },
-  th: {
-    formTitle: "ส่งคำขอความปลอดภัยสูง",
-    nameLabel: "ชื่อจริง - นามสกุล",
-    namePlaceholder: "กรุณากรอกชื่อและนามสกุลของคุณ",
-    emailLabel: "อีเมลองค์กร",
-    emailPlaceholder: "name@company.com",
-    companyLabel: "ชื่อบริษัท/องค์กร",
-    companyPlaceholder: "กรุณากรอกชื่อบริษัทของคุณ",
-    subjectLabel: "หัวข้ออีเมล",
-    subjectDefault: "การให้คำปรึกษาเกี่ยวกับระบบเวลาทำงานและเงินดือนอัตโนมัติทั่วโลก",
-    detailsLabel: "รายละเอียดความต้องการทางธุรกิจ",
-    detailsPlaceholder: "โปรดอธิบายรายละเอียดบริการ ขนาดที่ต้องการ และตลาดเป้าหมายโดยย่อ...",
-    submitBtn: "ส่งคำขออย่างปลอดภัย",
-    sslNote: "ข้อมูลทางธุรกิจของคุณได้รับการคุ้มครองโดยโปรโตคอล SSL และการเข้ารหัสที่เข้มงวด",
-    successTitle: "ส่งข้อมูลแล้ว!",
-    successDesc: "ความต้องการทางธุรกิจของคุณได้รับการส่งอย่างปลอดภัยแล้ว ผู้เชี่ยวชาญจะติดต่อกลับผ่านอีเมลบริษัทภายใน 24 ชั่วโมง",
-    backHome: "กลับไปที่แดชบอร์ด",
-    goAdmin: "ไปยังหน้าแอดมิน",
-    validationRequired: "โปรดระบุข้อมูลในช่องนี้",
-    validationEmail: "โปรดป้อนที่อยู่อีเมลที่ถูกต้อง"
-  },
-  id: {
-    formTitle: "Kirim Permintaan Keamanan Tinggi",
-    nameLabel: "Nama Lengkap",
-    namePlaceholder: "Silakan masukkan nama lengkap Anda",
-    emailLabel: "Email Perusahaan",
-    emailPlaceholder: "name@company.com",
-    companyLabel: "Nama Perusahaan/Organisasi",
-    companyPlaceholder: "Silakan masukkan nama perusahaan Anda",
-    subjectLabel: "Subjek Email",
-    subjectDefault: "Konsultasi Absensi & Payroll Otomatis Global",
-    detailsLabel: "Detail Persyaratan Bisnis",
-    detailsPlaceholder: "Jelaskan dengan singkat kategori layanan, skala, dan pasar target Anda...",
-    submitBtn: "Kirim Permintaan Aman",
-    sslNote: "Informasi bisnis Anda dilindungi oleh protokol SSL dan dijamin kerahasiaannya",
-    successTitle: "PENGIRIMAN DATA SELESAI!",
-    successDesc: "Kebutuhan bisnis Anda telah berhasil dikirim. Konsultan khusus kami akan menghubungi Anda melalui email perusahaan dalam waktu 24 jam.",
-    backHome: "Kembali ke Beranda",
-    goAdmin: "Masuk ke Admin",
-    validationRequired: "Kolom ini wajib diisi",
-    validationEmail: "Masukkan alamat email yang valid"
-  },
-  ms: {
-    formTitle: "Serahkan Permintaan Keselamatan Tinggi",
-    nameLabel: "Nama Penuh",
-    namePlaceholder: "Sila masukkan nama penuh anda",
-    emailLabel: "E-mel Korporat",
-    emailPlaceholder: "name@company.com",
-    companyLabel: "Nama Syarikat/Organisasi",
-    companyPlaceholder: "Sila masukkan nama syarikat anda",
-    subjectLabel: "Perkara E-mel",
-    subjectDefault: "Pertanyaan Kehadiran Global & Automasi Payroll",
-    detailsLabel: "Butiran Keperluan Perniagaan",
-    detailsPlaceholder: "Terangkan ringkas mengenai kategori barangan, anggaran skala penyimpanan dan sasaran pasaran...",
-    submitBtn: "Hantar Permintaan Selamat",
-    sslNote: "Maklumat perniagaan anda dilindungi oleh protokol SSL dan penyulitan penuh",
-    successTitle: "PENGHANTARAN BERJAYA!",
-    successDesc: "Permintaan perniagaan anda telah selamat dihantar. Perunding kami akan menghubungi anda melalui e-mel yang disediakan dalam masa 24 jam.",
-    backHome: "Kembali ke Dashboard",
-    goAdmin: "Masuk Admin",
-    validationRequired: "Ruangan ini wajib diisi",
-    validationEmail: "Sila masukkan alamat e-mel yang sah"
-  },
-  es: {
-    formTitle: "Enviar Solicitud de Alta Seguridad",
-    nameLabel: "Nombre Completo",
-    namePlaceholder: "Por favor introduzca su nombre completo",
-    emailLabel: "Correo Electrónico Corporativo",
-    emailPlaceholder: "name@company.com",
-    companyLabel: "Nombre de la Empresa",
-    companyPlaceholder: "Por favor introduzca el nombre de su empresa",
-    subjectLabel: "Asunto del Correo",
-    subjectDefault: "Consulta sobre Asistencia y Nómina Automatizada Global",
-    detailsLabel: "Requisitos de Negocio Detallados",
-    detailsPlaceholder: "Describa brevemente la categoría de servicio, la escala estimada y los mercados objetivo...",
-    submitBtn: "Transmitir Solicitud Segura",
-    sslNote: "Sus datos están protegidos por el protocolo SSL y cifrado grado AES-256",
-    successTitle: "¡TRANSMISIÓN COMPLETADA!",
-    successDesc: "Sus requisitos comerciales se han enviado con éxito. Un asesor de cumplimiento corporativo se comunicará por correo dentro de las 24 horas.",
-    backHome: "Volver a la Página Principal",
-    goAdmin: "Ir al Admin",
-    validationRequired: "Este campo es requerido",
-    validationEmail: "Por favor introduzca un correo electrónico válido"
-  },
-  pt: {
-    formTitle: "Enviar Solicitação de Alta Segurança",
-    nameLabel: "Nome Completo",
-    namePlaceholder: "Insira seu nome completo",
-    emailLabel: "E-mail Corporativo",
-    emailPlaceholder: "name@company.com",
-    companyLabel: "Nome da Empresa/Organização",
-    companyPlaceholder: "Insira o nome da sua empresa",
-    subjectLabel: "Assunto do E-mail",
-    subjectDefault: "Consulta de Folha de Pagamento & Presença Global",
-    detailsLabel: "Detalhes de Requisitos de Negócio",
-    detailsPlaceholder: "Descreva brevemente a categoria de serviço, escala estimada e mercados alvo...",
-    submitBtn: "Transmitir Solicitação Segura",
-    sslNote: "Suas informações comerciais são protegidas por protocolo SSL e criptografia AES-256",
-    successTitle: "TRANSMISSÃO CONCLUÍDA!",
-    successDesc: "Seus requisitos de negócios foram enviados com segurança. Um consultor dedicado responderá através do seu e-mail corporativo em até 24 horas.",
-    backHome: "Retornar ao Dashboard",
-    goAdmin: "Entrar no Admin",
-    validationRequired: "Campo obrigatório",
-    validationEmail: "Insira um endereço de e-mail válido"
-  }
-};
-
 export default function EmailFormPage({ onBack, onOpenAdmin }: EmailFormPageProps) {
-  const { i18n } = useTranslation();
+  const { t, i18n } = useTranslation("portal");
 
-  // Detect current display language
-  const currentLang = contactTranslations[i18n.language] ? i18n.language : "en";
-  const tr = contactTranslations[currentLang];
+  // 联系表单文案统一来自共享 portal namespace，避免三端切换语言时继续维护组件内私有翻译表。
+  const currentLang = i18n.resolvedLanguage || i18n.language || "en";
+  const tr = {
+    formTitle: t("contact.formTitle"),
+    nameLabel: t("contact.nameLabel"),
+    namePlaceholder: t("contact.namePlaceholder"),
+    emailLabel: t("contact.emailLabel"),
+    emailPlaceholder: t("contact.emailPlaceholder"),
+    companyLabel: t("contact.companyLabel"),
+    companyPlaceholder: t("contact.companyPlaceholder"),
+    subjectLabel: t("contact.subjectLabel"),
+    subjectDefault: t("contact.subjectDefault"),
+    detailsLabel: t("contact.detailsLabel"),
+    detailsPlaceholder: t("contact.detailsPlaceholder"),
+    submitBtn: t("contact.submitBtn"),
+    sslNote: t("contact.sslNote"),
+    recipientLabel: t("contact.recipientLabel"),
+    encryptionBadge: t("contact.encryptionBadge"),
+    charUnit: t("contact.charUnit"),
+    submittingBtn: t("contact.submittingBtn"),
+    transmittingTitle: t("contact.transmittingTitle"),
+    protocolConsole: t("contact.protocolConsole"),
+    directInquiry: t("contact.directInquiry"),
+    successTitle: t("contact.successTitle"),
+    successDesc: t("contact.successDesc"),
+    backHome: t("contact.backHome"),
+    goAdmin: t("contact.goAdmin"),
+    validationRequired: t("contact.validationRequired"),
+    validationEmail: t("contact.validationEmail"),
+    submitError: t("contact.submitError"),
+  };
 
   // Forms dynamic state
   const [formData, setFormData] = useState({
@@ -281,17 +116,18 @@ export default function EmailFormPage({ onBack, onOpenAdmin }: EmailFormPageProp
     let cancelled = false;
     setLogLines([]);
 
+    // 终端动画日志是页面可见文案，统一从 portal namespace 生成；保留技术前缀，避免破坏原有视觉节奏。
     const logLibrary = [
-      `[CLIENT] Initializing secure telemetry channel...`,
-      `[ROUTING] Binding payload descriptor nodes...`,
-      `[SECURITY] Applying TLSv1.3 encryption handshake with dutylix@163.com`,
-      `[ENCRYPTION] Cipher: ECDHE-RSA-AES256-GCM-SHA384`,
-      `[CORRIDOR] Injecting corporate client payload metadata regarding: [${formData.company || "Direct Inquiry"}]`,
-      `[VALIDATOR] Processing client corporate email registry authentication...`,
-      `[COMMITTING] Transmitting requirements packet of: [${formData.name}]`,
-      `[GATEWAY] Remote SSL certificate handshake: VERIFIED`,
-      `[SUCCESS] Encryption tunnel routed successfully to corporate backlog.`,
-      `[SLA] Assigned secure tracking token #DTL-${Math.floor(Math.random() * 89999 + 10000)}`
+      t("contact.logs.client"),
+      t("contact.logs.routing"),
+      t("contact.logs.security"),
+      t("contact.logs.encryption"),
+      t("contact.logs.corridor", { company: formData.company || tr.directInquiry }),
+      t("contact.logs.validator"),
+      t("contact.logs.committing", { name: formData.name }),
+      t("contact.logs.gateway"),
+      t("contact.logs.success"),
+      t("contact.logs.sla", { token: Math.floor(Math.random() * 89999 + 10000) })
     ];
 
     let currentIndex = 0;
@@ -317,7 +153,7 @@ export default function EmailFormPage({ onBack, onOpenAdmin }: EmailFormPageProp
           if (cancelled) {
             return;
           }
-          setSubmitError(error instanceof Error ? error.message : "提交失败，请稍后重试。");
+          setSubmitError(error instanceof Error ? error.message : tr.submitError);
           setPayoutState("editing");
         });
       }
@@ -411,13 +247,13 @@ export default function EmailFormPage({ onBack, onOpenAdmin }: EmailFormPageProp
                     <Mail className="w-5 h-5" />
                   </div>
                   <div>
-                    <div className="text-[10px] font-mono font-bold text-zinc-500 tracking-wider">SECURE ENDPOINT RECIPIENT</div>
+                    <div className="text-[10px] font-mono font-bold text-zinc-500 tracking-wider">{tr.recipientLabel}</div>
                     <div className="text-base font-semibold text-indigo-400">dutylix@163.com</div>
                   </div>
                 </div>
                 <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs px-3 py-1 rounded-full font-mono font-medium self-end sm:self-auto">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  ENC: RSA-4096
+                  {tr.encryptionBadge}
                 </div>
               </div>
 
@@ -509,7 +345,7 @@ export default function EmailFormPage({ onBack, onOpenAdmin }: EmailFormPageProp
                       {tr.detailsLabel} <span className="text-[#5f5bf6]">*</span>
                     </label>
                     <span className="text-xs font-mono text-zinc-500">
-                      {formData.message.length} chars
+                      {formData.message.length} {tr.charUnit}
                     </span>
                   </div>
                   <textarea
@@ -541,7 +377,7 @@ export default function EmailFormPage({ onBack, onOpenAdmin }: EmailFormPageProp
                     {isSubmitting ? (
                       <>
                         <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        <span>Securing Tunnel Link...</span>
+                        <span>{tr.submittingBtn}</span>
                       </>
                     ) : (
                       <span>{tr.submitBtn}</span>
@@ -575,7 +411,7 @@ export default function EmailFormPage({ onBack, onOpenAdmin }: EmailFormPageProp
                 <Terminal className="text-[#5f5bf6] w-6 h-6" />
               </div>
               <h3 className="text-xl font-display font-semibold text-white tracking-tight">
-                SECURE END-TO-END TRANSMISSION ACTIVE
+                {tr.transmittingTitle}
               </h3>
             </div>
 
@@ -583,7 +419,7 @@ export default function EmailFormPage({ onBack, onOpenAdmin }: EmailFormPageProp
             <div className="bg-black/95 rounded-xl p-5 border border-white/5 text-left font-mono text-[11px] text-zinc-300 space-y-1.5 h-[180px] overflow-y-auto select-none">
               <div className="flex items-center gap-2 mb-2 text-zinc-500 border-b border-white/5 pb-2 text-[9px] font-bold uppercase tracking-wider">
                 <Globe className="w-3 h-3 text-[#5f5bf6]" />
-                Secure Handshake Node & Router Protocol Console
+                {tr.protocolConsole}
               </div>
               {logLines.map((line, idx) => (
                 <motion.div

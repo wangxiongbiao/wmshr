@@ -4,6 +4,8 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { tAdmin } from "./lib/i18nText";
+import { useTranslation } from "react-i18next";
 import { Sidebar } from "./components/Sidebar";
 import { Header } from "./components/Header";
 import { Dashboard } from "./components/Dashboard";
@@ -80,6 +82,7 @@ function getOAuthErrorFromCurrentUrl() {
 }
 
 export default function App() {
+  const { t } = useTranslation(["admin", "auth"]);
   const { confirm } = useDialog();
   const searchParams = new URLSearchParams(window.location.search);
   const isGooglePopupCallback =
@@ -188,7 +191,7 @@ export default function App() {
 
         const popupError = getOAuthErrorFromCurrentUrl();
         if (error || popupError) {
-          const message = error?.message || popupError || "Google 登录失败";
+          const message = error?.message || popupError || tAdmin("Google 登录失败");
           logGoogleAuth("admin", "Popup callback contains oauth error", { error: message });
           postPopupResultToOpener({
             type: GOOGLE_AUTH_MESSAGE_TYPE,
@@ -286,7 +289,7 @@ export default function App() {
 
       clearPopupWindow();
       setGoogleSigningIn(false);
-      setAuthError(event.data.error || "Google 登录失败，请重试。");
+      setAuthError(event.data.error || tAdmin("Google 登录失败，请重试。"));
     };
 
     window.addEventListener("message", handleMessage);
@@ -320,10 +323,10 @@ export default function App() {
       const result = await ensureWorkspaceBootstrap();
       if (result.created) {
         setWorkspaceBootstrapDismissed(true);
-        addToast(result.message || "已自动初始化当前账号的演示数据");
+        addToast(result.message || tAdmin("已自动初始化当前账号的业务数据"));
       }
     } catch (error) {
-      addToast(error instanceof Error ? error.message : "后台初始化检查失败");
+      addToast(error instanceof Error ? error.message : tAdmin("后台初始化检查失败"));
     } finally {
       await Promise.all([
         loadEmployeeModuleData(),
@@ -339,7 +342,7 @@ export default function App() {
       const employeeRows = await fetchEmployees();
       setEmployees(employeeRows);
     } catch (error) {
-      addToast(error instanceof Error ? error.message : "员工模块数据加载失败");
+      addToast(error instanceof Error ? error.message : tAdmin("员工模块数据加载失败"));
     } finally {
       setEmployeesLoading(false);
     }
@@ -351,7 +354,7 @@ export default function App() {
       const rules = await fetchAttendanceRules();
       setAttendanceRuleList(rules);
     } catch (error) {
-      addToast(error instanceof Error ? error.message : "考勤规则模块数据加载失败");
+      addToast(error instanceof Error ? error.message : tAdmin("考勤规则模块数据加载失败"));
     } finally {
       setAttendanceRulesLoading(false);
     }
@@ -383,7 +386,7 @@ export default function App() {
 
     if (!data?.url) {
       setGoogleSigningIn(false);
-      setAuthError("未获取到 Google 登录地址，请稍后重试。");
+      setAuthError(tAdmin("未获取到 Google 登录地址，请稍后重试。"));
       return;
     }
 
@@ -391,7 +394,7 @@ export default function App() {
 
     if (!popup) {
       setGoogleSigningIn(false);
-      setAuthError("浏览器拦截了登录弹窗，请允许弹窗后重试。");
+      setAuthError(tAdmin("浏览器拦截了登录弹窗，请允许弹窗后重试。"));
       return;
     }
 
@@ -417,7 +420,7 @@ export default function App() {
 
       if (!popupResolvedRef.current) {
         setGoogleSigningIn(false);
-        setAuthError("你已关闭 Google 登录弹窗，请重试。");
+        setAuthError(tAdmin("你已关闭 Google 登录弹窗，请重试。"));
       }
     }, GOOGLE_POPUP_POLL_MS);
   };
@@ -440,9 +443,9 @@ export default function App() {
       ]);
       setWorkspaceBootstrapDismissed(true);
       setActiveTab("attendance");
-      addToast(result.message || "已为当前账号初始化后台示例数据");
+      addToast(result.message || tAdmin("已为当前账号初始化后台业务数据"));
     } catch (error) {
-      addToast(error instanceof Error ? error.message : "初始化后台失败");
+      addToast(error instanceof Error ? error.message : tAdmin("初始化后台失败"));
     } finally {
       setWorkspaceBootstrapping(false);
     }
@@ -454,13 +457,13 @@ export default function App() {
   };
 
   const openEditEmployee = async (employee: Employee) => {
-    setGlobalLoadingMessage("正在加载员工档案...");
+    setGlobalLoadingMessage(tAdmin("正在加载员工档案..."));
     try {
       const detail = await fetchEmployeeDetail(employee.id);
       setEditingEmployee(detail.employee);
       setIsEmployeeModalOpen(true);
     } catch (error) {
-      addToast(error instanceof Error ? error.message : "员工详情加载失败");
+      addToast(error instanceof Error ? error.message : tAdmin("员工详情加载失败"));
     } finally {
       setGlobalLoadingMessage("");
     }
@@ -475,7 +478,7 @@ export default function App() {
       const response = await fetchEmployeeAppAccount(employee.id);
       setEmployeeAppAccountResponse(response);
     } catch (error) {
-      addToast(error instanceof Error ? error.message : "员工 App 账号加载失败");
+      addToast(error instanceof Error ? error.message : tAdmin("员工 App 账号加载失败"));
     } finally {
       setEmployeeAppAccountLoading(false);
     }
@@ -490,9 +493,9 @@ export default function App() {
     try {
       const response = await resetEmployeeAppPassword(selectedEmployeeForAppAccount.id);
       setEmployeeAppAccountResponse(response);
-      addToast("员工 App 密码已重置为 Aa123456");
+      addToast(tAdmin("员工 App 密码已重置为 Aa123456"));
     } catch (error) {
-      addToast(error instanceof Error ? error.message : "重置员工 App 密码失败");
+      addToast(error instanceof Error ? error.message : tAdmin("重置员工 App 密码失败"));
     } finally {
       setEmployeeAppAccountActionLoading(false);
     }
@@ -508,9 +511,9 @@ export default function App() {
       const nextStatus = employeeAppAccountResponse.account.status === "disabled" ? "active" : "disabled";
       const response = await updateEmployeeAppAccountStatus(selectedEmployeeForAppAccount.id, nextStatus);
       setEmployeeAppAccountResponse(response);
-      addToast(nextStatus === "active" ? "员工 App 账号已启用" : "员工 App 账号已停用");
+      addToast(nextStatus === "active" ? tAdmin("员工 App 账号已启用") : tAdmin("员工 App 账号已停用"));
     } catch (error) {
-      addToast(error instanceof Error ? error.message : "员工 App 账号状态更新失败");
+      addToast(error instanceof Error ? error.message : tAdmin("员工 App 账号状态更新失败"));
     } finally {
       setEmployeeAppAccountActionLoading(false);
     }
@@ -521,12 +524,16 @@ export default function App() {
       return;
     }
 
-    const message = `姓名：${selectedEmployeeForAppAccount?.name || employeeAppAccountResponse.account.employeeName}\nApp账号：${employeeAppAccountResponse.account.account}\n密码：${employeeAppAccountResponse.defaultPassword}`;
+    const message = tAdmin("姓名：{{name}}\nApp账号：{{account}}\n密码：{{password}}", {
+      name: selectedEmployeeForAppAccount?.name || employeeAppAccountResponse.account.employeeName,
+      account: employeeAppAccountResponse.account.account,
+      password: employeeAppAccountResponse.defaultPassword,
+    });
     try {
       await navigator.clipboard.writeText(message);
-      addToast("已复制员工 App 账号密码");
+      addToast(tAdmin("已复制员工 App 账号密码"));
     } catch {
-      addToast("复制失败，请手动复制弹窗中的账号和密码");
+      addToast(tAdmin("复制失败，请手动复制弹窗中的账号和密码"));
     }
   };
 
@@ -544,9 +551,9 @@ export default function App() {
       });
       setEditingEmployee(detail.employee);
       setIsEmployeeModalOpen(false);
-      addToast(editingEmployee ? '员工档案已更新' : '新员工已添加成功');
+      addToast(editingEmployee ? tAdmin("员工档案已更新") : tAdmin("新员工已添加成功"));
     } catch (error) {
-      addToast(error instanceof Error ? error.message : "员工保存失败");
+      addToast(error instanceof Error ? error.message : tAdmin("员工保存失败"));
     } finally {
       setEmployeeSaving(false);
     }
@@ -554,10 +561,10 @@ export default function App() {
 
   const handleDeleteEmployee = async (employee: Employee) => {
     const confirmed = await confirm({
-      title: "确认删除员工?",
-      message: `此操作会将员工 ${employee.name} 从 v2 员工列表中移除，后续仍可在后台数据中保留离职记录。是否继续？`,
-      confirmText: "确认删除",
-      cancelText: "取消",
+      title: tAdmin("确认删除员工?"),
+      message: tAdmin("此操作会将员工 {{name}} 从 v2 员工列表中移除，后续仍可在后台数据中保留离职记录。是否继续？", { name: employee.name }),
+      confirmText: tAdmin("确认删除"),
+      cancelText: tAdmin("取消"),
       tone: "danger"
     });
 
@@ -569,9 +576,9 @@ export default function App() {
       // 当前后端没有物理删除接口；v2 删除入口只负责让员工退出当前员工列表，因此沿用状态接口标记为离职，避免误删历史考勤/薪资记录。
       await updateEmployeeStatus(employee.id, "resigned");
       setEmployees((prev) => prev.filter((item) => item.id !== employee.id));
-      addToast("员工已从当前列表移除");
+      addToast(tAdmin("员工已从当前列表移除"));
     } catch (error) {
-      addToast(error instanceof Error ? error.message : "员工删除失败");
+      addToast(error instanceof Error ? error.message : tAdmin("员工删除失败"));
     }
   };
 
@@ -589,13 +596,13 @@ export default function App() {
   };
 
   const openEditAttendanceRule = async (rule: AttendanceRule) => {
-    setGlobalLoadingMessage("正在加载考勤规则...");
+    setGlobalLoadingMessage(tAdmin("正在加载考勤规则..."));
     try {
       const detail = await fetchAttendanceRuleDetail(rule.id);
       setEditingAttendanceRule(detail.rule);
       setIsAttendanceRuleModalOpen(true);
     } catch (error) {
-      addToast(error instanceof Error ? error.message : "考勤规则详情加载失败");
+      addToast(error instanceof Error ? error.message : tAdmin("考勤规则详情加载失败"));
     } finally {
       setGlobalLoadingMessage("");
     }
@@ -604,11 +611,11 @@ export default function App() {
   const handleSaveAttendanceRule = async (payload: AttendanceRuleFormData) => {
     if (editingAttendanceRule?.relatedEmployeeCount) {
       const confirmed = await confirm({
-        title: "确认更新已被引用的规则",
+        title: tAdmin("确认更新已被引用的规则"),
         message:
-          "该考勤规则已被员工引用。保存修改后，关联员工后续考勤计算将按新规则执行；如重新计算历史考勤，历史结果也可能变化。是否继续保存？",
-        confirmText: "继续保存",
-        cancelText: "先不修改",
+          tAdmin("该考勤规则已被员工引用。保存修改后，关联员工后续考勤计算将按新规则执行；如重新计算历史考勤，历史结果也可能变化。是否继续保存？"),
+        confirmText: tAdmin("继续保存"),
+        cancelText: tAdmin("先不修改"),
         tone: "warning"
       });
       if (!confirmed) {
@@ -625,9 +632,9 @@ export default function App() {
       syncAttendanceRuleIntoState(detail.rule);
       setIsAttendanceRuleModalOpen(false);
       setEditingAttendanceRule(null);
-      addToast(editingAttendanceRule ? "考勤规则已更新" : "考勤规则已创建");
+      addToast(editingAttendanceRule ? tAdmin("考勤规则已更新") : tAdmin("考勤规则已创建"));
     } catch (error) {
-      addToast(error instanceof Error ? error.message : "考勤规则保存失败");
+      addToast(error instanceof Error ? error.message : tAdmin("考勤规则保存失败"));
     } finally {
       setAttendanceRuleSaving(false);
     }
@@ -642,7 +649,7 @@ export default function App() {
       setRelatedEmployees(rows);
     } catch (error) {
       setRelatedEmployees([]);
-      addToast(error instanceof Error ? error.message : "关联员工加载失败");
+      addToast(error instanceof Error ? error.message : tAdmin("关联员工加载失败"));
     } finally {
       setRelatedEmployeesLoading(false);
     }
@@ -667,9 +674,9 @@ export default function App() {
       syncAttendanceRuleIntoState(detail.rule);
       setIsAttendanceRuleToggleModalOpen(false);
       setToggleTargetRule(null);
-      addToast(detail.rule.isActive ? "考勤规则已启用" : "考勤规则已停用");
+      addToast(detail.rule.isActive ? tAdmin("考勤规则已启用") : tAdmin("考勤规则已停用"));
     } catch (error) {
-      addToast(error instanceof Error ? error.message : "考勤规则状态更新失败");
+      addToast(error instanceof Error ? error.message : tAdmin("考勤规则状态更新失败"));
     } finally {
       setAttendanceRuleToggleSaving(false);
     }
@@ -677,14 +684,14 @@ export default function App() {
 
   const pageTitle = useMemo(() => {
     const titles: Record<TabId, string> = {
-      dashboard: '数据看板',
-      employees: '员工管理',
-      attendance: '考勤计算',
-      payroll: '薪资核算',
-      sop: 'SOP管理'
+      dashboard: t('数据看板'),
+      employees: t('员工管理'),
+      attendance: t('考勤计算'),
+      payroll: t('薪资核算'),
+      sop: t('SOP管理')
     };
     return titles[activeTab];
-  }, [activeTab]);
+  }, [activeTab, t]);
 
   const showWorkspaceBootstrapCard =
     Boolean(session?.access_token) &&
@@ -697,17 +704,13 @@ export default function App() {
 
   if (isGooglePopupCallback) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#f8fafc] text-slate-500 text-sm">
-        正在完成 Google 登录...
-      </div>
+      <div className="min-h-screen flex items-center justify-center bg-[#f8fafc] text-slate-500 text-sm">{t("正在打开 Google 授权...")}</div>
     );
   }
 
   if (authLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#f8fafc] text-slate-500 text-sm">
-        正在检查登录状态...
-      </div>
+      <div className="min-h-screen flex items-center justify-center bg-[#f8fafc] text-slate-500 text-sm">{t("加载中")}</div>
     );
   }
 
@@ -729,26 +732,22 @@ export default function App() {
                 <div className="max-w-2xl">
                   <div className="flex items-center gap-2 text-brand-700 mb-2">
                     <Sparkles className="w-5 h-5" />
-                    <span className="text-sm font-semibold">首次进入当前账号后台</span>
+                    <span className="text-sm font-semibold">{tAdmin("首次进入当前账号后台")}</span>
                   </div>
-                  <h3 className="text-xl font-bold text-slate-900">一键初始化当前 Google 账号的独立后台数据</h3>
-                  <p className="mt-2 text-sm text-slate-600 leading-6">
-                    初始化后会为当前账号创建默认考勤规则、示例员工、当月考勤记录和薪酬演示数据。它们只属于你当前登录的 Google 账号，不会和其他账号共享。
-                  </p>
+                  <h3 className="text-xl font-bold text-slate-900">{tAdmin("一键初始化当前 Google 账号的独立后台数据")}</h3>
+                  <p className="mt-2 text-sm text-slate-600 leading-6">{tAdmin("初始化后会为当前账号创建默认考勤规则、员工资料、当月考勤记录和薪酬数据。它们只属于你当前登录的 Google 账号，不会和其他账号共享。")}</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
                   <button
                     onClick={() => setWorkspaceBootstrapDismissed(true)}
                     className="px-4 py-2.5 rounded-lg border border-slate-300 bg-white text-sm text-slate-700 hover:bg-slate-50"
-                  >
-                    稍后手动创建
-                  </button>
+                  >{tAdmin("稍后手动创建")}</button>
                   <button
                     onClick={() => void handleBootstrapWorkspace()}
                     disabled={workspaceBootstrapping}
                     className="px-5 py-2.5 rounded-lg bg-brand-600 text-white text-sm font-medium hover:bg-brand-700 disabled:opacity-60"
                   >
-                    {workspaceBootstrapping ? "正在初始化..." : "立即初始化当前后台"}
+                    {workspaceBootstrapping ? tAdmin("正在初始化...") : tAdmin("立即初始化当前后台")}
                   </button>
                 </div>
               </div>
@@ -828,7 +827,7 @@ export default function App() {
       <AttendanceRuleRelatedEmployeesModal
         isOpen={isRelatedEmployeesModalOpen}
         onClose={() => setIsRelatedEmployeesModalOpen(false)}
-        ruleName={selectedRuleForEmployees?.name || "考勤规则"}
+        ruleName={selectedRuleForEmployees?.name || tAdmin("考勤规则")}
         employees={relatedEmployees}
         loading={relatedEmployeesLoading}
       />
@@ -848,7 +847,7 @@ export default function App() {
               <div className="h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-brand-600" />
               <div>
                 <div className="text-sm font-semibold text-slate-800">{globalLoadingMessage}</div>
-                <div className="mt-1 text-xs text-slate-500">请稍候，正在准备弹窗内容</div>
+                <div className="mt-1 text-xs text-slate-500">{tAdmin("请稍候，正在准备弹窗内容")}</div>
               </div>
             </div>
           </div>

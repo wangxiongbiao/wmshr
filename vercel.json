@@ -2,6 +2,16 @@
   "buildCommand": "npm --workspace @wmshr/admin run build",
   "outputDirectory": "apps/admin/dist",
   "installCommand": "npm install --include=optional",
+  "crons": [
+    {
+      "path": "/api/cron/attendance-nightly",
+      "schedule": "0 17 * * *"
+    },
+    {
+      "path": "/api/cron/payroll-nightly",
+      "schedule": "5 17 * * *"
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/(.*)",

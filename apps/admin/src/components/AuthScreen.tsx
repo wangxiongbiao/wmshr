@@ -3,11 +3,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useTranslation } from "react-i18next";
+
 interface AuthScreenProps {
   loading?: boolean;
   onGoogleLogin: () => void;
   error?: string;
 }
+
+// 登录页“返回官网”必须和门户服务解耦：本地调试回 3001 门户，生产环境回正式官网；如域名调整，优先通过 VITE_HOME_URL 覆盖。
+const HOME_SITE_URL = import.meta.env.VITE_HOME_URL
+  || (import.meta.env.DEV ? "http://localhost:3001" : "https://dutylix.com");
 
 function WmshrLogoMark() {
   // 继续复用 public/dutylix-icon.svg 这个既有路径，避免改动静态资源引用面；图形内容已恢复为蓝底 WMSHR 立方体标识。
@@ -26,15 +32,20 @@ function GoogleIcon() {
 }
 
 export function AuthScreen({ loading = false, onGoogleLogin, error }: AuthScreenProps) {
+  const { t } = useTranslation(["auth", "common"]);
+
   return (
     <div className="min-h-screen overflow-hidden bg-[#eef5f2] text-slate-950">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_12%_10%,rgba(191,224,221,0.75),transparent_32%),radial-gradient(circle_at_86%_18%,rgba(219,232,244,0.8),transparent_28%),linear-gradient(135deg,#fbfaf6_0%,#eef5f2_48%,#e8f0f6_100%)]" />
       <div className="absolute inset-0 opacity-[0.16] bg-[linear-gradient(to_right,#64748b_1px,transparent_1px),linear-gradient(to_bottom,#64748b_1px,transparent_1px)] bg-[size:72px_72px]" />
 
       <main className="relative min-h-screen px-5 py-5 lg:px-10 lg:py-8 flex items-center">
-        <div className="absolute right-5 top-5 lg:right-10 lg:top-8 rounded-full border border-white/70 bg-white/60 px-4 py-2 text-xs font-semibold text-slate-500 shadow-sm backdrop-blur-xl">
-          admin.dutylix.com
-        </div>
+        <a
+          href={HOME_SITE_URL}
+          className="absolute right-5 top-5 lg:right-10 lg:top-8 rounded-full border border-white/70 bg-white/75 px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm backdrop-blur-xl transition hover:-translate-y-0.5 hover:bg-white hover:text-slate-900"
+        >
+          {t("返回官网")}
+        </a>
 
         <div className="mx-auto grid w-full max-w-7xl items-center gap-6 lg:grid-cols-[1.12fr_0.88fr]">
           <section className="relative min-h-[620px] overflow-hidden rounded-[2rem] border border-white/70 bg-white/45 p-6 shadow-[0_30px_100px_rgba(15,23,42,0.12)] backdrop-blur-2xl lg:rounded-[2.5rem] lg:p-8">
@@ -53,12 +64,12 @@ export function AuthScreen({ loading = false, onGoogleLogin, error }: AuthScreen
                 <div className="relative grid h-full min-h-[360px] grid-cols-[0.9fr_1.1fr] gap-4">
                   <div className="flex flex-col justify-end gap-4">
                     <div className="w-44 rounded-[1.35rem] border border-white/70 bg-white/70 p-4 shadow-xl shadow-slate-900/5 backdrop-blur-md">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">今日上班</p>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">{t("安全登录")}</p>
                       <p className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">08:30</p>
-                      <p className="mt-2 text-xs text-slate-500">考勤已同步</p>
+                      <p className="mt-2 text-xs text-slate-500">{t("Google 账号进入")}</p>
                     </div>
                     <div className="ml-10 w-52 rounded-[1.35rem] border border-white/70 bg-slate-950/80 p-4 text-white shadow-2xl shadow-slate-900/20 backdrop-blur-md">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-cyan-100/70">薪资待确认</p>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-cyan-100/70">{t("薪资边界")}</p>
                       <div className="mt-4 space-y-2">
                         <div className="h-2 w-28 rounded-full bg-white/70" />
                         <div className="h-2 w-36 rounded-full bg-white/35" />
@@ -72,17 +83,17 @@ export function AuthScreen({ loading = false, onGoogleLogin, error }: AuthScreen
                     <div className="relative h-80 w-64 rotate-3 rounded-[2rem] border border-white/80 bg-white/80 p-5 shadow-2xl shadow-slate-900/10 backdrop-blur-md">
                       <div className="flex items-center justify-between border-b border-slate-200 pb-4">
                         <div>
-                          <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">考勤明细</p>
-                          <p className="mt-1 text-lg font-semibold text-slate-900">今日汇总</p>
+                          <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">{t("专属工作台")}</p>
+                          <p className="mt-1 text-lg font-semibold text-slate-900">{t("只显示你的团队数据")}</p>
                         </div>
-                        <span className="rounded-full bg-emerald-100 px-3 py-1 text-[10px] font-bold text-emerald-700">正常</span>
+                        <span className="rounded-full bg-emerald-100 px-3 py-1 text-[10px] font-bold text-emerald-700">{t("在线")}</span>
                       </div>
                       <div className="mt-5 space-y-4">
-                        {["标准工时", "加班时长", "请假记录"].map((label, index) => (
+                        {[[t("安全登录"), "8.0h"], [t("薪资边界"), "1.25h"], [t("专属工作台"), t("在线")]].map(([label, value], index) => (
                           <div key={label}>
                             <div className="mb-2 flex justify-between text-xs text-slate-500">
                               <span>{label}</span>
-                              <span>{index === 0 ? "8.0h" : index === 1 ? "1.25h" : "已核对"}</span>
+                              <span>{value}</span>
                             </div>
                             <div className="h-2 overflow-hidden rounded-full bg-slate-100">
                               <div className={`h-full rounded-full ${index === 0 ? "w-[82%] bg-slate-800" : index === 1 ? "w-[38%] bg-cyan-400" : "w-[58%] bg-emerald-400"}`} />
@@ -91,7 +102,7 @@ export function AuthScreen({ loading = false, onGoogleLogin, error }: AuthScreen
                         ))}
                       </div>
                       <div className="mt-6 rounded-2xl bg-slate-50 p-4">
-                        <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">待处理工资条</p>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">{t("薪资边界")}</p>
                         <p className="mt-2 text-2xl font-semibold text-slate-900">12</p>
                       </div>
                     </div>
@@ -101,9 +112,9 @@ export function AuthScreen({ loading = false, onGoogleLogin, error }: AuthScreen
 
               <div className="mt-6 grid gap-3 sm:grid-cols-3">
                 {[
-                  ["安全登录", "Google 账号进入"],
-                  ["专属工作台", "只显示你的团队数据"],
-                  ["薪资边界", "工资与考勤独立核对"]
+                  [t("安全登录"), t("Google 账号进入")],
+                  [t("专属工作台"), t("只显示你的团队数据")],
+                  [t("薪资边界"), t("工资与考勤独立核对")]
                 ].map(([title, caption]) => (
                   <div key={title} className="rounded-2xl border border-white/70 bg-white/55 p-4 shadow-sm backdrop-blur-xl">
                     <p className="text-sm font-semibold text-slate-800">{title}</p>
@@ -124,22 +135,18 @@ export function AuthScreen({ loading = false, onGoogleLogin, error }: AuthScreen
                   </div>
                   <div>
                     <p className="text-sm font-bold tracking-[0.18em] text-slate-400">WMSHR</p>
-                    <p className="text-sm font-semibold text-slate-700">管理后台</p>
+                    <p className="text-sm font-semibold text-slate-700">{t("专属工作台")}</p>
                   </div>
                 </div>
-                <span className="rounded-full bg-emerald-50 px-3 py-1.5 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-100">
-                  在线
-                </span>
+                <span className="rounded-full bg-emerald-50 px-3 py-1.5 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-100">{t("在线")}</span>
               </div>
 
               <div className="mb-8">
-                <p className="mb-3 text-sm font-semibold text-cyan-700">管理员登录</p>
+                <p className="mb-3 text-sm font-semibold text-cyan-700">{t("管理员登录")}</p>
                 <h1 className="text-4xl font-semibold leading-[1.08] tracking-[-0.04em] text-slate-950 lg:text-5xl">
-                  考勤与薪资自动运行
+                  {t("考勤与薪资自动运行")}
                 </h1>
-                <p className="mt-5 text-base leading-7 text-slate-500">
-                  统一管理员入口，登录后即可查看员工、考勤、加班与工资条数据。
-                </p>
+                <p className="mt-5 text-base leading-7 text-slate-500">{t("统一管理员入口，登录后即可查看员工、考勤、加班与工资条数据。")}</p>
               </div>
 
               <button
@@ -150,7 +157,7 @@ export function AuthScreen({ loading = false, onGoogleLogin, error }: AuthScreen
                 <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white">
                   <GoogleIcon />
                 </span>
-                {loading ? "正在打开 Google 授权..." : "使用 Google 账号进入后台"}
+                {loading ? t("正在打开 Google 授权...") : t("使用 Google 账号进入后台")}
               </button>
 
               {error && (
@@ -160,10 +167,8 @@ export function AuthScreen({ loading = false, onGoogleLogin, error }: AuthScreen
               )}
 
               <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50/80 p-4 text-sm leading-6 text-slate-500">
-                <p className="font-semibold text-slate-700">主站进入 · Google 登录 · 数据安全隔离</p>
-                <p className="mt-1 text-xs">
-                  登录成功后进入你的管理工作台，员工与薪资数据不会展示给未授权访问者。
-                </p>
+                <p className="font-semibold text-slate-700">{t("主站进入 · Google 登录 · 数据安全隔离")}</p>
+                <p className="mt-1 text-xs">{t("登录成功后进入你的管理工作台，员工与薪资数据不会展示给未授权访问者。")}</p>
               </div>
             </div>
           </aside>

@@ -4,6 +4,7 @@
  */
 
 import { useMemo } from "react";
+import { tAdmin } from "../lib/i18nText";
 import { cn } from "../lib/utils";
 
 type PaginationItem = number | "ellipsis";
@@ -73,17 +74,14 @@ export function Pagination({
 
   return (
     <nav
-      aria-label="分页导航"
+      aria-label={tAdmin("分页导航")}
       className={cn(
         "flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-4 sm:flex-row sm:items-center sm:justify-between",
         className
       )}
     >
       <div className="text-sm text-slate-500">
-        当前第 <span className="font-semibold text-slate-700">{currentPage}</span> /{" "}
-        <span className="font-semibold text-slate-700">{totalPages}</span> 页，显示{" "}
-        <span className="font-semibold text-slate-700">{pageStart}-{pageEnd}</span>，共{" "}
-        <span className="font-semibold text-slate-700">{total}</span> {itemName}
+        {tAdmin("当前第 {{currentPage}} / {{totalPages}} 页，显示 {{pageStart}}-{{pageEnd}}，共 {{total}} {{itemName}}", { currentPage, totalPages, pageStart, pageEnd, total, itemName })}
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <button
@@ -91,9 +89,7 @@ export function Pagination({
           onClick={() => onPageChange(Math.max(1, currentPage - 1))}
           disabled={disabled || currentPage <= 1}
           className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-        >
-          上一页
-        </button>
+        >{tAdmin("上一页")}</button>
         {paginationItems.map((item, index) => (
           item === "ellipsis" ? (
             <span key={`ellipsis-${index}`} className="px-2 text-sm text-slate-400">
@@ -122,9 +118,7 @@ export function Pagination({
           onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
           disabled={disabled || currentPage >= totalPages}
           className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-        >
-          下一页
-        </button>
+        >{tAdmin("下一页")}</button>
       </div>
     </nav>
   );

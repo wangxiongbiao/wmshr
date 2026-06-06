@@ -4,6 +4,7 @@ import {Ionicons} from '@expo/vector-icons';
 import {NavigationContainer} from '@react-navigation/native';
 import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
+import {useTranslation} from 'react-i18next';
 import {useAuth} from './providers/AuthProvider';
 import {LoginScreen} from '../features/auth/screens/LoginScreen';
 import {HomeScreen} from '../features/home/screens/HomeScreen';
@@ -58,6 +59,8 @@ function MineNavigator() {
 }
 
 function MainTabs() {
+  const { t } = useTranslation('app');
+
   return (
     <Tab.Navigator
       screenOptions={({route}) => ({
@@ -87,10 +90,10 @@ function MainTabs() {
           return <Ionicons name={iconMap[route.name]} size={size} color={color} />;
         },
       })}>
-      <Tab.Screen name="Home" component={HomeScreen} options={{title: '首页'}} />
-      <Tab.Screen name="Attendance" component={AttendanceNavigator} options={{title: '考勤'}} />
+      <Tab.Screen name="Home" component={HomeScreen} options={{title: t('首页')}} />
+      <Tab.Screen name="Attendance" component={AttendanceNavigator} options={{title: t('考勤')}} />
       <Tab.Screen name="Sop" component={SopNavigator} options={{title: 'SOP'}} />
-      <Tab.Screen name="Mine" component={MineNavigator} options={{title: '我的'}} />
+      <Tab.Screen name="Mine" component={MineNavigator} options={{title: t('我的')}} />
     </Tab.Navigator>
   );
 }

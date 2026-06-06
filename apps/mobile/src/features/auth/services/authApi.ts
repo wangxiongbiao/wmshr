@@ -17,10 +17,9 @@ export async function loginEmployeeApp(payload: MobileLoginPayload): Promise<Mob
   });
 }
 
-export async function fetchCurrentEmployee(employee: EmployeeProfile | null): Promise<EmployeeProfile> {
-  // 第一版还没有“当前员工资料”独立接口；登录成功返回的 employee 是 session 期间的资料来源，避免继续保留 mock 员工。
-  if (!employee) {
-    throw new Error('请先登录员工账号');
-  }
-  return employee;
+export async function fetchCurrentEmployee(accessToken: string): Promise<EmployeeProfile> {
+  const response = await httpClient<{employee: EmployeeProfile}>('/api/mobile/auth/me', {
+    headers: {Authorization: `Bearer ${accessToken}`},
+  });
+  return response.employee;
 }

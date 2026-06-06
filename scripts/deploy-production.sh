@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# WMSHR / Dutylix admin production release script.
+# WMSHR / Dutylix production release script.
 # Keep this file aligned with the deployment runbook in the Hermes github-operations skill:
-# root vercel.json builds apps/admin, production custom domain is admin.dutylix.com,
-# and post-release verification must test the custom domain instead of only the generated Vercel URL.
+# root vercel.json builds apps/admin, apps/home must be deployed from its own directory
+# with the explicit dutylix Vercel project, and post-release verification must test the
+# custom domains instead of only the generated Vercel URLs.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PROJECT_MANAGER_DIR="/Users/admin/Desktop/GitHub-Project-Manager"
@@ -12,6 +13,10 @@ PROJECT_RECORD="${PROJECT_MANAGER_DIR}/public/data/projects/wangxiongbiao-wmshr.
 PROJECT_INDEX="${PROJECT_MANAGER_DIR}/public/data/project-index.json"
 CUSTOM_DOMAIN="admin.dutylix.com"
 CUSTOM_ORIGIN="https://${CUSTOM_DOMAIN}"
+HOME_APP_DIR="${REPO_ROOT}/apps/home"
+HOME_VERCEL_PROJECT="dutylix"
+HOME_CUSTOM_DOMAIN="dutylix.com"
+HOME_CUSTOM_ORIGIN="https://${HOME_CUSTOM_DOMAIN}"
 PROTECTED_CHECK_URL="${CUSTOM_ORIGIN}/api/admin/employees"
 HEALTH_URL="${CUSTOM_ORIGIN}/api/health"
 GOOGLE_AUTH_URL="${CUSTOM_ORIGIN}/api/public/google-auth-url?redirectTo=https%3A%2F%2Fadmin.dutylix.com"
@@ -31,7 +36,7 @@ Options:
 
 Default flow:
   lint/build/diff-check/test -> optional Supabase db push -> commit if dirty -> push main ->
-  Vercel prod deploy -> alias admin.dutylix.com -> verify production endpoints -> update project log.
+  Vercel prod deploy admin + portal -> alias custom domains -> verify production endpoints/assets -> update project log.
 EOF
 }
 
@@ -83,6 +88,12 @@ extract_deployment_url() {
   grep -Eo 'https://dutylix-admin-[^[:space:]]+-wang-lins-projects\.vercel\.app' "$1" | tail -n 1
 }
 
+extract_home_deployment_url() {
+  # The monorepo root is linked to dutylix-admin, so the portal deploy is parsed separately
+  # from the explicit apps/home Vercel project to avoid aliasing the admin deployment to dutylix.com.
+  grep -Eo 'https://dutylix-[^[:space:]]+-wang-lins-projects\.vercel\.app' "$1" | tail -n 1
+}
+
 verify_http_status() {
   local url="$1"
   local expected="$2"
@@ -96,9 +107,46 @@ verify_http_status() {
   fi
 }
 
+verify_home_production() {
+  local html_file bundle_path bundle_file
+  html_file="$(mktemp -t wmshr-home-html.XXXXXX)"
+  bundle_file="$(mktemp -t wmshr-home-bundle.XXXXXX.js)"
+
+  echo "== Portal production verification =="
+  verify_http_status "$HOME_CUSTOM_ORIGIN" "200"
+  verify_http_status "${HOME_CUSTOM_ORIGIN}/favicon.ico" "200"
+  verify_http_status "${HOME_CUSTOM_ORIGIN}/dutylix-icon.svg" "200"
+
+  curl -L -s "$HOME_CUSTOM_ORIGIN" >"$html_file"
+  # The portal is a SPA; visible CTA text lives in the emitted JS bundle rather than index.html.
+  # Keep this verification tied to the real production asset so a stale custom-domain alias fails the release.
+  bundle_path="$(python3 - "$html_file" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+html = Path(sys.argv[1]).read_text(errors="ignore")
+matches = re.findall(r'src="([^"]*/assets/index-[^"]+\.js)"', html)
+if not matches:
+    raise SystemExit("Could not find portal JS bundle in production HTML")
+print(matches[-1])
+PY
+)"
+  curl -L -s "${HOME_CUSTOM_ORIGIN}${bundle_path}" >"$bundle_file"
+  if ! grep -q 'Use Now' "$bundle_file" || ! grep -q '立即使用' "$bundle_file"; then
+    echo "Portal bundle did not contain expected CTA text." >&2
+    exit 1
+  fi
+  if grep -Eq 'Login with Google|谷歌登录' "$bundle_file"; then
+    echo "Portal bundle still contains removed Google-login CTA text." >&2
+    exit 1
+  fi
+}
+
 update_project_manager_log() {
   local head_sha="$1"
   local deployment_url="$2"
+  local home_deployment_url="$3"
   local now
   now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
@@ -108,7 +156,7 @@ update_project_manager_log() {
   fi
 
   # GitHub 项目发布属于实际使用记录；这里同步项目详情和索引，避免下次复盘时只看到 Git/Vercel 状态却缺少发布过程。
-  python3 - "$PROJECT_RECORD" "$PROJECT_INDEX" "$now" "$head_sha" "$deployment_url" <<'PY'
+  python3 - "$PROJECT_RECORD" "$PROJECT_INDEX" "$now" "$head_sha" "$deployment_url" "$home_deployment_url" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -118,23 +166,24 @@ index_path = Path(sys.argv[2])
 now = sys.argv[3]
 head_sha = sys.argv[4]
 deployment_url = sys.argv[5]
+home_deployment_url = sys.argv[6]
 
 project = json.loads(project_path.read_text())
 log = {
     "usedAt": now,
-    "task": "一键发布 WMSHR / Dutylix admin 到正式环境",
-    "usageType": "自动化发布、数据库迁移、GitHub 推送、Vercel 生产部署、自定义域名验证",
-    "process": "通过 scripts/deploy-production.sh 执行 lint/build/diff check/考勤测试、可选 Supabase db push、git commit/push、vercel deploy --prod、admin.dutylix.com alias 与线上接口验证。",
-    "result": f"发布脚本执行成功。GitHub main HEAD 为 {head_sha}；Vercel 部署 URL 为 {deployment_url}；admin.dutylix.com 已完成线上验证。",
-    "extractedOrIntegrated": "使用仓库根 vercel.json 的 apps/admin 构建配置、Supabase 迁移目录、Vercel dutylix-admin 项目和 admin.dutylix.com 生产域名。",
-    "successCriteria": "lint/build/diff check/考勤测试通过；GitHub main 推送成功；Vercel Production Ready；admin.dutylix.com 页面、health、未登录保护接口和 Google auth URL 验证通过。",
-    "pitfalls": "Vercel CLI 默认 alias 可能不是 admin.dutylix.com，脚本必须显式 vercel alias set；发布脚本默认提交当前工作树全部改动，执行前应确认 git status 中没有无关文件。",
-    "nextActions": "如需业务端到端验收，登录 admin.dutylix.com 检查薪资列表、工资条生成和员工端账号登录。",
+    "task": "一键发布 WMSHR / Dutylix admin 与门户到正式环境",
+    "usageType": "自动化发布、数据库迁移、GitHub 推送、Vercel 生产部署、自定义域名验证、门户资源验证",
+    "process": "通过 scripts/deploy-production.sh 执行 lint/build/diff check/考勤测试、可选 Supabase db push、git commit/push、admin Vercel 生产部署、apps/home 显式部署到 dutylix 项目、两个正式域名 alias 与线上验证。",
+    "result": f"发布脚本执行成功。GitHub main HEAD 为 {head_sha}；admin 部署 URL 为 {deployment_url}；门户部署 URL 为 {home_deployment_url}；admin.dutylix.com 与 dutylix.com 已完成线上验证。",
+    "extractedOrIntegrated": "使用仓库根 vercel.json 的 apps/admin 构建配置、apps/home 门户构建配置、Supabase 迁移目录、Vercel dutylix-admin/dutylix 项目以及 admin.dutylix.com/dutylix.com 生产域名。",
+    "successCriteria": "lint/build/diff check/考勤测试通过；GitHub main 推送成功；两个 Vercel Production Ready；admin.dutylix.com 页面、health、未登录保护接口和 Google auth URL 验证通过；dutylix.com 首页、favicon、dutylix-icon.svg 与 SPA CTA bundle 验证通过。",
+    "pitfalls": "Vercel CLI 默认 alias 可能不是目标自定义域名，脚本必须显式 vercel alias set；仓库根绑定 dutylix-admin，门户必须在 apps/home 中显式 --project dutylix 发布；发布脚本默认提交当前工作树全部改动，执行前应确认 git status 中没有无关文件。",
+    "nextActions": "如需业务端到端验收，打开 dutylix.com 检查门户按钮跳转，再登录 admin.dutylix.com 检查薪资列表、工资条生成和员工端账号登录。",
 }
 project.setdefault("usageLogs", []).append(log)
 project["usageLogCount"] = len(project["usageLogs"])
 project["updatedAt"] = now
-project["notes"] = "本机实际业务项目；apps/admin 已部署到 Vercel 项目 dutylix-admin，并通过 Cloudflare/Vercel 绑定 admin.dutylix.com；支持 scripts/deploy-production.sh 一键发布。"
+project["notes"] = "本机实际业务项目；apps/admin 部署到 Vercel 项目 dutylix-admin / admin.dutylix.com；apps/home 门户部署到 Vercel 项目 dutylix / dutylix.com；支持 scripts/deploy-production.sh 一键发布 admin 与门户。"
 project_path.write_text(json.dumps(project, ensure_ascii=False, indent=2) + "\n")
 
 index = json.loads(index_path.read_text())
@@ -190,9 +239,11 @@ main() {
   fi
 
   if [[ "$RUN_DB_PUSH" == "1" ]]; then
-    # Supabase CLI may prompt when migrations are pending; `yes` keeps the release one-command while the previous checks guard obvious mistakes.
-    echo "+ yes | supabase db push"
-    yes | supabase db push
+    # Use the Supabase CLI's own non-interactive flag instead of piping `yes`.
+    # With `set -o pipefail`, `yes | supabase db push` can exit 141 after Supabase
+    # closes stdin successfully, which must not abort an otherwise successful release.
+    echo "+ supabase db push --yes"
+    supabase db push --yes
     run supabase migration list --linked
   else
     echo "Skip Supabase db push (--no-db)."
@@ -247,8 +298,22 @@ main() {
   verify_http_status "$PROTECTED_CHECK_URL" "401"
   verify_http_status "$GOOGLE_AUTH_URL" "200"
 
+  local home_deploy_log home_deployment_url
+  home_deploy_log="$(mktemp -t wmshr-home-vercel-deploy.XXXXXX.log)"
+  echo "+ cd ${HOME_APP_DIR} && vercel deploy --prod --yes --project ${HOME_VERCEL_PROJECT}"
+  # The repository root is linked to dutylix-admin; deploy the portal from apps/home with
+  # an explicit Vercel project so dutylix.com never receives the admin build by mistake.
+  (cd "$HOME_APP_DIR" && vercel deploy --prod --yes --project "$HOME_VERCEL_PROJECT") | tee "$home_deploy_log"
+  home_deployment_url="$(extract_home_deployment_url "$home_deploy_log")"
+  if [[ -z "$home_deployment_url" ]]; then
+    echo "Could not parse portal Vercel production deployment URL from $home_deploy_log" >&2
+    exit 1
+  fi
+  run vercel alias set "$home_deployment_url" "$HOME_CUSTOM_DOMAIN"
+  verify_home_production
+
   if [[ "$RUN_PROJECT_MANAGER_LOG" == "1" ]]; then
-    update_project_manager_log "$head_sha" "$deployment_url"
+    update_project_manager_log "$head_sha" "$deployment_url" "$home_deployment_url"
   else
     echo "Skip GitHub-Project-Manager usage log (--no-project-log)."
   fi
@@ -256,8 +321,10 @@ main() {
   echo
   echo "Release completed."
   echo "HEAD: $head_sha"
-  echo "Deployment: $deployment_url"
-  echo "Production: $CUSTOM_ORIGIN"
+  echo "Admin deployment: $deployment_url"
+  echo "Admin production: $CUSTOM_ORIGIN"
+  echo "Portal deployment: $home_deployment_url"
+  echo "Portal production: $HOME_CUSTOM_ORIGIN"
 }
 
 main "$@"

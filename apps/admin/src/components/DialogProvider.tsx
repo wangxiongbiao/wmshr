@@ -1,4 +1,5 @@
 import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
+import { tAdmin } from "../lib/i18nText";
 import { AlertTriangle, CircleAlert, MessageSquareText, X } from "lucide-react";
 import { cn } from "../lib/utils";
 
@@ -66,8 +67,8 @@ export function DialogProvider({ children }: { children: ReactNode }) {
       setPromptValue("");
       setActiveDialog({
         kind: "confirm",
-        confirmText: options.confirmText || "确认继续",
-        cancelText: options.cancelText || "取消",
+        confirmText: options.confirmText || tAdmin("确认继续"),
+        cancelText: options.cancelText || tAdmin("取消"),
         tone: options.tone || "default",
         ...options
       });
@@ -81,8 +82,8 @@ export function DialogProvider({ children }: { children: ReactNode }) {
       setPromptValue(nextValue);
       setActiveDialog({
         kind: "prompt",
-        confirmText: options.confirmText || "提交",
-        cancelText: options.cancelText || "取消",
+        confirmText: options.confirmText || tAdmin("提交"),
+        cancelText: options.cancelText || tAdmin("取消"),
         tone: options.tone || "default",
         ...options
       });
@@ -95,7 +96,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
       setPromptValue("");
       setActiveDialog({
         kind: "alert",
-        confirmText: options.confirmText || "知道了",
+        confirmText: options.confirmText || tAdmin("知道了"),
         cancelText: "",
         tone: options.tone || "default",
         ...options
@@ -178,12 +179,10 @@ export function DialogProvider({ children }: { children: ReactNode }) {
             <div className="space-y-5 px-6 py-6">
               {activeDialog.kind === "prompt" ? (
                 <div className="space-y-2">
-                  <label className="block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                    备注内容
-                  </label>
+                  <label className="block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{tAdmin("备注内容")}</label>
                   <textarea
                     value={promptValue}
-                    placeholder={activeDialog.placeholder || "请输入内容"}
+                    placeholder={activeDialog.placeholder || tAdmin("请输入内容")}
                     onChange={(event) => setPromptValue(event.target.value)}
                     rows={4}
                     className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-brand-300 focus:bg-white focus:ring-4 focus:ring-brand-500/12"
@@ -198,7 +197,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
                     onClick={handleCancel}
                     className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
                   >
-                    {activeDialog.cancelText || "取消"}
+                    {activeDialog.cancelText || tAdmin("取消")}
                   </button>
                 ) : null}
                 <button
@@ -206,7 +205,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
                   onClick={handleConfirm}
                   className={cn("inline-flex items-center justify-center rounded-2xl px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition focus:outline-none focus:ring-4", toneMeta.buttonClass)}
                 >
-                  {activeDialog.confirmText || "确认"}
+                  {activeDialog.confirmText || tAdmin("确认")}
                 </button>
               </div>
             </div>
@@ -220,7 +219,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
 export function useDialog() {
   const value = useContext(DialogContext);
   if (!value) {
-    throw new Error("useDialog 必须在 DialogProvider 内使用");
+    throw new Error(tAdmin("useDialog 必须在 DialogProvider 内使用"));
   }
 
   return value;

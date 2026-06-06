@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { SUPPORTED_LANGUAGES } from "@wmshr/i18n";
 import EmailFormPage from "./components/EmailFormPage";
 import teamMeetingImage from "./assets/images/zenith_team_meeting_1779183482085.png";
 import hqOfficeImage from "./assets/images/zenith_hq_office_1779183499882.png";
@@ -36,16 +37,7 @@ import hqOfficeImage from "./assets/images/zenith_hq_office_1779183499882.png";
 const ADMIN_PORTAL_URL = import.meta.env.VITE_ADMIN_PORTAL_URL
   || (import.meta.env.DEV ? "http://localhost:3000" : "https://admin.dutylix.com");
 
-const languages = [
-  { code: 'en', name: 'English' },
-  { code: 'zh', name: '简体中文' },
-  { code: 'zht', name: '繁體中文' },
-  { code: 'th', name: 'ไทย' },
-  { code: 'id', name: 'Bahasa Indonesia' },
-  { code: 'ms', name: 'Bahasa Melayu' },
-  { code: 'es', name: 'Español' },
-  { code: 'pt', name: 'Português' },
-];
+const languages = SUPPORTED_LANGUAGES.map(({ code, nativeName }) => ({ code, name: nativeName }));
 
 function WmshrLogoMark({ className = "w-6 h-6" }: { className?: string }) {
   // 继续复用 public/dutylix-icon.svg 这个既有路径，避免改动静态资源引用面；图形内容已恢复为蓝底 WMSHR 立方体标识。
@@ -598,7 +590,7 @@ export default function App() {
                   <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                 </button>
                 <button className="px-10 py-5 glass text-white rounded-2xl font-bold text-lg hover:bg-white/10 transition-all border-white/5">
-                  {t('hero.watchDemo')}
+                  {t('hero.viewPlatform')}
                 </button>
               </div>
             </motion.div>

@@ -16,6 +16,7 @@
     "build:home": "npm --workspace @wmshr/home run build",
     "lint": "npm run lint --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
+    "check:i18n": "node scripts/check-i18n-hardcoded.mjs",
     "deploy:prod": "bash scripts/deploy-production.sh"
   },
   "overrides": {

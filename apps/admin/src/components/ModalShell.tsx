@@ -1,4 +1,5 @@
 import { type ReactNode } from "react";
+import { tAdmin } from "../lib/i18nText";
 import { X } from "lucide-react";
 import { cn } from "../lib/utils";
 
@@ -32,7 +33,7 @@ export function ModalShell({
       <div className={cn("max-h-[90vh] w-full overflow-hidden rounded-xl bg-white shadow-2xl fade-in flex flex-col", className)}>
         <div className={cn("flex flex-shrink-0 items-center justify-between border-b border-slate-100 bg-slate-50 px-6 py-4", headerClassName)}>
           <h3 className="text-lg font-bold text-slate-800">{title}</h3>
-          <button onClick={onClose} className="text-slate-400 transition hover:text-slate-600" aria-label="关闭弹窗">
+          <button onClick={onClose} className="text-slate-400 transition hover:text-slate-600" aria-label={tAdmin("关闭弹窗")}>
             <X className="h-5 w-5" />
           </button>
         </div>

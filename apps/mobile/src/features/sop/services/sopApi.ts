@@ -1,16 +1,27 @@
+import {httpClient} from '../../../shared/api/httpClient';
 import {SopDocument} from '../types';
 
-const sopDocuments: SopDocument[] = [
-  {id: '1', title: '仓库安全操作规范', version: 'V2.1', updatedAt: '05-10', readStatus: 'read', readAt: '2026-05-10T09:00:00.000Z'},
-  {id: '2', title: '拣货作业标准流程', version: 'V1.8', updatedAt: '05-08', readStatus: 'unread'},
-  {id: '3', title: '叉车安全驾驶指南', version: 'V3.0', updatedAt: '05-05', readStatus: 'unread'},
-];
-
-export async function fetchSopDocuments(): Promise<SopDocument[]> {
-  // SOP 数据先集中在 service，保证后续接后台发布/已读确认时页面无需迁移 mock 数据。
-  return sopDocuments;
+function authHeaders(accessToken: string) {
+  // SOP 列表、详情、阅读确认都由后端按员工 token 过滤可见范围；前端不得提交 employeeId 以免形成越权入口。
+  return {Authorization: `Bearer ${accessToken}`};
 }
 
-export async function fetchSopDocument(sopId: string): Promise<SopDocument | undefined> {
-  return sopDocuments.find(item => item.id === sopId);
+export async function fetchSopDocuments(accessToken: string, keyword = ''): Promise<SopDocument[]> {
+  const query = keyword.trim() ? `?keyword=${encodeURIComponent(keyword.trim())}` : '';
+  return httpClient<SopDocument[]>(`/api/mobile/sops${query}`, {
+    headers: authHeaders(accessToken),
+  });
+}
+
+export async function fetchSopDocument(accessToken: string, sopId: string): Promise<SopDocument> {
+  return httpClient<SopDocument>(`/api/mobile/sops/${sopId}`, {
+    headers: authHeaders(accessToken),
+  });
+}
+
+export async function confirmSopRead(accessToken: string, sopId: string): Promise<SopDocument> {
+  return httpClient<SopDocument>(`/api/mobile/sops/${sopId}/read`, {
+    method: 'POST',
+    headers: authHeaders(accessToken),
+  });
 }

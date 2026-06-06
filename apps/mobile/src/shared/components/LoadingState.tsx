@@ -1,5 +1,6 @@
 import React from 'react';
 import {ActivityIndicator, StyleSheet, View} from 'react-native';
+import {useTranslation} from 'react-i18next';
 import {AppText} from './AppText';
 import {colors} from '../constants/colors';
 
@@ -7,11 +8,14 @@ type Props = {
   message?: string;
 };
 
-export function LoadingState({message = '加载中'}: Props) {
+export function LoadingState({message}: Props) {
+  const { t } = useTranslation('app');
+  const resolvedMessage = message ?? t('加载中');
+
   return (
     <View style={styles.container}>
       <ActivityIndicator color={colors.primary} />
-      <AppText variant="muted">{message}</AppText>
+      <AppText variant="muted">{resolvedMessage}</AppText>
     </View>
   );
 }

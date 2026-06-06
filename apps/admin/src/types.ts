@@ -16,9 +16,9 @@ export type PayrollReviewStatus = 'pending' | 'approved' | 'rejected';
 
 export type AttendanceType = 'normal' | 'late' | 'early' | 'absent' | 'leave' | 'sick_leave' | 'overtime';
 
-export type AttendanceSource = 'manual' | 'device' | 'import' | 'system';
+export type AttendanceSource = 'manual' | 'device' | 'import' | 'system' | 'mobile';
 
-export type AttendanceCalculationStatus = 'normal' | 'leave' | 'sick_leave' | 'absent' | 'manual_adjusted' | 'exception';
+export type AttendanceCalculationStatus = 'pending' | 'checked_in' | 'normal' | 'leave' | 'sick_leave' | 'absent' | 'manual_adjusted' | 'exception';
 
 export type EmployeeStatus = 'active' | 'on_leave' | 'probation' | 'disabled' | 'resigned';
 
@@ -54,6 +54,8 @@ export interface Employee {
   fixedSalary: number | null;
   attendanceBonus: number;
   socialSecurity: number;
+  mealAllowance: number;
+  serviceFeeRate: number;
   currency: CurrencyCode;
   joinDate: string;
   status: EmployeeStatus;
@@ -208,6 +210,8 @@ export interface EmployeeUpsertPayload {
   fixedSalary: number | null;
   attendanceBonus: number;
   socialSecurity: number;
+  mealAllowance: number;
+  serviceFeeRate: number;
   salaryEffectiveStartDate: string;
   currency: CurrencyCode;
   photo: string | null;
@@ -239,6 +243,8 @@ export interface AttendanceCalculationResult {
   salaryType: SalaryType | null;
   hourlyRate: number | null;
   fixedSalary: number | null;
+  mealAllowance: number;
+  serviceFeeRate: number;
   currency: CurrencyCode;
   attendanceRecordId: number | null;
   date: string;
@@ -251,6 +257,7 @@ export interface AttendanceCalculationResult {
   overtimeRawHours: number;
   overtimePayHours: number;
   // v2 后端直接返回费用结果，前端只展示/导出，不再二次按旧考勤规则重算。
+  mealAllowanceAmount: number;
   workPay: number;
   overtimePay: number;
   totalPay: number;
@@ -268,6 +275,22 @@ export interface AttendanceCalculationDetail {
   result: AttendanceCalculationResult;
   employee: Employee | null;
   record: AttendanceRecord | null;
+}
+
+export interface AttendanceMaintenanceRunSummary {
+  date: string;
+  ownerCount: number;
+  targetEmployeeCount: number;
+  successCount: number;
+  failureCount: number;
+  failures: Array<{ ownerUserId?: string; employeeId?: number; date: string; error: string }>;
+}
+
+export interface AttendanceDailyMaintenanceResponse {
+  previousDate: string;
+  todayDate: string;
+  settlement: AttendanceMaintenanceRunSummary;
+  draft: AttendanceMaintenanceRunSummary;
 }
 
 export interface MonthlyAttendanceSummary {
@@ -352,6 +375,7 @@ export interface MonthlyPayrollResult {
   deductionTotal: number;
   otherTotal: number;
   socialSecurityAmount: number;
+  serviceFeeAmount: number;
   grossPay: number;
   totalDeduction: number;
   netPay: number;
@@ -377,6 +401,19 @@ export interface PayrollGenerateBatchResponse {
   skippedCount: number;
   failureCount: number;
   failures: Array<{
+    employeeId: number;
+    error: string;
+  }>;
+}
+
+export interface PayrollNightlyRunResponse {
+  yearMonth: string;
+  ownerCount: number;
+  targetEmployeeCount: number;
+  successCount: number;
+  failureCount: number;
+  failures: Array<{
+    ownerUserId: string;
     employeeId: number;
     error: string;
   }>;

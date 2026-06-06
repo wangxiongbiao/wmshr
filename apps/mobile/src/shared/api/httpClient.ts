@@ -7,7 +7,7 @@ export async function httpClient<T>(path: string, init?: RequestInit): Promise<T
   const requestPath = path.startsWith('/') ? path : `/${path}`;
 
   if (!baseUrl) {
-    throw new Error('移动端 API 地址未配置');
+    throw new Error('Mobile API URL is not configured');
   }
 
   const response = await fetch(`${baseUrl}${requestPath}`, {
@@ -21,7 +21,7 @@ export async function httpClient<T>(path: string, init?: RequestInit): Promise<T
   const payload = await response.json().catch(() => null) as JsonObject | null;
 
   if (!response.ok) {
-    throw new Error(String(payload?.error || '请求失败'));
+    throw new Error(String(payload?.error || 'Request failed'));
   }
 
   return payload as T;

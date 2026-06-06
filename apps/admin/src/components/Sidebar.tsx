@@ -4,6 +4,7 @@
  */
 
 import { Clock, FileText, LayoutDashboard, Users, Wallet } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { TabId } from "../types";
 import { cn } from "../lib/utils";
 
@@ -18,13 +19,14 @@ interface SidebarProps {
 }
 
 export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
+  const { t } = useTranslation("admin");
   const navItems = [
     // 数据看板已按 admin-v2 界面和接口契约恢复，继续保持 v2 模块顺序，避免旧后台入口回流。
-    { id: 'dashboard' as TabId, label: '数据看板', icon: LayoutDashboard },
-    { id: 'employees' as TabId, label: '员工管理', icon: Users },
-    { id: 'attendance' as TabId, label: '考勤计算', icon: Clock },
-    { id: 'payroll' as TabId, label: '薪资核算', icon: Wallet },
-    { id: 'sop' as TabId, label: 'SOP管理', icon: FileText },
+    { id: 'dashboard' as TabId, label: t('数据看板'), icon: LayoutDashboard },
+    { id: 'employees' as TabId, label: t('员工管理'), icon: Users },
+    { id: 'attendance' as TabId, label: t('考勤计算'), icon: Clock },
+    { id: 'payroll' as TabId, label: t('薪资核算'), icon: Wallet },
+    { id: 'sop' as TabId, label: t('SOP管理'), icon: FileText },
   ];
 
   return (

@@ -3,6 +3,8 @@ import {
   AppConfig,
   AttendanceCalculationDetail,
   AttendanceCalculationResult,
+  AttendanceDailyMaintenanceResponse,
+  AttendanceMaintenanceRunSummary,
   AttendanceRecord,
   AttendanceRecordCreatePayload,
   AttendanceRecordUpdatePayload,
@@ -21,6 +23,7 @@ import {
   MonthlyAttendanceSummary,
   MonthlyPayrollResult,
   PayrollGenerateBatchResponse,
+  PayrollNightlyRunResponse,
   PayrollResultDetail,
   RecalculateBatchItem,
   RecalculateBatchResponse,
@@ -45,7 +48,7 @@ async function request<T>(input: string, init?: RequestInit): Promise<T> {
   const payload = await response.json().catch(() => null);
 
   if (!response.ok) {
-    throw new Error(payload?.error || "请求失败");
+    throw new Error(payload?.error || "Request failed");
   }
 
   return payload as T;
@@ -333,6 +336,14 @@ export async function recalculateMonthlyPayroll(yearMonth: string, employeeIds?:
   });
 }
 
+export async function runNightlyPayrollNow(yearMonth: string): Promise<PayrollNightlyRunResponse> {
+  return request<PayrollNightlyRunResponse>("/api/admin/payroll-results/run-nightly", {
+    method: "POST",
+    // 手动按钮走已登录后台接口，服务端只核算当前账号；不要从浏览器调用 cron 专用入口或暴露 CRON_SECRET。
+    body: JSON.stringify({ yearMonth })
+  });
+}
+
 export async function approvePayrollResult(resultId: number): Promise<MonthlyPayrollResult> {
   return request<MonthlyPayrollResult>(`/api/admin/payroll-results/${resultId}/approve`, {
     method: "PATCH"
@@ -426,6 +437,28 @@ export async function recalculateMonthlyAttendance(yearMonth: string, employeeId
   return request<MonthlyAttendanceSummary[]>("/api/admin/attendance-calculations/recalculate-monthly", {
     method: "POST",
     body: JSON.stringify({ yearMonth, employeeId: employeeId || null })
+  });
+}
+
+export async function runAttendanceDailyMaintenance(params: { previousDate?: string; todayDate?: string } = {}): Promise<AttendanceDailyMaintenanceResponse> {
+  return request<AttendanceDailyMaintenanceResponse>("/api/admin/attendance-calculations/run-daily-maintenance", {
+    method: "POST",
+    // 手动补跑只能走已登录后台接口，并由服务端限定当前账号；不要在浏览器调用 cron 入口或传 CRON_SECRET。
+    body: JSON.stringify(params)
+  });
+}
+
+export async function generateAttendanceDrafts(date: string): Promise<AttendanceMaintenanceRunSummary> {
+  return request<AttendanceMaintenanceRunSummary>("/api/admin/attendance-calculations/generate-drafts", {
+    method: "POST",
+    body: JSON.stringify({ date })
+  });
+}
+
+export async function settleAttendanceDate(date: string): Promise<AttendanceMaintenanceRunSummary> {
+  return request<AttendanceMaintenanceRunSummary>("/api/admin/attendance-calculations/settle-date", {
+    method: "POST",
+    body: JSON.stringify({ date })
   });
 }
 

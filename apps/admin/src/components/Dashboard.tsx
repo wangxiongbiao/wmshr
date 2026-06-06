@@ -4,6 +4,7 @@
  */
 
 import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { tAdmin } from "../lib/i18nText";
 import { Activity, AlertCircle, Award, BarChart2, Clock, Settings, Users, Zap } from "lucide-react";
 import type { DashboardData, DashboardDepartmentStat, DashboardEmployeeStat, TabId } from "../types";
 import { fetchDashboardData } from "../lib/api";
@@ -33,7 +34,7 @@ export function Dashboard({ onOpenSettings, onNav }: DashboardProps) {
       const nextData = await fetchDashboardData();
       setData(nextData);
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "数据看板加载失败");
+      setError(nextError instanceof Error ? nextError.message : tAdmin("数据看板加载失败"));
     } finally {
       setLoading(false);
     }
@@ -53,7 +54,7 @@ export function Dashboard({ onOpenSettings, onNav }: DashboardProps) {
   );
 
   if (loading && !data) {
-    return <div className="glass-panel rounded-xl p-10 text-center text-sm text-slate-500">正在加载数据看板...</div>;
+    return <div className="glass-panel rounded-xl p-10 text-center text-sm text-slate-500">{tAdmin("正在加载数据看板...")}</div>;
   }
 
   return (
@@ -66,7 +67,7 @@ export function Dashboard({ onOpenSettings, onNav }: DashboardProps) {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 px-1 text-xs">
         <div className="flex items-center gap-2 text-slate-600">
           <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
-          <span>当前看板时间：<span className="font-bold text-slate-800 font-mono text-sm">{data?.dashboardDate || "-"}</span></span>
+          <span>{tAdmin("当前看板时间：")}<span className="font-bold text-slate-800 font-mono text-sm">{data?.dashboardDate || "-"}</span></span>
         </div>
         <button
           type="button"
@@ -74,7 +75,7 @@ export function Dashboard({ onOpenSettings, onNav }: DashboardProps) {
           disabled={loading}
           className="whitespace-nowrap text-[10px] text-slate-400 font-medium hover:text-indigo-600 disabled:opacity-60"
         >
-          {loading ? "正在刷新..." : "系统已实时关联数据集内最后一次考勤记录周期 · 点击刷新"}
+          {loading ? tAdmin("正在刷新...") : tAdmin("系统已实时关联数据集内最后一次考勤记录周期 · 点击刷新")}
         </button>
       </div>
 
@@ -83,35 +84,35 @@ export function Dashboard({ onOpenSettings, onNav }: DashboardProps) {
         <KpiCard
           icon={<Users className="w-5 h-5" />}
           tone="blue"
-          label="在职员工数"
+          label={tAdmin("在职员工数")}
           value={`${activeCount}`}
-          unit="人"
-          helper={`登记总数: ${data?.totalEmployeeCount || 0}人 (休假/离职 ${data?.inactiveEmployeeCount || 0}人)`}
+          unit={tAdmin("人")}
+          helper={tAdmin("登记总数: {{total}}人 (休假/离职 {{inactive}}人)", { total: data?.totalEmployeeCount || 0, inactive: data?.inactiveEmployeeCount || 0 })}
         />
         <KpiCard
           icon={<Clock className="w-5 h-5" />}
           tone="emerald"
-          label="当日上班总时长"
+          label={tAdmin("当日上班总时长")}
           value={(data?.todayWorkHours || 0).toFixed(1)}
           unit="h"
-          helper={`人均考勤时间: ${(data?.todayAverageWorkHours || 0).toFixed(1)}h / 人`}
+          helper={tAdmin("人均考勤时间: {{hours}}h / 人", { hours: (data?.todayAverageWorkHours || 0).toFixed(1) })}
         />
         <KpiCard
           icon={<Zap className="w-5 h-5" />}
           tone="amber"
-          label="当日加班总时长"
+          label={tAdmin("当日加班总时长")}
           value={(data?.todayOvertimeHours || 0).toFixed(1)}
           unit="h"
-          helper={`加班预估: ${formatCurrency(data?.todayOvertimeEstimatePay || 0, config?.currency || "THB")}`}
+          helper={tAdmin("加班预估: {{amount}}", { amount: formatCurrency(data?.todayOvertimeEstimatePay || 0, config?.currency || "THB") })}
           helperBadge
         />
         <KpiCard
           icon={<AlertCircle className="w-5 h-5" />}
           tone="rose"
-          label="今日考勤异常率"
+          label={tAdmin("今日考勤异常率")}
           value={(data?.todayExceptionRate || 0).toFixed(1)}
           unit="%"
-          helper={`异常人数: ${data?.todayExceptionCount || 0}人 / 需关注`}
+          helper={tAdmin("异常人数: {{count}}人 / 需关注", { count: data?.todayExceptionCount || 0 })}
         />
       </div>
 
@@ -123,9 +124,9 @@ export function Dashboard({ onOpenSettings, onNav }: DashboardProps) {
                 <span className="p-1 rounded-md bg-indigo-50 text-indigo-600">
                   <BarChart2 className="w-4 h-4" />
                 </span>
-                <h3 className="text-base font-bold text-slate-800">员工有效工时与多维能效透视</h3>
+                <h3 className="text-base font-bold text-slate-800">{tAdmin("员工有效工时与多维能效透视")}</h3>
               </div>
-              <p className="text-xs text-slate-400 mt-1">统计分析系统，通过工时饱和、日均平均及能动比等高阶指标，辅助管理决策。</p>
+              <p className="text-xs text-slate-400 mt-1">{tAdmin("统计分析系统，通过工时饱和、日均平均及能动比等高阶指标，辅助管理决策。")}</p>
             </div>
 
             <div className="flex bg-slate-100 p-1 rounded-xl self-end sm:self-auto border border-slate-100">
@@ -137,7 +138,7 @@ export function Dashboard({ onOpenSettings, onNav }: DashboardProps) {
                 )}
               >
                 <Award className="w-3.5 h-3.5" />
-                <span className="whitespace-nowrap">工时饱和排行 (Top)</span>
+                <span className="whitespace-nowrap">{tAdmin("工时饱和排行 (Top)")}</span>
               </button>
               <button
                 onClick={() => setChartTab("departments")}
@@ -147,7 +148,7 @@ export function Dashboard({ onOpenSettings, onNav }: DashboardProps) {
                 )}
               >
                 <Activity className="w-3.5 h-3.5" />
-                <span className="whitespace-nowrap">部门负荷诊断</span>
+                <span className="whitespace-nowrap">{tAdmin("部门负荷诊断")}</span>
               </button>
             </div>
           </div>
@@ -162,14 +163,12 @@ export function Dashboard({ onOpenSettings, onNav }: DashboardProps) {
         <div className="space-y-6">
           <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
             <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-1.5">
-              <span className="w-1.5 h-3.5 bg-indigo-600 rounded" />
-              核算规则提示
-            </h3>
+              <span className="w-1.5 h-3.5 bg-indigo-600 rounded" />{tAdmin("核算规则提示")}</h3>
             <div className="space-y-3.5">
-              <RuleRow label="每日标准工时" value={`${config?.standardHours ?? 0} h`} />
-              <RuleRow label="午餐休息折抵" value={`${config?.dailyBreakMinutes ?? 0} min`} />
+              <RuleRow label={tAdmin("每日标准工时")} value={`${config?.standardHours ?? 0} h`} />
+              <RuleRow label={tAdmin("午餐休息折抵")} value={`${config?.dailyBreakMinutes ?? 0} min`} />
               <div className="flex justify-between items-center p-3 bg-indigo-50/50 border border-indigo-100 transition rounded-xl text-xs">
-                <span className="text-indigo-600 font-bold">加班计算倍率</span>
+                <span className="text-indigo-600 font-bold">{tAdmin("加班计算倍率")}</span>
                 <span className="font-extrabold text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded-lg">{config?.overtimeMultiplier ?? 1}x</span>
               </div>
             </div>
@@ -177,12 +176,10 @@ export function Dashboard({ onOpenSettings, onNav }: DashboardProps) {
 
           <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
             <h3 className="text-sm font-bold text-slate-800 mb-3 flex items-center gap-1.5">
-              <span className="w-1.5 h-3.5 bg-indigo-600 rounded" />
-              快捷向导
-            </h3>
+              <span className="w-1.5 h-3.5 bg-indigo-600 rounded" />{tAdmin("快捷向导")}</h3>
             <div className="grid grid-cols-2 gap-3">
-              <GuideButton icon={<Clock className="w-4 h-4" />} label="进入考勤计算" onClick={() => onNav("attendance")} />
-              <GuideButton icon={<Zap className="w-4 h-4" />} label="生成薪资条" onClick={() => onNav("payroll")} />
+              <GuideButton icon={<Clock className="w-4 h-4" />} label={tAdmin("进入考勤计算")} onClick={() => onNav("attendance")} />
+              <GuideButton icon={<Zap className="w-4 h-4" />} label={tAdmin("生成薪资条")} onClick={() => onNav("payroll")} />
             </div>
           </div>
 
@@ -190,8 +187,7 @@ export function Dashboard({ onOpenSettings, onNav }: DashboardProps) {
             onClick={onOpenSettings}
             className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-extrabold shadow-md shadow-indigo-600/10 hover:shadow-indigo-600/20 transition flex items-center justify-center gap-2 cursor-pointer border border-indigo-700"
           >
-            <Settings className="w-4 h-4" /> 调整系统考勤核算规则
-          </button>
+            <Settings className="w-4 h-4" />{tAdmin("调整系统考勤核算规则")}</button>
         </div>
       </div>
     </div>
@@ -234,16 +230,16 @@ function KpiCard({ icon, tone, label, value, unit, helper, helperBadge = false }
 
 function EmployeePerformanceList({ stats, maxRegHour }: { stats: DashboardEmployeeStat[]; maxRegHour: number }) {
   if (stats.length === 0) {
-    return <EmptyState text="暂无员工考勤统计，请先在考勤计算中生成结果。" />;
+    return <EmptyState text={tAdmin("暂无员工考勤统计，请先在考勤计算中生成结果。")} />;
   }
 
   return (
     <div className="space-y-4">
       <div className="bg-slate-50 p-3 rounded-xl flex items-center justify-between text-xs text-slate-500 border border-slate-100 mb-1">
-        <span className="flex-1 min-w-0 whitespace-nowrap font-extrabold text-slate-700">员工姓名 (职位 · 部门)</span>
+        <span className="flex-1 min-w-0 whitespace-nowrap font-extrabold text-slate-700">{tAdmin("员工姓名 (职位 · 部门)")}</span>
         <div className="flex flex-shrink-0 gap-6 xl:gap-8">
-          <span className="whitespace-nowrap font-extrabold text-slate-700 w-44 text-right">工时分配 (正常/加班)</span>
-          <span className="whitespace-nowrap font-extrabold text-slate-700 w-20 text-center">工时饱和率</span>
+          <span className="whitespace-nowrap font-extrabold text-slate-700 w-44 text-right">{tAdmin("工时分配 (正常/加班)")}</span>
+          <span className="whitespace-nowrap font-extrabold text-slate-700 w-20 text-center">{tAdmin("工时饱和率")}</span>
         </div>
       </div>
 
@@ -273,25 +269,25 @@ function EmployeePerformanceList({ stats, maxRegHour }: { stats: DashboardEmploy
                 </div>
                 <div className="truncate">
                   <h4 className="text-sm font-bold text-slate-800 truncate">{displayName}</h4>
-                  <span className="text-[10px] text-slate-400 font-medium">{stat.employeeDept || "未分配"} · {stat.employeeRole || "未设置职位"}</span>
+                  <span className="text-[10px] text-slate-400 font-medium">{stat.employeeDept || tAdmin("未分配")} · {stat.employeeRole || tAdmin("未设置职位")}</span>
                 </div>
               </div>
 
               <div className="flex flex-shrink-0 items-center justify-end gap-6 xl:gap-8">
                 <div className="w-[220px] flex flex-col gap-1 items-end flex-shrink-0">
                   <div className="flex text-[10px] text-slate-500 font-semibold gap-2">
-                    <span>标准:{regH.toFixed(0)}h</span>
-                    {otH > 0 && <span className="text-amber-600 font-bold">加班:{otH.toFixed(0)}h</span>}
+                    <span>{tAdmin("标准:{{hours}}h", { hours: regH.toFixed(0) })}</span>
+                    {otH > 0 && <span className="text-amber-600 font-bold">{tAdmin("加班:{{hours}}h", { hours: otH.toFixed(0) })}</span>}
                   </div>
                   <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden flex">
-                    <div className="bg-blue-500 h-full" style={{ width: `${Math.max(5, regPct)}%` }} title="正常应出勤时长" />
-                    {otH > 0 && <div className="bg-amber-400 h-full" style={{ width: `${otPct}%` }} title="累计额外加班时长" />}
+                    <div className="bg-blue-500 h-full" style={{ width: `${Math.max(5, regPct)}%` }} title={tAdmin("正常应出勤时长")} />
+                    {otH > 0 && <div className="bg-amber-400 h-full" style={{ width: `${otPct}%` }} title={tAdmin("累计额外加班时长")} />}
                   </div>
                 </div>
 
                 <div className="w-20 flex flex-col items-center flex-shrink-0">
-                  <span className={cn("text-[10px] font-black px-2 py-0.5 rounded-full", satBg)}>{stat.satiety > 0 ? `${stat.satiety}%` : "休假中"}</span>
-                  <span className="text-[9px] text-slate-400 mt-0.5">工时: {totalH.toFixed(1)}h</span>
+                  <span className={cn("text-[10px] font-black px-2 py-0.5 rounded-full", satBg)}>{stat.satiety > 0 ? `${stat.satiety}%` : tAdmin("休假中")}</span>
+                  <span className="text-[9px] text-slate-400 mt-0.5">{tAdmin("工时: {{hours}}h", { hours: totalH.toFixed(1) })}</span>
                 </div>
               </div>
             </div>
@@ -304,7 +300,7 @@ function EmployeePerformanceList({ stats, maxRegHour }: { stats: DashboardEmploy
 
 function DepartmentPerformanceList({ stats }: { stats: DashboardDepartmentStat[] }) {
   if (stats.length === 0) {
-    return <EmptyState text="暂无部门负荷数据，请先维护员工部门并生成考勤结果。" />;
+    return <EmptyState text={tAdmin("暂无部门负荷数据，请先维护员工部门并生成考勤结果。")} />;
   }
 
   return (
@@ -316,14 +312,14 @@ function DepartmentPerformanceList({ stats }: { stats: DashboardDepartmentStat[]
               <div className="flex justify-between items-start">
                 <div>
                   <h4 className="text-sm font-bold text-slate-800">{item.deptName}</h4>
-                  <p className="text-[10px] text-slate-400 font-medium">在职编制: {item.staffCount} 人</p>
+                  <p className="text-[10px] text-slate-400 font-medium">{tAdmin("在职编制: {{count}} 人", { count: item.staffCount })}</p>
                 </div>
                 <span className={cn("text-[10px] font-extrabold px-2 py-0.5 rounded border", getBadgeToneClass(item.badgeTone))}>{item.loadLabel}</span>
               </div>
 
               <div className="my-3 space-y-1">
                 <div className="flex justify-between text-xs text-slate-600 font-medium">
-                  <span>加班比例</span>
+                  <span>{tAdmin("加班比例")}</span>
                   <span className="font-bold text-slate-700">{item.otRatio}%</span>
                 </div>
                 <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
@@ -333,18 +329,18 @@ function DepartmentPerformanceList({ stats }: { stats: DashboardDepartmentStat[]
 
               <div className="grid grid-cols-2 gap-2 bg-white/60 p-2 rounded-lg text-xs border border-slate-100">
                 <div>
-                  <p className="text-[10px] text-slate-400">累计工时</p>
+                  <p className="text-[10px] text-slate-400">{tAdmin("累计工时")}</p>
                   <p className="font-extrabold text-slate-700">{item.totalValidHours.toFixed(1)}h</p>
                 </div>
                 <div>
-                  <p className="text-[10px] text-slate-400">人均单日工时</p>
+                  <p className="text-[10px] text-slate-400">{tAdmin("人均单日工时")}</p>
                   <span className="font-extrabold text-slate-700">{item.avgHours.toFixed(1)}h</span>
                 </div>
               </div>
             </div>
 
             <div className="mt-3.5 border-t border-slate-100 pt-2.5">
-              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">💡 优化建议:</p>
+              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">{tAdmin("💡 优化建议:")}</p>
               <p className="text-[11px] text-slate-600 mt-0.5 leading-relaxed bg-white/40 p-1.5 rounded-lg border border-slate-100/50">{item.actionAdvice}</p>
             </div>
           </div>

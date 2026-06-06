@@ -93,7 +93,11 @@ function buildAttendanceResultPayload({
   overtimePayHours = 0,
   workPay = 0,
   overtimePay = 0,
-  totalPay = 0
+  mealAllowanceAmount = 0,
+  totalPay = 0,
+  calculationPhase = "settled",
+  generatedBy = "calculation",
+  settledAt = new Date().toISOString()
 }) {
   // v2 计算结果只认账号级 attendance_config；旧规则列仅作为现有表结构的物理残留被清空。
   // 不要再写入“全局规则名”或规则 ID，否则前端/接口会重新形成旧多规则兼容语义。
@@ -114,12 +118,17 @@ function buildAttendanceResultPayload({
     overtime_pay_hours: roundToTwo(overtimePayHours),
     work_pay: roundToTwo(workPay),
     overtime_pay: roundToTwo(overtimePay),
+    meal_allowance_amount: roundToTwo(mealAllowanceAmount),
     total_pay: roundToTwo(totalPay),
     status,
     has_exception: hasException,
     exception_reason: exceptionReason,
     note: record?.note || "",
     source: record?.source || null,
+    // draft/settled 元数据只服务定时任务和补跑排查；前端展示仍以 status 为准，避免把底稿实现细节暴露给管理员。
+    calculation_phase: calculationPhase,
+    generated_by: generatedBy,
+    settled_at: settledAt,
     calculated_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
   };
@@ -129,7 +138,7 @@ function isEmployeeOnLeave(employee) {
   return employee?.status === "on_leave";
 }
 
-export function calculateDailyAttendanceRow(employee, record, config, date, ownerUserId) {
+export function calculateDailyAttendanceRow(employee, record, config, date, ownerUserId, options = {}) {
   const normalizedConfig = normalizeConfig(config);
   const employeeId = Number(employee.id);
   const standardHours = Number(normalizedConfig.standard_hours);
@@ -145,6 +154,24 @@ export function calculateDailyAttendanceRow(employee, record, config, date, owne
       status: "leave",
       hasException: false,
       exceptionReason: null
+    });
+  }
+
+  if (!record && options.pendingIfNoRecord) {
+    // 当天底稿是过程态：没有打卡记录时先展示“待打卡”，避免早上刚生成底稿就把员工误判为缺勤。
+    // 前一日结算和手动/月度重算不要传该选项，确保正式结算仍把无记录员工落为缺勤。
+    return buildAttendanceResultPayload({
+      ownerUserId,
+      employeeId,
+      date,
+      record: null,
+      config: normalizedConfig,
+      status: "pending",
+      hasException: false,
+      exceptionReason: null,
+      calculationPhase: "draft",
+      generatedBy: options.generatedBy || "draft_job",
+      settledAt: null
     });
   }
 
@@ -190,6 +217,24 @@ export function calculateDailyAttendanceRow(employee, record, config, date, owne
   }
 
   if (!record.out_time) {
+    if (options.inProgressIfMissingOut) {
+      // 当天已上班但未下班属于过程态 checked_in；只有正式结算历史日期时才转为异常，避免上午打卡后列表误报异常。
+      return buildAttendanceResultPayload({
+        ownerUserId,
+        employeeId,
+        date,
+        record,
+        config: normalizedConfig,
+        status: "checked_in",
+        hasException: false,
+        exceptionReason: null,
+        standardHours,
+        calculationPhase: "draft",
+        generatedBy: options.generatedBy || "draft_job",
+        settledAt: null
+      });
+    }
+
     return buildAttendanceResultPayload({
       ownerUserId,
       employeeId,
@@ -244,6 +289,8 @@ export function calculateDailyAttendanceRow(employee, record, config, date, owne
     ? Number(employee.fixed_salary) / 30
     : Math.max(0, validHours - overtimePayHours) * hourlyRate;
   const overtimePay = overtimePayHours * overtimeFeeInEmployeeCurrency;
+  // 餐补按员工档案中的每日固定金额发放，只在真实正常出勤记录上计入；病假/缺勤/休假/异常行都必须为 0，避免薪资前置数据把非正常考勤误算补贴。
+  const mealAllowanceAmount = record.type === "normal" ? Number(employee.meal_allowance || 0) : 0;
 
   return buildAttendanceResultPayload({
     ownerUserId,
@@ -262,6 +309,7 @@ export function calculateDailyAttendanceRow(employee, record, config, date, owne
     overtimePayHours,
     workPay,
     overtimePay,
-    totalPay: workPay + overtimePay
+    mealAllowanceAmount,
+    totalPay: workPay + overtimePay + mealAllowanceAmount
   });
 }

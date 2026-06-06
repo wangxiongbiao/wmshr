@@ -75,3 +75,24 @@ function normalRecord(overrides = {}) {
   assert.equal(row.overtime_pay, 72);
   assert.equal(row.total_pay, 712);
 }
+
+// 当天底稿没有打卡时必须保留 pending 过程态，避免零点刚生成就把员工误判为缺勤。
+{
+  const row = calculateDailyAttendanceRow(baseEmployee(), null, DEFAULT_ATTENDANCE_CONFIG, date, ownerUserId, { pendingIfNoRecord: true });
+  assert.equal(row.status, "pending");
+  assert.equal(row.calculation_phase, "draft");
+  assert.equal(row.settled_at, null);
+  assert.equal(row.has_exception, false);
+}
+
+// 当天只有上班打卡但没有下班打卡时展示 checked_in；正式结算不传该选项时仍会转异常。
+{
+  const draftRow = calculateDailyAttendanceRow(baseEmployee(), normalRecord({ out_time: null, source: "mobile" }), DEFAULT_ATTENDANCE_CONFIG, date, ownerUserId, { inProgressIfMissingOut: true });
+  assert.equal(draftRow.status, "checked_in");
+  assert.equal(draftRow.calculation_phase, "draft");
+  assert.equal(draftRow.has_exception, false);
+
+  const settledRow = calculateDailyAttendanceRow(baseEmployee(), normalRecord({ out_time: null, source: "mobile" }), DEFAULT_ATTENDANCE_CONFIG, date, ownerUserId);
+  assert.equal(settledRow.status, "exception");
+  assert.equal(settledRow.exception_reason, "OUT_TIME_MISSING");
+}

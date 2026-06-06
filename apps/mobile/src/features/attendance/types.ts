@@ -9,6 +9,7 @@ export interface TodayAttendanceStatus {
   locationAccuracy: number | null;
   canCheckIn: boolean;
   canCheckOut: boolean;
+  requiresDescriptionInWorkTime?: boolean;
   warning?: string;
 }
 
@@ -17,6 +18,8 @@ export interface CheckInPayload {
   latitude: number;
   longitude: number;
   accuracy: number;
+  locationName?: string;
+  description?: string;
   deviceId?: string;
   clientTime: string;
 }
@@ -28,4 +31,5 @@ export interface AttendanceRecord {
   checkOutTime: string;
   type: 'normal' | 'overtime';
   hours: string;
+  note?: string;
 }
