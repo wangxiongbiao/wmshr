@@ -5,7 +5,7 @@
 
 import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { tAdmin } from "../lib/i18nText";
-import { Download, Edit, Plus, Settings } from "lucide-react";
+import { Download, Edit, Plus, RefreshCw, Settings } from "lucide-react";
 import type {
   AppConfig,
   AttendanceCalculationResult,
@@ -23,11 +23,18 @@ import {
   updateAttendanceRecord
 } from "../lib/api";
 import { ModalShell } from "./ModalShell";
-import { cn, formatDuration } from "../lib/utils";
+import { cn, formatCurrency as formatPayrollCurrency, formatDuration } from "../lib/utils";
+import { Pagination } from "./Pagination";
 
 interface AttendanceTableProps {
   employees: Employee[];
 }
+
+type CreateAttendanceForm = Omit<AttendanceRecordUpdatePayload, "type"> & {
+  employeeId: string;
+  // 新增考勤记录要求操作员主动选择类型；空值只存在于表单层，提交前必须校验并收窄为后端 AttendanceType。
+  type: AttendanceRecordUpdatePayload["type"] | "";
+};
 
 const DEFAULT_CREATE_IN_TIME = "08:30";
 const DEFAULT_CREATE_OUT_TIME = "17:30";
@@ -55,11 +62,22 @@ function getDefaultMonth() {
 }
 
 function formatCurrency(value: number, currency: string) {
-  return `${Number(value || 0).toFixed(2)} ${currency || "THB"}`;
+  // 考勤计算列表的可见金额列对齐薪资核算列表，统一用货币符号承载币种，避免同页金额展示口径分叉。
+  return formatPayrollCurrency(Number(value || 0), (currency || "THB") as Parameters<typeof formatPayrollCurrency>[1]);
+}
+
+function formatMoneyNumber(value: number) {
+  // CSV 导出保留原有紧凑数字列，避免本次“可见列表展示”改动影响已有导出字段解析口径。
+  return Number(value || 0).toFixed(2);
 }
 
 function formatEmployeeDisplayName(employee: Pick<Employee, "name" | "nickname">) {
   return employee.nickname ? `${employee.name}(${employee.nickname})` : employee.name;
+}
+
+function getAttendanceTotalPayWithService(item: AttendanceCalculationResult) {
+  // attendance_calculation_results.totalPay 是历史沉淀的“上班+餐补+加班”；列表合计需要额外计入服务费，但不在前端重算其他费用口径。
+  return Number(item.totalPay || 0) + Number(item.serviceFeeAmount || 0);
 }
 
 function getStatusLabel(status: string) {
@@ -76,14 +94,14 @@ function getStatusLabel(status: string) {
     case "manual_adjusted": return tAdmin("人工调整");
     case "exception": return tAdmin("异常");
     case "normal":
-    default: return tAdmin("正常");
+    default: return tAdmin("全勤");
   }
 }
 
 function getStatusMeta(item: AttendanceCalculationResult) {
   const status = item.isOvertime && item.status === "normal" ? "overtime" : item.status;
   if (STATUS_CLASS_NAMES[status]) return { label: getStatusLabel(status), className: STATUS_CLASS_NAMES[status] };
-  return { label: item.statusLabel || item.status || tAdmin("正常"), className: "bg-slate-100 text-slate-700" };
+  return { label: item.statusLabel || item.status || tAdmin("全勤"), className: "bg-slate-100 text-slate-700" };
 }
 
 function Modal({
@@ -120,6 +138,8 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
   const [timeFilterType, setTimeFilterType] = useState<"all" | "day" | "month">("all");
   const [selectedDate, setSelectedDate] = useState("");
   const [selectedMonth, setSelectedMonth] = useState("");
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
   const [calculations, setCalculations] = useState<AttendanceCalculationResult[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [configForm, setConfigForm] = useState<AppConfig | null>(null);
@@ -128,10 +148,10 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
   const [isAdjustmentOpen, setIsAdjustmentOpen] = useState(false);
   const [isMaintenanceConfirmOpen, setIsMaintenanceConfirmOpen] = useState(false);
   const [adjustingResult, setAdjustingResult] = useState<AttendanceCalculationResult | null>(null);
-  const [createForm, setCreateForm] = useState({
+  const [createForm, setCreateForm] = useState<CreateAttendanceForm>({
     employeeId: "",
     date: getDefaultDate(),
-    type: "normal" as AttendanceRecordUpdatePayload["type"],
+    type: "",
     inTime: DEFAULT_CREATE_IN_TIME,
     outTime: DEFAULT_CREATE_OUT_TIME,
     note: ""
@@ -204,10 +224,20 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
     });
   }, [calculations]);
 
-  const isAllSelected = sortedRows.length > 0 && sortedRows.every((row) => selectedIds.has(row.id));
+  useEffect(() => {
+    // 后端筛选条件变化会刷新 calculations；分页回到第一页，避免旧页码切到空白表格。
+    setPage(1);
+  }, [calculations]);
+
+  const paginatedRows = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return sortedRows.slice(start, start + pageSize);
+  }, [page, sortedRows]);
+
+  const isAllSelected = paginatedRows.length > 0 && paginatedRows.every((row) => selectedIds.has(row.id));
 
   const toggleSelectAll = (checked: boolean) => {
-    setSelectedIds(checked ? new Set(sortedRows.map((row) => row.id)) : new Set());
+    setSelectedIds(checked ? new Set(paginatedRows.map((row) => row.id)) : new Set());
   };
 
   const toggleSelect = (id: number, checked: boolean) => {
@@ -239,16 +269,16 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
     }
   };
 
-  const applyDefaultTimeWhenNormal = <T extends { type: AttendanceRecordUpdatePayload["type"]; inTime: string | null; outTime: string | null }>(
+  const applyDefaultTimeWhenNormal = <T extends { type: AttendanceRecordUpdatePayload["type"] | ""; inTime: string | null; outTime: string | null }>(
     prev: T,
-    nextType: AttendanceRecordUpdatePayload["type"]
+    nextType: AttendanceRecordUpdatePayload["type"] | ""
   ): T => ({
     ...prev,
     type: nextType,
-    // 只在切回“正常”时恢复业务默认上下班时间；其他考勤类型保留用户已填时间，避免病假/缺勤等记录被强塞默认时间。
+    // 只在切回“全勤(normal)”时恢复业务默认上下班时间；空值和其他考勤类型保留用户已填时间，避免病假/缺勤等记录被强塞默认时间。
     inTime: nextType === "normal" ? DEFAULT_CREATE_IN_TIME : prev.inTime,
     outTime: nextType === "normal" ? DEFAULT_CREATE_OUT_TIME : prev.outTime
-  });
+  } as T);
 
   const handleRunDailyMaintenance = async () => {
     setSubmitting(true);
@@ -256,8 +286,8 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
     setMaintenanceMessage("");
     try {
       await runAttendanceDailyMaintenance();
-      // 用户只需要看到业务结果，不展示底层结算日期、底稿数量或失败统计，避免把自动维护细节暴露到主界面。
-      setMaintenanceMessage(tAdmin("结算成功"));
+      // 用户只需要看到业务结果，不展示底层维护日期、底稿数量或失败统计，避免把自动维护细节暴露到主界面。
+      setMaintenanceMessage(tAdmin("更新成功"));
       setIsMaintenanceConfirmOpen(false);
       await loadData();
     } catch (nextError) {
@@ -272,7 +302,7 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
     const headers = [
       tAdmin("日期"), tAdmin("员工姓名"), tAdmin("来源国家"), tAdmin("性别"), tAdmin("职位"), tAdmin("所属区域"),
       tAdmin("时薪"), tAdmin("基本日薪"), tAdmin("上班时间"), tAdmin("下班时间"), tAdmin("有效工时"), tAdmin("加班工时"),
-      tAdmin("今天上班费用"), tAdmin("餐补费用"), tAdmin("加班费"), tAdmin("合计费用"), tAdmin("考勤状态"), tAdmin("备注")
+      tAdmin("今天上班费用"), tAdmin("餐补费用"), tAdmin("加班费"), tAdmin("服务费"), tAdmin("合计费用"), tAdmin("考勤状态"), tAdmin("备注")
     ];
     const countryNames: Record<string, string> = { MM: tAdmin("缅甸"), TH: tAdmin("泰国"), CN: tAdmin("中国"), VN: tAdmin("越南"), KH: tAdmin("柬埔寨") };
     const rows = sortedRows.map((item) => {
@@ -285,16 +315,17 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
         item.employeeGender === "female" ? tAdmin("女") : item.employeeGender === "male" ? tAdmin("男") : "-",
         item.employeeRole || "-",
         item.employeeDept || "-",
-        `${displayHourlyRate.toFixed(2)} ${item.currency}`,
-        `${baseDailyWage.toFixed(2)} ${item.currency}`,
+        formatMoneyNumber(displayHourlyRate),
+        formatMoneyNumber(baseDailyWage),
         item.rawInTime || "-",
         item.rawOutTime || "-",
         `${item.validHours.toFixed(2)}h`,
         `${item.overtimePayHours.toFixed(2)}h`,
-        `${item.workPay.toFixed(2)} ${item.currency}`,
-        `${item.mealAllowanceAmount.toFixed(2)} ${item.currency}`,
-        `${item.overtimePay.toFixed(2)} ${item.currency}`,
-        `${item.totalPay.toFixed(2)} ${item.currency}`,
+        formatMoneyNumber(item.workPay),
+        formatMoneyNumber(item.mealAllowanceAmount),
+        formatMoneyNumber(item.overtimePay),
+        formatMoneyNumber(item.serviceFeeAmount),
+        formatCurrency(getAttendanceTotalPayWithService(item), item.currency),
         getStatusMeta(item).label,
         item.note || ""
       ];
@@ -363,6 +394,8 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
       // 新增记录只沿用当前筛选员工和日期；上下班时间每次打开都回到业务默认值，避免上次补卡的临时时间污染下一条新增记录。
       employeeId: selectedEmployeeId === "all" ? prev.employeeId : String(selectedEmployeeId),
       date: timeFilterType === "day" && selectedDate ? selectedDate : prev.date || getDefaultDate(),
+      // 每次打开新增弹窗都清空考勤类型，要求操作员主动确认本次记录类型，避免沿用上一条补卡选择。
+      type: "",
       inTime: DEFAULT_CREATE_IN_TIME,
       outTime: DEFAULT_CREATE_OUT_TIME
     }));
@@ -376,6 +409,11 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
       setError(tAdmin("请选择员工后再新增考勤记录"));
       return;
     }
+    if (!createForm.type) {
+      setError(tAdmin("请选择考勤类型"));
+      return;
+    }
+    const attendanceType: AttendanceRecordUpdatePayload["type"] = createForm.type;
 
     setSubmitting(true);
     setError("");
@@ -384,7 +422,7 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
       await createAttendanceRecord({
         employeeId,
         date: createForm.date,
-        type: createForm.type,
+        type: attendanceType,
         inTime: createForm.inTime || null,
         outTime: createForm.outTime || null,
         note: createForm.note
@@ -504,14 +542,15 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
             )}
           </h3>
           <div className="flex gap-2 flex-wrap justify-end">
-            {/* 后台只保留一个业务化维护入口；先确认再执行，避免管理员在筛选状态下误以为只会结算当前筛选范围。 */}
+            {/* 后台只保留一个业务化维护入口；先确认再执行，避免管理员在筛选状态下误以为只会更新当前筛选范围。 */}
             <button
               type="button"
               onClick={() => setIsMaintenanceConfirmOpen(true)}
               disabled={submitting}
-              className="bg-emerald-50 border border-emerald-200 text-emerald-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-emerald-100 transition disabled:opacity-60"
+              className="bg-emerald-50 border border-emerald-200 text-emerald-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-emerald-100 transition disabled:opacity-60 flex items-center gap-1.5"
               title={tAdmin("结算前一天考勤，并生成今天考勤底稿")}
-            >{submitting ? tAdmin("数据结算中...") : tAdmin("数据结算")}</button>
+            >
+              <RefreshCw className="w-4 h-4" />{submitting ? tAdmin("更新考勤中...") : tAdmin("更新考勤")}</button>
             <button
               type="button"
               onClick={handleOpenCreate}
@@ -554,23 +593,24 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
                 <th className="sticky top-0 bg-white z-10 px-3 py-3 font-medium text-center border-b border-slate-100">{tAdmin("下班")}</th>
                 <th className="sticky top-0 bg-white z-10 px-3 py-3 font-medium text-center border-b border-slate-100">{tAdmin("有效工时")}</th>
                 <th className="sticky top-0 bg-white z-10 px-3 py-3 font-medium text-center text-blue-600 border-b border-slate-100">{tAdmin("加班时长")}</th>
-                <th className="sticky top-0 bg-white z-10 px-3 py-3 font-medium text-right text-indigo-600 border-b border-slate-100">{tAdmin("上班费用")}</th>
+                <th className="sticky top-0 bg-white z-10 px-3 py-3 font-medium text-right text-slate-600 border-b border-slate-100">{tAdmin("上班费用")}</th>
                 <th className="sticky top-0 bg-white z-10 px-3 py-3 font-medium text-right text-amber-600 border-b border-slate-100">{tAdmin("餐补费用")}</th>
                 <th className="sticky top-0 bg-white z-10 px-3 py-3 font-medium text-right text-green-600 border-b border-slate-100">{tAdmin("加班费用")}</th>
-                <th className="sticky top-0 bg-white z-10 px-3 py-3 font-medium text-right text-rose-600 border-b border-slate-100">{tAdmin("合计费用")}</th>
+                <th className="sticky top-0 bg-white z-10 px-3 py-3 font-medium text-right text-amber-600 border-b border-slate-100">{tAdmin("服务费")}</th>
+                <th className="sticky top-0 bg-white z-10 px-3 py-3 font-medium text-right text-blue-700 border-b border-slate-100">{tAdmin("合计费用")}</th>
                 <th className="sticky top-0 bg-white z-10 px-3 py-3 font-medium text-center border-b border-slate-100">{tAdmin("操作")}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={13} className="px-6 py-12 text-center text-slate-400 text-sm">{tAdmin("正在加载考勤记录...")}</td>
+                  <td colSpan={14} className="px-6 py-12 text-center text-slate-400 text-sm">{tAdmin("正在加载考勤记录...")}</td>
                 </tr>
               ) : sortedRows.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="px-6 py-12 text-center text-slate-400 text-sm">{tAdmin("没有找到符合筛选条件的考勤记录")}</td>
+                  <td colSpan={14} className="px-6 py-12 text-center text-slate-400 text-sm">{tAdmin("没有找到符合筛选条件的考勤记录")}</td>
                 </tr>
-              ) : sortedRows.map((item) => {
+              ) : paginatedRows.map((item) => {
                 const statusMeta = getStatusMeta(item);
                 const isNonWorkingStatus = ["pending", "absent", "leave", "sick_leave"].includes(item.status);
                 return (
@@ -613,10 +653,11 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
                     <td className="px-3 py-3 text-sm text-center">
                       {isNonWorkingStatus ? <span className="text-slate-400 font-mono">0.00h</span> : <span className="font-mono font-bold text-blue-600">{formatDuration(item.overtimePayHours)}</span>}
                     </td>
-                    <td className={cn("px-3 py-3 text-sm font-mono text-right font-medium", isNonWorkingStatus ? "text-slate-400" : "text-indigo-600")}>{formatCurrency(item.workPay, item.currency)}</td>
-                    <td className={cn("px-3 py-3 text-sm font-mono text-right font-medium", item.mealAllowanceAmount > 0 ? "text-amber-600" : "text-slate-400")}>{formatCurrency(item.mealAllowanceAmount, item.currency)}</td>
-                    <td className={cn("px-3 py-3 text-sm font-mono text-right font-medium", isNonWorkingStatus ? "text-slate-400" : "text-green-600")}>{formatCurrency(item.overtimePay, item.currency)}</td>
-                    <td className={cn("px-3 py-3 text-sm font-mono text-right font-bold", isNonWorkingStatus ? "text-slate-400" : "text-rose-600")}>{formatCurrency(item.totalPay, item.currency)}</td>
+                    <td className={cn("px-3 py-3 text-xs font-mono text-right", isNonWorkingStatus ? "text-slate-400" : "text-slate-600")}>{formatCurrency(item.workPay, item.currency)}</td>
+                    <td className={cn("px-3 py-3 text-xs font-mono text-right font-semibold", item.mealAllowanceAmount > 0 ? "text-amber-600" : "text-slate-400")}>{formatCurrency(item.mealAllowanceAmount, item.currency)}</td>
+                    <td className={cn("px-3 py-3 text-xs font-mono text-right font-semibold", isNonWorkingStatus ? "text-slate-400" : "text-green-600")}>{formatCurrency(item.overtimePay, item.currency)}</td>
+                    <td className={cn("px-3 py-3 text-xs font-mono text-right font-semibold", item.serviceFeeAmount > 0 ? "text-amber-600" : "text-slate-400")}>{formatCurrency(item.serviceFeeAmount, item.currency)}</td>
+                    <td className="px-3 py-3 text-right"><span className={cn("text-sm font-bold font-mono", isNonWorkingStatus ? "text-slate-400" : "text-blue-800")}>{formatCurrency(getAttendanceTotalPayWithService(item), item.currency)}</span></td>
                     <td className="px-3 py-3 text-center whitespace-nowrap">
                       <button
                         type="button"
@@ -636,9 +677,18 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
         </div>
       </div>
 
-      <div className="shrink-0 flex items-center justify-between text-sm">
+      <div className="shrink-0 space-y-3 text-sm">
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          total={sortedRows.length}
+          itemName={tAdmin("条考勤")}
+          disabled={loading}
+          onPageChange={setPage}
+        />
+        <div className="flex items-center justify-between">
         <div className="flex items-center gap-4 text-slate-400 flex-wrap">
-          <span>{tAdmin("共 {{count}} 条已显示考勤", { count: sortedRows.length })}</span>
+          <span>{tAdmin("共 {{count}} 条已筛选考勤", { count: sortedRows.length })}</span>
           <span>•</span>
           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-400" />{tAdmin("待打卡 = 当天底稿，暂不计入薪资")}</span>
           <span>•</span>
@@ -646,11 +696,12 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
           <span>•</span>
           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-400" />{tAdmin("假期 = 员工休假状态")}</span>
         </div>
+        </div>
       </div>
 
       <Modal
         isOpen={isMaintenanceConfirmOpen}
-        title={tAdmin("确认数据结算")}
+        title={tAdmin("确认更新考勤")}
         onClose={() => {
           if (!submitting) {
             setIsMaintenanceConfirmOpen(false);
@@ -670,11 +721,11 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
               disabled={submitting}
               onClick={() => void handleRunDailyMaintenance()}
               className="rounded-lg bg-emerald-600 px-6 py-2 text-sm text-white transition hover:bg-emerald-700 disabled:opacity-60"
-            >{submitting ? tAdmin("数据结算中...") : tAdmin("确认结算")}</button>
+            >{submitting ? tAdmin("更新考勤中...") : tAdmin("确认更新")}</button>
           </div>
         )}
       >
-        {/* 数据结算是全局每日维护动作，不读取当前员工/日期筛选；确认文案必须持续说明这一边界，避免用户误操作。 */}
+        {/* 更新考勤是全局每日维护动作，不读取当前员工/日期筛选；确认文案必须持续说明这一边界，避免用户误操作。 */}
         <div className="space-y-3 text-sm text-slate-600">
           <p>{tAdmin("系统将结算前一天考勤，并生成今天考勤底稿。此操作不受当前筛选条件影响，是否继续？")}</p>
         </div>
@@ -721,8 +772,9 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
               </div>
             ) : null}
             <Field label={tAdmin("考勤类型")}>
-              <select value={createForm.type} onChange={(event) => setCreateForm((prev) => applyDefaultTimeWhenNormal(prev, event.target.value as AttendanceRecordUpdatePayload["type"]))} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500">
-                <option value="normal">{tAdmin("正常")}</option>
+              <select required value={createForm.type} onChange={(event) => setCreateForm((prev) => applyDefaultTimeWhenNormal(prev, event.target.value as AttendanceRecordUpdatePayload["type"] | ""))} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500">
+                <option value="">{tAdmin("请选择考勤类型")}</option>
+                <option value="normal">{tAdmin("全勤")}</option>
                 <option value="late">{tAdmin("迟到")}</option>
                 <option value="early">{tAdmin("早退")}</option>
                 <option value="absent">{tAdmin("缺勤")}</option>
@@ -758,7 +810,7 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
             <Field label={tAdmin("日期")}><input type="date" value={adjustForm.date} onChange={(event) => setAdjustForm((prev) => ({ ...prev, date: event.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500" /></Field>
             <Field label={tAdmin("考勤类型")}>
               <select value={adjustForm.type} onChange={(event) => setAdjustForm((prev) => applyDefaultTimeWhenNormal(prev, event.target.value as AttendanceRecordUpdatePayload["type"]))} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500">
-                <option value="normal">{tAdmin("正常")}</option>
+                <option value="normal">{tAdmin("全勤")}</option>
                 <option value="late">{tAdmin("迟到")}</option>
                 <option value="early">{tAdmin("早退")}</option>
                 <option value="absent">{tAdmin("缺勤")}</option>

@@ -5,8 +5,8 @@
 
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { tAdmin } from "../lib/i18nText";
-import { Activity, AlertCircle, Award, BarChart2, Clock, Settings, Users, Zap } from "lucide-react";
-import type { DashboardData, DashboardDepartmentStat, DashboardEmployeeStat, TabId } from "../types";
+import { AlertCircle, BarChart2, Clock, Settings, Users, Zap } from "lucide-react";
+import type { DashboardData, DashboardEmployeeStat, TabId } from "../types";
 import { fetchDashboardData } from "../lib/api";
 import { cn, formatCurrency } from "../lib/utils";
 
@@ -15,14 +15,7 @@ interface DashboardProps {
   onNav: (tabId: Extract<TabId, "attendance" | "payroll">) => void;
 }
 
-function getBadgeToneClass(tone: DashboardDepartmentStat["badgeTone"]) {
-  if (tone === "rose") return "text-rose-700 bg-rose-50 border-rose-200 animate-pulse";
-  if (tone === "amber") return "text-amber-700 bg-amber-50 border-amber-200";
-  return "text-emerald-700 bg-emerald-50 border-emerald-200";
-}
-
 export function Dashboard({ onOpenSettings, onNav }: DashboardProps) {
-  const [chartTab, setChartTab] = useState<"employees" | "departments">("employees");
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -45,7 +38,6 @@ export function Dashboard({ onOpenSettings, onNav }: DashboardProps) {
   }, []);
 
   const employeeStats = data?.employeeStats || [];
-  const departmentStats = data?.departmentStats || [];
   const config = data?.config;
   const activeCount = data?.activeEmployeeCount || 0;
   const maxRegHour = useMemo(
@@ -63,7 +55,7 @@ export function Dashboard({ onOpenSettings, onNav }: DashboardProps) {
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       ) : null}
 
-      {/* v2 看板由后端一次性返回最后一次考勤周期、KPI、员工排行和部门诊断；前端只负责展示与模块跳转。 */}
+      {/* v2 看板由后端一次性返回最后一次考勤周期、KPI 和员工统计；前端只负责展示与模块跳转。 */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 px-1 text-xs">
         <div className="flex items-center gap-2 text-slate-600">
           <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
@@ -129,35 +121,10 @@ export function Dashboard({ onOpenSettings, onNav }: DashboardProps) {
               <p className="text-xs text-slate-400 mt-1">{tAdmin("统计分析系统，通过工时饱和、日均平均及能动比等高阶指标，辅助管理决策。")}</p>
             </div>
 
-            <div className="flex bg-slate-100 p-1 rounded-xl self-end sm:self-auto border border-slate-100">
-              <button
-                onClick={() => setChartTab("employees")}
-                className={cn(
-                  "px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer",
-                  chartTab === "employees" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-800"
-                )}
-              >
-                <Award className="w-3.5 h-3.5" />
-                <span className="whitespace-nowrap">{tAdmin("工时饱和排行 (Top)")}</span>
-              </button>
-              <button
-                onClick={() => setChartTab("departments")}
-                className={cn(
-                  "px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer",
-                  chartTab === "departments" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-800"
-                )}
-              >
-                <Activity className="w-3.5 h-3.5" />
-                <span className="whitespace-nowrap">{tAdmin("部门负荷诊断")}</span>
-              </button>
-            </div>
           </div>
 
-          {chartTab === "employees" ? (
-            <EmployeePerformanceList stats={employeeStats} maxRegHour={maxRegHour} />
-          ) : (
-            <DepartmentPerformanceList stats={departmentStats} />
-          )}
+          {/* 用户已取消顶部切换入口和部门诊断卡片；这里固定展示员工统计，避免后续误恢复双 Tab 结构。 */}
+          <EmployeePerformanceList stats={employeeStats} maxRegHour={maxRegHour} />
         </div>
 
         <div className="space-y-6">
@@ -293,58 +260,6 @@ function EmployeePerformanceList({ stats, maxRegHour }: { stats: DashboardEmploy
             </div>
           );
         })}
-      </div>
-    </div>
-  );
-}
-
-function DepartmentPerformanceList({ stats }: { stats: DashboardDepartmentStat[] }) {
-  if (stats.length === 0) {
-    return <EmptyState text={tAdmin("暂无部门负荷数据，请先维护员工部门并生成考勤结果。")} />;
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {stats.map((item) => (
-          <div key={item.deptName} className="bg-slate-50 border border-slate-100 rounded-xl p-4 flex flex-col justify-between hover:shadow-sm transition">
-            <div>
-              <div className="flex justify-between items-start">
-                <div>
-                  <h4 className="text-sm font-bold text-slate-800">{item.deptName}</h4>
-                  <p className="text-[10px] text-slate-400 font-medium">{tAdmin("在职编制: {{count}} 人", { count: item.staffCount })}</p>
-                </div>
-                <span className={cn("text-[10px] font-extrabold px-2 py-0.5 rounded border", getBadgeToneClass(item.badgeTone))}>{item.loadLabel}</span>
-              </div>
-
-              <div className="my-3 space-y-1">
-                <div className="flex justify-between text-xs text-slate-600 font-medium">
-                  <span>{tAdmin("加班比例")}</span>
-                  <span className="font-bold text-slate-700">{item.otRatio}%</span>
-                </div>
-                <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                  <div className="bg-amber-500 h-full" style={{ width: `${Math.min(100, item.otRatio)}%` }} />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 bg-white/60 p-2 rounded-lg text-xs border border-slate-100">
-                <div>
-                  <p className="text-[10px] text-slate-400">{tAdmin("累计工时")}</p>
-                  <p className="font-extrabold text-slate-700">{item.totalValidHours.toFixed(1)}h</p>
-                </div>
-                <div>
-                  <p className="text-[10px] text-slate-400">{tAdmin("人均单日工时")}</p>
-                  <span className="font-extrabold text-slate-700">{item.avgHours.toFixed(1)}h</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-3.5 border-t border-slate-100 pt-2.5">
-              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">{tAdmin("💡 优化建议:")}</p>
-              <p className="text-[11px] text-slate-600 mt-0.5 leading-relaxed bg-white/40 p-1.5 rounded-lg border border-slate-100/50">{item.actionAdvice}</p>
-            </div>
-          </div>
-        ))}
       </div>
     </div>
   );

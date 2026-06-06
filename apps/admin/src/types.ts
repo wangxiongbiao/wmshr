@@ -260,6 +260,8 @@ export interface AttendanceCalculationResult {
   mealAllowanceAmount: number;
   workPay: number;
   overtimePay: number;
+  // 考勤列表的服务费按员工档案比例基于本日上班费用展示；合计列需要把该金额计入，但不改变后端沉淀的旧 total_pay 字段。
+  serviceFeeAmount: number;
   totalPay: number;
   status: AttendanceCalculationStatus;
   statusLabel: string;
@@ -354,6 +356,14 @@ export interface SalaryAdjustmentPayload {
   note: string;
 }
 
+export interface PayrollExceptionDetail {
+  date: string;
+  status: string;
+  statusLabel: string;
+  reason: string;
+  note: string;
+}
+
 export interface MonthlyPayrollResult {
   id: number;
   employeeId: number;
@@ -384,6 +394,8 @@ export interface MonthlyPayrollResult {
   calculationStatus: PayrollCalculationStatus;
   reviewStatus: PayrollReviewStatus;
   blockedReason: string | null;
+  // 薪资列表的异常入口需要展示具体异常日期和原因；该字段由月度薪资接口从日考勤计算结果聚合，避免前端再发额外请求或只显示笼统 blockedReason。
+  exceptionDetails?: PayrollExceptionDetail[];
   calculatedAt: string | null;
   confirmedAt: string | null;
   createdAt: string;

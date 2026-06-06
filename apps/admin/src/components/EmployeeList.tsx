@@ -3,11 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { tAdmin } from "../lib/i18nText";
 import { Edit, KeyRound, Plus, Search, Trash2 } from "lucide-react";
 import { Employee } from "../types";
 import { cn, COUNTRY_FLAGS, formatCurrency, getCountryName } from "../lib/utils";
+import { Pagination } from "./Pagination";
 
 interface EmployeeListProps {
   employees: Employee[];
@@ -40,8 +41,10 @@ function getV2HourlyRate(employee: Employee) {
 
 export function EmployeeList({ employees, loading = false, onAddEmployee, onEditEmployee, onManageAppAccount, onDeleteEmployee }: EmployeeListProps) {
   const [query, setSearchQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const pageSize = 12;
 
-  // 员工管理按 admin-v2 原型展示：本组件只做 v2 的姓名/职位/区域搜索和卡片渲染，避免把正式后台的多筛选、分页、停用/离职按钮重新带回界面。
+  // 员工管理按 admin-v2 原型展示：本组件只做 v2 的姓名/职位/区域搜索和卡片渲染；分页只切分当前筛选结果，不重新引入旧后台的多筛选、停用/离职按钮。
   const filteredEmployees = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     if (!normalizedQuery) return employees;
@@ -53,6 +56,16 @@ export function EmployeeList({ employees, loading = false, onAddEmployee, onEdit
       emp.dept.toLowerCase().includes(normalizedQuery)
     );
   }, [employees, query]);
+
+  useEffect(() => {
+    // 筛选条件或员工源数据变化后回到第一页，避免分页停留在旧页码导致用户误以为没有员工数据。
+    setPage(1);
+  }, [employees, query]);
+
+  const paginatedEmployees = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredEmployees.slice(start, start + pageSize);
+  }, [filteredEmployees, page]);
 
   return (
     <div className="h-full min-h-0 flex flex-col">
@@ -85,7 +98,7 @@ export function EmployeeList({ employees, loading = false, onAddEmployee, onEdit
         ) : (
           // v2 员工卡片包含头像、标签和薪资字段；常规大屏保持三列，避免一行四列时字段被挤压换行。
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5">
-            {filteredEmployees.map((emp) => {
+            {paginatedEmployees.map((emp) => {
             const monthlyWage = getV2MonthlyWage(emp);
             const hourlyRate = getV2HourlyRate(emp);
             const statusLabel = getV2StatusLabel(emp);
@@ -197,6 +210,15 @@ export function EmployeeList({ employees, loading = false, onAddEmployee, onEdit
             })}
           </div>
         )}
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          total={filteredEmployees.length}
+          itemName={tAdmin("名员工")}
+          disabled={loading}
+          className="mt-6"
+          onPageChange={setPage}
+        />
         <div className="mt-6 text-center text-sm text-slate-400">{tAdmin("共 {{count}} 名员工", { count: employees.length })}</div>
       </div>
     </div>

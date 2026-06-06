@@ -13,8 +13,6 @@ import {colors} from '../../../shared/constants/colors';
 import {CheckInCard, CheckInPhase} from '../components/CheckInCard';
 import {TodayTaskCard} from '../components/TodayTaskCard';
 
-const LOCATION_FAILURE_MESSAGE = '定位失败，不能打卡。请重试定位；如果一直失败，请重启 App 后再试。';
-const DESCRIPTION_REQUIRED_MESSAGE = '上班时间打卡必须填写打卡说明。';
 
 export function HomeScreen() {
   const { t } = useTranslation('app');
@@ -57,8 +55,8 @@ export function HomeScreen() {
     if (requiresDescription && !trimmedDescription) {
       // 后端已经有同一条强校验；前端先拦截是为了给员工明确、即时的上班时间说明要求，避免进入定位后才被接口拒绝。
       setPhase('description_required');
-      setHelperText(t(DESCRIPTION_REQUIRED_MESSAGE));
-      showToast(t(DESCRIPTION_REQUIRED_MESSAGE));
+      setHelperText(t('上班时间打卡必须填写打卡说明。'));
+      showToast(t('上班时间打卡必须填写打卡说明。'));
       return;
     }
 
@@ -67,13 +65,13 @@ export function HomeScreen() {
       setPhase('requesting_permission');
       const permission = await Location.requestForegroundPermissionsAsync();
       if (permission.status !== Location.PermissionStatus.GRANTED) {
-        throw new Error(t(LOCATION_FAILURE_MESSAGE));
+        throw new Error(t('定位失败，不能打卡。请重试定位；如果一直失败，请重启 App 后再试。'));
       }
 
       setPhase('locating');
       const location = await Location.getCurrentPositionAsync({accuracy: Location.Accuracy.Balanced});
       if (!Number.isFinite(location.coords.latitude) || !Number.isFinite(location.coords.longitude)) {
-        throw new Error(t(LOCATION_FAILURE_MESSAGE));
+        throw new Error(t('定位失败，不能打卡。请重试定位；如果一直失败，请重启 App 后再试。'));
       }
 
       setPhase('reverse_geocoding');
@@ -118,7 +116,7 @@ export function HomeScreen() {
         phase,
       });
       setPhase('failed');
-      setHelperText(message === t(LOCATION_FAILURE_MESSAGE) ? t(LOCATION_FAILURE_MESSAGE) : message);
+      setHelperText(message === t('定位失败，不能打卡。请重试定位；如果一直失败，请重启 App 后再试。') ? t('定位失败，不能打卡。请重试定位；如果一直失败，请重启 App 后再试。') : message);
       showToast(message);
     }
   };
@@ -139,7 +137,7 @@ export function HomeScreen() {
           {todayStatus.status !== 'checked_out' ? (
             <View style={[styles.descriptionCard, requiresDescription && styles.descriptionRequiredCard]}>
               <Text style={sharedStyles.cardTitle}>{requiresDescription ? t('打卡说明（必填）') : t('打卡说明')}</Text>
-              <Text style={[sharedStyles.muted, requiresDescription && styles.requiredText]}>{requiresDescription ? t(DESCRIPTION_REQUIRED_MESSAGE) : t('非上班时间说明可选。')}</Text>
+              <Text style={[sharedStyles.muted, requiresDescription && styles.requiredText]}>{requiresDescription ? t('上班时间打卡必须填写打卡说明。') : t('非上班时间说明可选。')}</Text>
               <TextInput
                 value={description}
                 onChangeText={value => {

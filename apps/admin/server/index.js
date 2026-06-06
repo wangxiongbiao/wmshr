@@ -840,6 +840,10 @@ function getV2AttendanceStatusLabel(row) {
 function mapAttendanceCalculationRow(row, employeeMap = new Map()) {
   const employee = employeeMap.get(Number(row.employee_id));
   const overtimePayHours = Number(row.overtime_pay_hours);
+  const workPay = Number(row.work_pay || 0);
+  const serviceFeeRate = getNonNegativePayrollAmount(employee?.service_fee_rate);
+  // attendance_calculation_results 暂无独立服务费列；考勤列表按员工当前服务费比例从本日上班费用派生展示，避免改动沉淀表结构和历史结算写入路径。
+  const serviceFeeAmount = roundToTwo(workPay * serviceFeeRate / 100);
   // v2 考勤表格需要一次接口拿齐员工展示字段和费用字段；前端后续只负责筛选、展示、导出，不能再回到旧规则或本地重算。
   return {
     id: Number(row.id),
@@ -855,6 +859,7 @@ function mapAttendanceCalculationRow(row, employeeMap = new Map()) {
     salaryType: employee?.salary_type || null,
     hourlyRate: employee?.hourly_rate === null || employee?.hourly_rate === undefined ? null : Number(employee.hourly_rate),
     fixedSalary: employee?.fixed_salary === null || employee?.fixed_salary === undefined ? null : Number(employee.fixed_salary),
+    serviceFeeRate,
     currency: employee?.currency || "THB",
     attendanceRecordId: row.attendance_record_id === null ? null : Number(row.attendance_record_id),
     date: row.date,
@@ -866,9 +871,10 @@ function mapAttendanceCalculationRow(row, employeeMap = new Map()) {
     standardHours: Number(row.standard_hours),
     overtimeRawHours: Number(row.overtime_raw_hours),
     overtimePayHours,
-    workPay: Number(row.work_pay || 0),
+    workPay,
     mealAllowanceAmount: row.meal_allowance_amount === null || row.meal_allowance_amount === undefined ? 0 : Number(row.meal_allowance_amount),
     overtimePay: Number(row.overtime_pay || 0),
+    serviceFeeAmount,
     totalPay: Number(row.total_pay || 0),
     status: row.status,
     statusLabel: getV2AttendanceStatusLabel(row),
@@ -941,6 +947,84 @@ function mapSalaryAdjustmentItemRow(row) {
     note: row.note || "",
     createdAt: row.created_at,
     updatedAt: row.updated_at
+  };
+}
+
+const PAYROLL_EXCEPTION_REASON_LABELS = {
+  IN_TIME_MISSING: "上班未打卡",
+  OUT_TIME_MISSING: "下班未打卡",
+  TIME_FORMAT_INVALID: "打卡时间格式异常"
+};
+
+function getPayrollExceptionReason(row) {
+  const rawReason = row.exception_reason || row.note || "";
+  // 日考勤计算结果里沉淀的是稳定机器码；薪资异常明细是业务页面，必须在服务端统一转成可读原因，避免前端和导出继续暴露 OUT_TIME_MISSING 这类 key。
+  return PAYROLL_EXCEPTION_REASON_LABELS[rawReason] || rawReason || "异常考勤";
+}
+
+function buildPayrollExceptionDetails(dailyCalculations = []) {
+  return dailyCalculations
+    .filter((row) => row.has_exception)
+    .sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")))
+    .map((row) => ({
+      date: row.date,
+      status: row.status || "exception",
+      statusLabel: getV2AttendanceStatusLabel(row),
+      reason: getPayrollExceptionReason(row),
+      note: row.note || ""
+    }));
+}
+
+const PAYROLL_LIST_EMPLOYEE_COLUMNS = [
+  "id",
+  "employee_no",
+  "name",
+  "nickname",
+  "gender",
+  "country",
+  "role",
+  "dept",
+  "status",
+  "is_deleted",
+  "salary_type",
+  "hourly_rate",
+  "fixed_salary",
+  "currency",
+  "join_date",
+  "attendance_bonus",
+  "social_security",
+  "service_fee_rate"
+].join(", ");
+
+function groupRowsByEmployeeId(rows = []) {
+  return rows.reduce((map, row) => {
+    const employeeId = Number(row.employee_id);
+    if (!map.has(employeeId)) {
+      map.set(employeeId, []);
+    }
+    map.get(employeeId).push(row);
+    return map;
+  }, new Map());
+}
+
+function pickSalaryProfileForMonth(profiles = [], yearMonth) {
+  const monthStartDate = getMonthStartDate(yearMonth);
+  const monthEndDate = getMonthEndDate(yearMonth);
+  return profiles
+    .filter((profile) => toDateKey(profile.effective_start_date) <= monthEndDate && (!profile.effective_end_date || toDateKey(profile.effective_end_date) >= monthStartDate))
+    .sort((a, b) => String(b.effective_start_date || "").localeCompare(String(a.effective_start_date || "")) || Number(b.id || 0) - Number(a.id || 0))[0] || null;
+}
+
+function buildPayrollSourceContextFromBatch(employee, yearMonth, ownerUserId, batch) {
+  const employeeId = Number(employee.id);
+  return {
+    employee,
+    salaryProfile: pickSalaryProfileForMonth(batch.salaryProfilesByEmployeeId.get(employeeId) || [], yearMonth),
+    attendanceSummary: (batch.summariesByEmployeeId.get(employeeId) || [])[0] || null,
+    adjustmentItems: batch.adjustmentItemsByEmployeeId.get(employeeId) || [],
+    dailyCalculations: batch.dailyCalculationsByEmployeeId.get(employeeId) || [],
+    ruleFeeMap: batch.ruleFeeMap,
+    existingPayrollResult: (batch.payrollResultsByEmployeeId.get(employeeId) || [])[0] || null
   };
 }
 
@@ -1483,8 +1567,9 @@ async function recalculateMonthlyAttendance(yearMonth, ownerUserId, targetEmploy
       // 病假不计工时，但月汇总仍归入请假类计数；若后续要单独统计病假，应先给 monthly_attendance_summaries 增加独立字段。
       leave_count: rows.filter((row) => row.status === "leave" || row.status === "sick_leave").length,
       manual_adjusted_count: rows.filter((row) => row.status === "manual_adjusted").length,
-      can_generate_payroll: rows.every((row) => !row.has_exception),
-      blocked_reason: rows.every((row) => !row.has_exception) ? null : "存在未处理异常考勤记录",
+      // 异常考勤本身已经在日计算行里按 0 工时/0 费用沉淀，薪资核算不再因此阻断；但月汇总保留说明给薪资列表提示。
+      can_generate_payroll: true,
+      blocked_reason: rows.some((row) => row.has_exception) ? `异常考勤 ${rows.filter((row) => row.has_exception).length} 条，已按 0 工时/0 费用计入薪资` : null,
       calculated_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
@@ -1803,7 +1888,7 @@ async function getPayrollSourceContext(employeeId, yearMonth, ownerUserId) {
     supabase.from("employees").select("*").eq("owner_user_id", ownerUserId).eq("id", Number(employeeId)).maybeSingle(),
     supabase.from("monthly_attendance_summaries").select("*").eq("owner_user_id", ownerUserId).eq("employee_id", Number(employeeId)).eq("year_month", yearMonth).limit(1),
     supabase.from("salary_adjustment_items").select("*").eq("owner_user_id", ownerUserId).eq("employee_id", Number(employeeId)).eq("year_month", yearMonth).order("created_at", { ascending: false }),
-    supabase.from("attendance_calculation_results").select("attendance_rule_id, valid_hours, overtime_pay_hours").eq("owner_user_id", ownerUserId).eq("employee_id", Number(employeeId)).gte("date", `${yearMonth}-01`).lte("date", monthEndDate),
+    supabase.from("attendance_calculation_results").select("attendance_rule_id, date, status, valid_hours, overtime_pay_hours, has_exception, exception_reason, note").eq("owner_user_id", ownerUserId).eq("employee_id", Number(employeeId)).gte("date", `${yearMonth}-01`).lte("date", monthEndDate),
     supabase.from("attendance_rules").select("id, ot_hourly_fee").eq("owner_user_id", ownerUserId),
     supabase.from("monthly_payroll_results").select("*").eq("owner_user_id", ownerUserId).eq("employee_id", Number(employeeId)).eq("year_month", yearMonth).maybeSingle()
   ]);
@@ -1918,7 +2003,10 @@ function buildMonthlyPayrollPayloadFromContext(context, yearMonth, ownerUserId, 
   const grossPay = roundToTwo(basePay + serviceFeeAmount + overtimePay + attendanceBonus + allowanceTotal + otherTotal);
   const totalDeduction = roundToTwo(socialSecurity + deductionTotal);
   const netPay = roundToTwo(grossPay - totalDeduction);
-  const isBlockedByAttendance = attendanceSummary?.can_generate_payroll === false;
+  const exceptionCount = Number(attendanceSummary?.exception_count || 0);
+  const payrollExceptionNote = exceptionCount > 0
+    ? (attendanceSummary?.blocked_reason || `异常考勤 ${exceptionCount} 条，已按 0 工时/0 费用计入薪资`)
+    : null;
 
   return {
     employee_id: Number(employee.id),
@@ -1941,10 +2029,10 @@ function buildMonthlyPayrollPayloadFromContext(context, yearMonth, ownerUserId, 
     gross_pay: grossPay,
     total_deduction: totalDeduction,
     net_pay: netPay,
-    // 列表预览行必须体现考勤异常，真实生成入口会再次硬拦截，避免 UI 和后端业务规则分叉。
-    calculation_status: isBlockedByAttendance ? "blocked" : (previewOnly ? "draft" : "calculated"),
+    // 异常考勤不再阻断薪资：异常日的日计算行已经是 0 工时/0 费用，这里只把说明沉淀给列表和工资条追溯。
+    calculation_status: previewOnly ? "draft" : "calculated",
     review_status: forceRecalculate || existingPayrollResult ? "pending" : (existingPayrollResult?.review_status || "pending"),
-    blocked_reason: isBlockedByAttendance ? (attendanceSummary.blocked_reason || "存在未处理异常考勤记录") : null,
+    blocked_reason: payrollExceptionNote,
     calculated_at: previewOnly ? null : new Date().toISOString(),
     confirmed_at: existingPayrollResult?.calculation_status === "confirmed" ? existingPayrollResult.confirmed_at : null,
     updated_at: new Date().toISOString()
@@ -1966,11 +2054,7 @@ async function calculateMonthlyPayroll(employeeId, yearMonth, ownerUserId, { ski
     };
   }
 
-  // 考勤汇总是薪资生成的前置契约：有未处理异常时，后端必须硬拦截，不能只靠前端按钮状态提示。
-  if (attendanceSummary?.can_generate_payroll === false) {
-    throw new Error(attendanceSummary.blocked_reason || "存在未处理异常考勤记录，不能生成工资");
-  }
-
+  // 异常考勤已经由日计算行按 0 工时/0 费用进入汇总；薪资重算只保留说明，不再把异常作为生成阻断条件。
   const lockError = getPayrollResultLockError(existingPayrollResult);
   if (lockError) {
     throw new Error(lockError);
@@ -2318,7 +2402,8 @@ async function bootstrapWorkspaceData(ownerUserId, authUser) {
         out_time: "18:10",
         type: "normal",
         source: "device",
-        note: "初始化记录-正常加班",
+        // 初始化数据会直接进入考勤和工资单详情；备注必须使用业务含义，不能暴露“初始化/示例”等开发过程文案。
+        note: "正常加班",
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       }, ownerUserId),
@@ -2329,7 +2414,8 @@ async function bootstrapWorkspaceData(ownerUserId, authUser) {
         out_time: "22:00",
         type: "normal",
         source: "device",
-        note: "初始化记录-正常班次",
+        // 初始化数据会直接进入考勤和工资单详情；备注必须使用业务含义，不能暴露“初始化/示例”等开发过程文案。
+        note: "正常班次",
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       }, ownerUserId)
@@ -2344,7 +2430,8 @@ async function bootstrapWorkspaceData(ownerUserId, authUser) {
         out_time: null,
         type: "normal",
         source: "device",
-        note: "初始化记录-异常缺下班卡",
+        // 初始化数据会直接进入考勤和工资单详情；备注必须使用业务含义，不能暴露“初始化/示例”等开发过程文案。
+        note: "缺下班卡",
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       }, ownerUserId),
@@ -2355,7 +2442,8 @@ async function bootstrapWorkspaceData(ownerUserId, authUser) {
         out_time: null,
         type: "leave",
         source: "manual",
-        note: "初始化记录-请假",
+        // 初始化数据会直接进入考勤和工资单详情；备注必须使用业务含义，不能暴露“初始化/示例”等开发过程文案。
+        note: "请假",
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       }, ownerUserId)
@@ -2370,7 +2458,8 @@ async function bootstrapWorkspaceData(ownerUserId, authUser) {
         out_time: "17:35",
         type: "normal",
         source: "device",
-        note: "初始化记录-标准工时",
+        // 初始化数据会直接进入考勤和工资单详情；备注必须使用业务含义，不能暴露“初始化/示例”等开发过程文案。
+        note: "标准工时",
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       }, ownerUserId)
@@ -2396,7 +2485,8 @@ async function bootstrapWorkspaceData(ownerUserId, authUser) {
         type: "allowance",
         name: "餐补",
         amount: 350,
-        note: "初始化记录",
+        // 工资条会展示一次性薪资项备注；默认薪资项不写初始化备注，避免业务页面出现开发/种子数据文案。
+        note: "",
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       }, ownerUserId),
@@ -2406,7 +2496,8 @@ async function bootstrapWorkspaceData(ownerUserId, authUser) {
         type: "other",
         name: "绩效奖金",
         amount: 500,
-        note: "初始化记录",
+        // 工资条会展示一次性薪资项备注；默认薪资项不写初始化备注，避免业务页面出现开发/种子数据文案。
+        note: "",
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       }, ownerUserId)
@@ -2862,12 +2953,15 @@ app.get("/api/admin/dashboard", async (req, res) => {
     const [employeesResult, calculationsResult, attendanceConfig] = await Promise.all([
       supabase
         .from("employees")
-        .select("*")
+        // 数据看板只需要员工基础展示和统计字段；禁止在这里恢复 select("*")，否则 photo 等大字段会让看板接口重新膨胀到 MB 级。
+        // 员工详情页仍由员工接口负责读取完整档案，本接口只保护看板首屏加载速度和现有 DashboardData 契约。
+        .select("id, employee_no, name, nickname, dept, role, status, currency")
         .eq("owner_user_id", ownerUserId)
         .order("id", { ascending: true }),
       supabase
         .from("attendance_calculation_results")
-        .select("*")
+        // 看板统计仅依赖这些考勤结果字段；按需列选择可以降低 Supabase 传输、Vercel JSON 处理和浏览器解析成本。
+        .select("employee_id, date, status, valid_hours, overtime_pay_hours, overtime_pay, has_exception")
         .eq("owner_user_id", ownerUserId)
         .order("date", { ascending: true }),
       resolveAttendanceConfig(ownerUserId)
@@ -2884,6 +2978,17 @@ app.get("/api/admin/dashboard", async (req, res) => {
     const activeStatuses = new Set(["active", "probation"]);
     const activeEmployees = employees.filter((row) => activeStatuses.has(row.status));
     const activeEmployeeIds = new Set(activeEmployees.map((row) => Number(row.id)));
+    // 部门统计和员工统计都会按 employee_id 反查员工；集中建 Map，避免数据量增长后在循环中反复 find。
+    const activeEmployeeMap = new Map(activeEmployees.map((row) => [Number(row.id), row]));
+    // 员工排行仍保持原有“按员工汇总所有历史计算结果”的契约，只把重复 filter 合并为一次分组，避免 N 员工 × M 结果的重复扫描。
+    const calculationsByEmployeeId = new Map();
+    calculations.forEach((row) => {
+      const employeeId = Number(row.employee_id);
+      if (!calculationsByEmployeeId.has(employeeId)) {
+        calculationsByEmployeeId.set(employeeId, []);
+      }
+      calculationsByEmployeeId.get(employeeId).push(row);
+    });
     const totalEmployeeCount = employees.length;
     const activeEmployeeCount = activeEmployees.length;
     const inactiveEmployeeCount = Math.max(0, totalEmployeeCount - activeEmployeeCount);
@@ -2910,7 +3015,7 @@ app.get("/api/admin/dashboard", async (req, res) => {
 
     const employeeStats = activeEmployees
       .map((employee) => {
-        const employeeCalculations = calculations.filter((row) => Number(row.employee_id) === Number(employee.id));
+        const employeeCalculations = calculationsByEmployeeId.get(Number(employee.id)) || [];
         const workedCalculations = employeeCalculations.filter((row) => row.status !== "absent" && row.status !== "leave" && Number(row.valid_hours || 0) > 0);
         const totalValidHours = roundToTwo(employeeCalculations.reduce((sum, row) => sum + Number(row.valid_hours || 0), 0));
         const totalOvertimeHours = roundToTwo(employeeCalculations.reduce((sum, row) => sum + Number(row.overtime_pay_hours || 0), 0));
@@ -2926,7 +3031,8 @@ app.get("/api/admin/dashboard", async (req, res) => {
           employeeNickname: employee.nickname || "",
           employeeDept: employee.dept || "未分配",
           employeeRole: employee.role || "",
-          employeePhoto: employee.photo || null,
+          // photo 当前可能是 base64 大字段；看板先返回 null 保持字段契约，后续头像迁移到 URL/缩略图后再按需接入。
+          employeePhoto: null,
           totalValidHours,
           totalOvertimeHours,
           daysWorked,
@@ -2955,7 +3061,7 @@ app.get("/api/admin/dashboard", async (req, res) => {
       if (!activeEmployeeIds.has(Number(row.employee_id)) || row.status === "absent" || row.status === "leave") {
         return;
       }
-      const employee = activeEmployees.find((item) => Number(item.id) === Number(row.employee_id));
+      const employee = activeEmployeeMap.get(Number(row.employee_id));
       const deptName = employee?.dept || "未分配";
       const dept = departmentMap.get(deptName);
       if (!dept) {
@@ -3320,10 +3426,56 @@ app.get("/api/admin/attendance-calculations", async (req, res) => {
     }
 
     const monthRange = yearMonth ? getMonthRange(yearMonth) : null;
+    // v2 考勤页列表只展示/导出 mapAttendanceCalculationRow 需要的结果字段；不要恢复 select("*")，否则新增列会无边界进入列表接口。
+    const calculationListFields = [
+      "id",
+      "employee_id",
+      "attendance_record_id",
+      "date",
+      "raw_in_time",
+      "raw_out_time",
+      "raw_hours",
+      "break_deduction_hours",
+      "valid_hours",
+      "standard_hours",
+      "overtime_raw_hours",
+      "overtime_pay_hours",
+      "work_pay",
+      "meal_allowance_amount",
+      "overtime_pay",
+      "total_pay",
+      "status",
+      "has_exception",
+      "exception_reason",
+      "note",
+      "source",
+      "calculated_at"
+    ].join(", ");
+    // 员工表里 photo 可能是 base64 大字段；考勤列表只需要员工身份/筛选/薪资展示字段，头像保留为 null 由前端首字兜底。
+    // 如果未来要显示头像，应先把员工头像迁移为 URL/缩略图字段，再在这里显式接入，避免接口重新膨胀到 MB 级。
+    const attendanceEmployeeListFields = [
+      "id",
+      "employee_no",
+      "name",
+      "gender",
+      "country",
+      "role",
+      "dept",
+      "status",
+      "is_deleted",
+      "salary_type",
+      "hourly_rate",
+      "fixed_salary",
+      // 服务费列依赖员工档案比例派生金额；这里必须显式选择，不能为了精简列表字段漏掉计费口径。
+      "service_fee_rate",
+      "currency",
+      "join_date"
+    ].join(", ");
+
     // v2 考勤页支持“全部时间”；没有 yearMonth/date 时保留全量列表查询，只有按月筛选才加月份范围。
     let calculationQuery = supabase
       .from("attendance_calculation_results")
-      .select("*")
+      .select(calculationListFields)
       .eq("owner_user_id", ownerUserId)
       .order("date", { ascending: false })
       .order("employee_id", { ascending: true });
@@ -3336,11 +3488,13 @@ app.get("/api/admin/attendance-calculations", async (req, res) => {
         .lte("date", monthRange.periodEndDate);
     }
 
-    const calculationsResult = await calculationQuery;
-    const employeesResult = await supabase
-      .from("employees")
-      .select("*")
-      .eq("owner_user_id", ownerUserId);
+    const [calculationsResult, employeesResult] = await Promise.all([
+      calculationQuery,
+      supabase
+        .from("employees")
+        .select(attendanceEmployeeListFields)
+        .eq("owner_user_id", ownerUserId)
+    ]);
 
     if (calculationsResult.error) {
       throw calculationsResult.error;
@@ -3757,22 +3911,61 @@ app.get("/api/admin/payroll-results", async (req, res) => {
       return res.status(400).json({ error: "yearMonth 必须为 YYYY-MM" });
     }
 
-    const employeesResult = await supabase
-      .from("employees")
-      .select("*")
-      .eq("owner_user_id", ownerUserId)
-      .eq("is_deleted", false)
-      .order("id", { ascending: true });
-
-    if (employeesResult.error) {
-      throw employeesResult.error;
-    }
-
     const employeeId = req.query.employeeId ? Number(req.query.employeeId) : null;
     const keyword = String(req.query.keyword || "").trim().toLowerCase();
     const salaryType = String(req.query.salaryType || "all");
     const calculationStatus = String(req.query.calculationStatus || "all");
     const reviewStatus = String(req.query.reviewStatus || "all");
+    const monthEndDate = getMonthEndDate(yearMonth);
+
+    const [employeesResult, payrollResultsResult, summariesResult, adjustmentItemsResult, dailyCalculationsResult, rulesResult, salaryProfilesResult] = await Promise.all([
+      supabase
+        .from("employees")
+        // 薪资列表只需要基础身份和计薪字段；禁止恢复 select("*")，否则 photo 等大字段会让列表接口重新膨胀到 MB 级。
+        .select(PAYROLL_LIST_EMPLOYEE_COLUMNS)
+        .eq("owner_user_id", ownerUserId)
+        .eq("is_deleted", false)
+        .order("id", { ascending: true }),
+      supabase
+        .from("monthly_payroll_results")
+        .select("*")
+        .eq("owner_user_id", ownerUserId)
+        .eq("year_month", yearMonth),
+      supabase
+        .from("monthly_attendance_summaries")
+        .select("*")
+        .eq("owner_user_id", ownerUserId)
+        .eq("year_month", yearMonth),
+      supabase
+        .from("salary_adjustment_items")
+        .select("*")
+        .eq("owner_user_id", ownerUserId)
+        .eq("year_month", yearMonth)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("attendance_calculation_results")
+        // 异常详情弹窗依赖日级原因；这里只取薪资公式和异常展示需要的列，避免整月考勤结果宽表拖慢列表。
+        .select("employee_id, attendance_rule_id, date, status, valid_hours, overtime_pay_hours, has_exception, exception_reason, note")
+        .eq("owner_user_id", ownerUserId)
+        .gte("date", `${yearMonth}-01`)
+        .lte("date", monthEndDate),
+      supabase
+        .from("attendance_rules")
+        .select("id, ot_hourly_fee")
+        .eq("owner_user_id", ownerUserId),
+      supabase
+        .from("salary_profiles")
+        .select("*")
+        .eq("owner_user_id", ownerUserId)
+        .lte("effective_start_date", monthEndDate)
+    ]);
+
+    for (const result of [employeesResult, payrollResultsResult, summariesResult, adjustmentItemsResult, dailyCalculationsResult, rulesResult, salaryProfilesResult]) {
+      if (result.error) {
+        throw result.error;
+      }
+    }
+
     const targetEmployees = employeesResult.data.filter((employee) => {
       // 薪资核算主列表必须以当前可参与考勤/薪资的员工为准；历史停用/离职员工的工资结果只保留在库里，不进入当期工作流。
       if (!isEmployeeAvailableForAttendanceAndPayroll(employee)) {
@@ -3784,15 +3977,28 @@ app.get("/api/admin/payroll-results", async (req, res) => {
       return true;
     });
     const employeeMap = new Map(targetEmployees.map((row) => [Number(row.id), row]));
-    const rows = [];
+    const batch = {
+      payrollResultsByEmployeeId: groupRowsByEmployeeId(payrollResultsResult.data || []),
+      summariesByEmployeeId: groupRowsByEmployeeId(summariesResult.data || []),
+      adjustmentItemsByEmployeeId: groupRowsByEmployeeId(adjustmentItemsResult.data || []),
+      dailyCalculationsByEmployeeId: groupRowsByEmployeeId(dailyCalculationsResult.data || []),
+      salaryProfilesByEmployeeId: groupRowsByEmployeeId(salaryProfilesResult.data || []),
+      ruleFeeMap: new Map((rulesResult.data || []).map((row) => [Number(row.id), Number(row.ot_hourly_fee)]))
+    };
 
-    for (const employee of targetEmployees) {
-      const context = await getPayrollSourceContext(Number(employee.id), yearMonth, ownerUserId);
+    const rows = targetEmployees.map((employee) => {
+      // 旧实现按员工逐个 getPayrollSourceContext，导致 1 + N * 7 次 Supabase 查询；列表页改为月度批量取数后只在内存中组装上下文。
+      // 真实生成/重算仍走 calculateMonthlyPayroll，继续保留锁定校验、薪资档案补建和写库逻辑，避免只为列表预览引入 GET 副作用。
+      const context = buildPayrollSourceContextFromBatch(employee, yearMonth, ownerUserId, batch);
       const mappedRow = context.existingPayrollResult
         ? mapPayrollResultRow(context.existingPayrollResult, employeeMap)
         : mapPayrollResultRow(buildPayrollPreviewRow(buildMonthlyPayrollPayloadFromContext(context, yearMonth, ownerUserId, { previewOnly: true })), employeeMap);
-      rows.push(mappedRow);
-    }
+      // 异常图标并入员工详情列后，列表行必须直接携带日级异常明细，弹窗才能展示“哪天异常、原因是什么”。
+      return {
+        ...mappedRow,
+        exceptionDetails: buildPayrollExceptionDetails(context.dailyCalculations)
+      };
+    });
 
     const filteredRows = rows.filter((row) => {
       if (keyword) {

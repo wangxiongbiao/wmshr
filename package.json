@@ -17,6 +17,7 @@
     "lint": "npm run lint --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
     "check:i18n": "node scripts/check-i18n-hardcoded.mjs",
+    "restart:dev": "bash scripts/restart-dev-services.sh",
     "deploy:prod": "bash scripts/deploy-production.sh"
   },
   "overrides": {

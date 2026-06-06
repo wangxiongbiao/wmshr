@@ -4,6 +4,7 @@
  */
 
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { tAdmin } from "../lib/i18nText";
 import { AlertCircle, Calendar, Check, CheckCircle2, Clock, DollarSign, Download, Receipt, RefreshCw, Search, TrendingUp } from "lucide-react";
 import type {
@@ -24,6 +25,7 @@ import {
 import { useDialog } from "./DialogProvider";
 import { ModalShell } from "./ModalShell";
 import { cn, formatCurrency, formatDuration, getSalaryTypeLabel } from "../lib/utils";
+import { Pagination } from "./Pagination";
 
 interface PayrollTableProps {
   employees: Employee[];
@@ -80,10 +82,15 @@ function Modal({
 
 export function PayrollTable({ employees }: PayrollTableProps) {
   const { confirm, prompt } = useDialog();
+  const { i18n } = useTranslation("admin");
+  // PayrollTable 的可见文案仍集中通过 tAdmin() 渲染；这里显式订阅 react-i18next 语言状态，保证 Header 切换语言后整块薪资核算 UI 会重新渲染，而不是继续显示旧语言。
+  const translationRenderLanguage = i18n.resolvedLanguage || i18n.language;
   const [keyword, setKeyword] = useState("");
   const [yearMonth, setYearMonth] = useState(getDefaultYearMonth());
   const [calculationStatus, setCalculationStatus] = useState("all");
   const [reviewStatus, setReviewStatus] = useState("all");
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [results, setResults] = useState<MonthlyPayrollResult[]>([]);
@@ -92,6 +99,7 @@ export function PayrollTable({ employees }: PayrollTableProps) {
   const [isPayslipOpen, setIsPayslipOpen] = useState(false);
   const [signName, setSignName] = useState("");
   const [isCashPaid, setIsCashPaid] = useState(false);
+  const [exceptionResult, setExceptionResult] = useState<MonthlyPayrollResult | null>(null);
   const [hasLoadedResultsOnce, setHasLoadedResultsOnce] = useState(false);
   const [hasPromptedAutoGenerate, setHasPromptedAutoGenerate] = useState(false);
   const autoGeneratePromptingRef = useRef(false);
@@ -193,12 +201,8 @@ export function PayrollTable({ employees }: PayrollTableProps) {
   const openPayslip = async (result: MonthlyPayrollResult) => {
     setSubmitting(true);
     try {
-      if (result.calculationStatus === "blocked") {
-        setError(result.blockedReason || tAdmin("存在未处理异常考勤记录，不能生成工资条"));
-        return;
-      }
-      // 薪资列表现在会返回“在职员工 + 考勤汇总”的待生成预览行；预览行没有真实结果 id，必须先单人工资生成再拉详情。
-      // 不能直接拿 id=0 调详情接口，否则会重新暴露旧的“只有已生成结果才可进入工资条”的断层。
+      // 异常薪资不再在动作列硬拦截；异常说明统一放到员工列左侧入口和异常详情弹窗，工资条生成/查看仍按正常发放流程走。
+      // 预览行没有真实结果 id，必须先单人工资生成再拉详情，不能直接拿 id<=0 调详情接口。
       const sourceResult = result.id > 0 ? result : await generateOnePayroll(result.employeeId, result.yearMonth);
       const nextDetail = await fetchPayrollResultDetail(sourceResult.id);
       // v2 工资条是发放签收入口，必须用详情接口拿到员工、薪资项和汇总，不能用列表行直接确认。
@@ -336,12 +340,11 @@ export function PayrollTable({ employees }: PayrollTableProps) {
   };
 
   const applyPayoutStatusFilter = (status: "all" | "pending" | "paid") => {
-    // v2 薪资页按“待发放/已发放”理解状态；后端仍用 review/calculation 状态表达，前端只做映射，不把旧状态筛选暴露成主入口。
+    // v2 薪资页按“待发/已发”理解发放状态；这里只更新筛选状态，统一交给 useEffect 加载，避免按钮点击时手动 loadData 和状态变化各触发一次请求。
     const nextCalculationStatus = status === "paid" ? "confirmed" : "all";
     const nextReviewStatus = status === "pending" ? "pending" : "all";
     setCalculationStatus(nextCalculationStatus);
     setReviewStatus(nextReviewStatus);
-    void loadData({ calculationStatus: nextCalculationStatus, reviewStatus: nextReviewStatus });
   };
 
   const handleExportCSV = () => {
@@ -361,7 +364,7 @@ export function PayrollTable({ employees }: PayrollTableProps) {
       item.socialSecurityAmount.toFixed(2),
       item.totalDeduction.toFixed(2),
       item.netPay.toFixed(2),
-      item.calculationStatus === "confirmed" ? tAdmin("已发放") : tAdmin("待发放"),
+      item.calculationStatus === "confirmed" ? tAdmin("已发") : tAdmin("待发"),
       item.currency
     ]);
     const csvContent = "\uFEFF" + [headers.join(","), ...rows.map((row) => row.join(","))].join("\n");
@@ -408,6 +411,15 @@ export function PayrollTable({ employees }: PayrollTableProps) {
       progressPct: results.length > 0 ? (confirmedCount / results.length) * 100 : 0
     };
   }, [results]);
+  useEffect(() => {
+    // 搜索、状态或月份筛选会重新加载 results；分页回到第一页，避免保留旧页码后出现空表格。
+    setPage(1);
+  }, [results]);
+
+  const paginatedResults = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return results.slice(start, start + pageSize);
+  }, [page, results]);
   const payoutFilter = calculationStatus === "confirmed" ? "paid" : reviewStatus === "pending" ? "pending" : "all";
   const payslipResult = payslipDetail?.result || null;
   const payslipEmployee = payslipDetail?.employee || null;
@@ -420,10 +432,11 @@ export function PayrollTable({ employees }: PayrollTableProps) {
   const payslipAllowanceItems = payslipDetail?.adjustmentItems.filter((item) => item.type === "allowance") || [];
   const payslipOtherItems = payslipDetail?.adjustmentItems.filter((item) => item.type === "other") || [];
   const payslipDeductionItems = payslipDetail?.adjustmentItems.filter((item) => item.type === "deduction") || [];
-
+  const payslipIncomeAdjustmentItems = payslipAllowanceItems.concat(payslipOtherItems);
+  const payslipStandardPaidHours = payslipResult ? Math.max(0, payslipResult.validHours - payslipResult.overtimePayHours) : 0;
 
   return (
-    <div className="h-full min-h-0 flex flex-col gap-6">
+    <div className="h-full min-h-0 flex flex-col gap-6" data-i18n-language={translationRenderLanguage}>
       <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-lg bg-green-50 text-green-600 flex items-center justify-center font-bold shadow-inner">
@@ -560,13 +573,13 @@ export function PayrollTable({ employees }: PayrollTableProps) {
               onClick={() => applyPayoutStatusFilter("pending")}
               className={cn("px-3 py-1.5 text-xs font-semibold rounded-lg transition-all", payoutFilter === "pending" ? "bg-amber-500 text-white shadow-sm" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-100")}
             >
-              {tAdmin("⏳ 待发放 ({{count}})", { count: payrollMetrics.pendingCount })}
+              ⏳ {tAdmin("待发")} ({payrollMetrics.pendingCount})
             </button>
             <button
               onClick={() => applyPayoutStatusFilter("paid")}
               className={cn("px-3 py-1.5 text-xs font-semibold rounded-lg transition-all", payoutFilter === "paid" ? "bg-emerald-600 text-white shadow-sm" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-100")}
             >
-              {tAdmin("✅ 已发放 ({{count}})", { count: payrollMetrics.confirmedCount })}
+              ✅ {tAdmin("已发")} ({payrollMetrics.confirmedCount})
             </button>
           </div>
 
@@ -610,23 +623,35 @@ export function PayrollTable({ employees }: PayrollTableProps) {
                     <th className="px-6 py-3.5 font-semibold text-right text-green-600">{tAdmin("加班费")}</th>
                     <th className="px-6 py-3.5 font-semibold text-right text-amber-600">{tAdmin("服务费")}</th>
                     <th className="px-6 py-3.5 font-semibold text-right text-blue-700">{tAdmin("税后实发 (总额)")}</th>
-                    <th className="px-6 py-3.5 font-semibold text-center">{tAdmin("发放状态 / 动作")}</th>
+                    <th className="px-3 py-3.5 font-semibold text-center">{tAdmin("状态")}</th>
+                    <th className="px-4 py-3.5 font-semibold text-center">{tAdmin("动作")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {results.map((item) => {
+                  {paginatedResults.map((item) => {
                     // v2 原型展示“上班天数”；正式接口当前给的是月度汇总工时，因此按标准工时折算天数，后续接口若返回天数再直接替换这里。
                     const workingDays = item.standardHours > 0 ? Math.round(item.validHours / item.standardHours) : 0;
                     const isPaid = item.calculationStatus === "confirmed";
-                    const isBlocked = item.calculationStatus === "blocked";
-                    const isDraft = item.calculationStatus === "draft";
+                    const hasException = Boolean(item.blockedReason || item.exceptionDetails?.length);
                     const baseSalary = item.salaryType === "fixed"
                       ? formatCurrency(item.fixedSalary || 0, item.currency)
                       : formatCurrency(item.hourlyPay, item.currency);
 
                     return (
                       <tr key={item.id} className="hover:bg-slate-50/70 border-b border-slate-100 bg-white transition-colors">
-                        <td className="px-6 py-4">
+                        <td className="relative px-6 py-4">
+                          {hasException ? (
+                            <button
+                              type="button"
+                              onClick={() => setExceptionResult(item)}
+                              title={tAdmin("查看异常详情")}
+                              aria-label={tAdmin("查看异常详情")}
+                              className="absolute left-1.5 top-1.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-200 transition hover:bg-amber-100 hover:text-amber-800"
+                            >
+                              {/* 异常入口固定在员工单元格左上角，只保留图标，避免占用员工信息横向宽度；点击仍统一打开异常详情弹窗。 */}
+                              <AlertCircle className="h-3.5 w-3.5" />
+                            </button>
+                          ) : null}
                           <div className="flex items-center gap-3">
                             <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 font-bold overflow-hidden border-2 border-white shadow-sm flex-shrink-0">
                               {item.employeePhoto ? (
@@ -669,35 +694,32 @@ export function PayrollTable({ employees }: PayrollTableProps) {
                             {formatCurrency(item.netPay, item.currency)}
                           </span>
                         </td>
-                        <td className="px-6 py-4 text-center">
+                        <td className="px-3 py-4 text-center">
+                          <span className={cn(
+                            "inline-flex items-center justify-center gap-1 rounded-lg border px-2 py-1 text-xs font-semibold whitespace-nowrap",
+                            isPaid
+                              ? "border-emerald-100 bg-emerald-50 text-emerald-700"
+                              : "border-amber-100 bg-amber-50 text-amber-700"
+                          )}>
+                            {isPaid ? <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" /> : null}
+                            {isPaid ? tAdmin("已发") : tAdmin("待发")}
+                          </span>
+                        </td>
+                        <td className="px-4 py-4 text-center">
                           <div className="flex flex-col items-center justify-center gap-2">
                             <div className="flex items-center justify-center gap-1.5">
-                              <span className={cn(
-                                "inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-lg border",
-                                isPaid
-                                  ? "text-emerald-700 bg-emerald-50 border-emerald-100"
-                                  : isBlocked
-                                    ? "text-rose-700 bg-rose-50 border-rose-100"
-                                    : "text-amber-700 bg-amber-50 border-amber-100"
-                              )}>
-                                {isPaid ? <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse" /> : null}
-                                {isPaid ? tAdmin("已发放") : isBlocked ? tAdmin("考勤异常") : isDraft ? tAdmin("待生成") : tAdmin("待发放")}
-                              </span>
                               <button
                                 onClick={() => void openPayslip(item)}
-                                disabled={submitting || isBlocked}
+                                disabled={submitting}
                                 className={cn(
                                   "px-2.5 py-1 text-xs font-semibold rounded-lg transition flex items-center gap-1 disabled:opacity-50",
-                                  isBlocked
-                                    ? "text-rose-600 bg-rose-50 border border-rose-100 cursor-not-allowed"
-                                    : isPaid
+                                  isPaid
                                     ? "text-brand-700 bg-brand-50 border border-brand-100 hover:bg-brand-100"
                                     : "text-white bg-brand-600 hover:bg-brand-700 shadow-sm hover:shadow"
                                 )}
-                                title={isBlocked ? item.blockedReason || tAdmin("存在未处理异常考勤记录") : undefined}
                               >
                                 <Receipt className="w-3 h-3" />
-                                <span>{isBlocked ? tAdmin("先处理考勤") : isPaid ? tAdmin("查看工资条") : tAdmin("生成工资条")}</span>
+                                <span>{isPaid ? tAdmin("查看工资条") : tAdmin("生成工资条")}</span>
                               </button>
                             </div>
                           </div>
@@ -709,15 +731,90 @@ export function PayrollTable({ employees }: PayrollTableProps) {
               </table>
             </div>
 
-            <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row justify-between items-center text-xs text-slate-500">
-              <div>{tAdmin("当前列表共显示")}<span className="font-bold text-slate-700">{results.length}</span>{tAdmin("名员工的计算记录")}</div>
-              <div>{tAdmin("薪资发放由人事及仓库管理员校对后，可通过")}<span className="font-bold text-slate-700">{tAdmin("【生成工资条】")}</span>{tAdmin("开启独立签收单，一键核对实缴")}</div>
+            <div className="space-y-4 border-t border-slate-100 bg-slate-50 p-4">
+              <Pagination
+                page={page}
+                pageSize={pageSize}
+                total={results.length}
+                itemName={tAdmin("名员工")}
+                disabled={loading || submitting}
+                onPageChange={setPage}
+              />
+              <div className="flex flex-col sm:flex-row justify-between items-center text-xs text-slate-500">
+                <div>{tAdmin("当前筛选共显示")}<span className="font-bold text-slate-700">{results.length}</span>{tAdmin("名员工的计算记录")}</div>
+                <div>{tAdmin("薪资发放由人事及仓库管理员校对后，可通过")}<span className="font-bold text-slate-700">{tAdmin("【生成工资条】")}</span>{tAdmin("开启独立签收单，一键核对实缴")}</div>
+              </div>
             </div>
           </div>
         )}
         </div>
       </div>
 
+      <Modal
+        isOpen={Boolean(exceptionResult)}
+        title={tAdmin("异常详情")}
+        onClose={() => setExceptionResult(null)}
+        className="max-w-md"
+        footer={(
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => setExceptionResult(null)}
+              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
+            >
+              {tAdmin("知道了")}
+            </button>
+          </div>
+        )}
+      >
+        {exceptionResult ? (
+          <div className="space-y-4 text-sm text-slate-700">
+            <div className="rounded-xl border border-amber-100 bg-amber-50 p-4 text-amber-800">
+              <div className="mb-2 flex items-center gap-2 font-bold">
+                <AlertCircle className="h-4 w-4" />
+                <span>{tAdmin("该薪资数据有异常")}</span>
+              </div>
+              <p className="leading-6">{exceptionResult.blockedReason || tAdmin("存在异常考勤数据，已按当前薪资规则参与核算。")}</p>
+            </div>
+            <div className="rounded-xl border border-slate-100 bg-white p-4 text-xs">
+              <p className="mb-3 font-bold text-slate-700">{tAdmin("异常考勤明细")}</p>
+              {exceptionResult.exceptionDetails?.length ? (
+                <div className="space-y-2">
+                  {exceptionResult.exceptionDetails.map((detail) => (
+                    <div key={`${detail.date}-${detail.reason}`} className="rounded-lg border border-amber-100 bg-amber-50/60 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-mono font-bold text-slate-800">{detail.date}</span>
+                        <span className="rounded-full bg-white px-2 py-0.5 font-semibold text-amber-700 ring-1 ring-amber-100">{detail.statusLabel}</span>
+                      </div>
+                      <p className="mt-2 leading-5 text-slate-700">{detail.reason}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="leading-5 text-slate-500">{exceptionResult.blockedReason || tAdmin("暂无具体异常明细，请先重新结算当月考勤。")}</p>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-3 rounded-xl border border-slate-100 bg-white p-4 text-xs">
+              <div>
+                <p className="text-slate-400">{tAdmin("员工")}</p>
+                <p className="mt-1 font-semibold text-slate-800">{exceptionResult.employeeName}</p>
+              </div>
+              <div>
+                <p className="text-slate-400">{tAdmin("月份")}</p>
+                <p className="mt-1 font-mono font-semibold text-slate-800">{exceptionResult.yearMonth}</p>
+              </div>
+              <div>
+                <p className="text-slate-400">{tAdmin("状态")}</p>
+                <p className="mt-1 font-semibold text-slate-800">{exceptionResult.calculationStatus === "confirmed" ? tAdmin("已发") : tAdmin("待发")}</p>
+              </div>
+              <div>
+                <p className="text-slate-400">{tAdmin("实发")}</p>
+                <p className="mt-1 font-mono font-semibold text-slate-800">{formatCurrency(exceptionResult.netPay, exceptionResult.currency)}</p>
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
 
       <Modal
         isOpen={isPayslipOpen}
@@ -779,35 +876,61 @@ export function PayrollTable({ employees }: PayrollTableProps) {
             </div>
 
             <div className="space-y-2 border-y border-dashed border-slate-200 py-3.5 font-mono text-xs">
-              <div className="flex justify-between"><span className="text-slate-500">{tAdmin("标准计薪时限 (每日):")}</span><span className="font-semibold text-slate-800">{formatDuration(payslipResult.standardHours)}</span></div>
-              <div className="flex justify-between"><span className="text-slate-500">{tAdmin("本月有效上班天数:")}</span><span className="font-bold text-slate-800">{tAdmin("{{days}} 天", { days: payslipWorkingDays })}</span></div>
-              <div className="flex justify-between"><span className="text-slate-500">{tAdmin("本月累计上班工时:")}</span><span className="font-semibold text-slate-800">{formatDuration(payslipResult.validHours)}</span></div>
-              <div className="flex justify-between"><span className="text-slate-500">{tAdmin("本月有效加班工时:")}</span><span className="font-bold text-blue-600">{formatDuration(payslipResult.overtimePayHours)}</span></div>
+              {/* Payslip hour labels keep defaultValue deliberately: employee-facing payroll checks must show a readable label even if a locale resource is temporarily empty. */}
+              <div className="grid grid-cols-[minmax(180px,1fr)_auto] items-center gap-3"><span className="min-w-0 whitespace-nowrap font-medium text-slate-600">{tAdmin("标准计薪时限（每日标准工时）:", { defaultValue: "标准计薪时限（每日标准工时）:" })}</span><span className="font-semibold text-slate-800">{formatDuration(payslipResult.standardHours)}</span></div>
+              <div className="grid grid-cols-[minmax(180px,1fr)_auto] items-center gap-3"><span className="min-w-0 whitespace-nowrap font-medium text-slate-600">{tAdmin("本月有效上班天数:", { defaultValue: "本月有效上班天数:" })}</span><span className="font-bold text-slate-800">{tAdmin("{{days}} 天", { days: payslipWorkingDays })}</span></div>
+              <div className="grid grid-cols-[minmax(180px,1fr)_auto] items-center gap-3"><span className="min-w-0 whitespace-nowrap font-medium text-slate-600">{tAdmin("本月累计上班工时:", { defaultValue: "本月累计上班工时:" })}</span><span className="font-semibold text-slate-800">{formatDuration(payslipResult.validHours)}</span></div>
+              <div className="grid grid-cols-[minmax(180px,1fr)_auto] items-center gap-3"><span className="min-w-0 whitespace-nowrap font-medium text-slate-600">{tAdmin("本月有效加班工时:", { defaultValue: "本月有效加班工时:" })}</span><span className="font-bold text-blue-600">{formatDuration(payslipResult.overtimePayHours)}</span></div>
             </div>
 
             <div className="space-y-2 text-xs">
               <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{tAdmin("应纳发计算说明")}</p>
               <div className="space-y-2 rounded-lg bg-slate-50 p-3 font-mono">
-                {/* 工资条弹窗必须和列表共用同一基薪口径：月薪看 fixedSalary，时薪看本月标准工时工资，避免月薪员工 hourlyPay 为 0 时弹窗误显示 0。 */}
-                <div className="flex justify-between"><span className="text-slate-500">{tAdmin("计算基薪:")}</span><span className="font-bold text-slate-800 text-right">{formatCurrency(payslipBaseSalary, payslipResult.currency)}</span></div>
-                <div className="flex justify-between"><span className="text-slate-500">{tAdmin("加班应得:")}</span><span className="font-bold text-green-600 text-right">+ {formatCurrency(payslipResult.overtimePay, payslipResult.currency)}</span></div>
+                {/* 工资条金额说明必须逐行显示“项目名称 + 金额”，让员工能直接核对每个金额来源；不要只展示汇总数字。 */}
+                <div className="flex justify-between gap-3 rounded-md bg-white/70 px-2 py-1.5">
+                  <span className="min-w-0 text-slate-500">
+                    {payslipResult.salaryType === "fixed"
+                      ? tAdmin("固定月薪")
+                      : tAdmin("标准工时工资")}
+                    <span className="ml-1 text-[10px] text-slate-400">
+                      {payslipResult.salaryType === "hourly"
+                        ? tAdmin("{{hours}} × {{rate}}", { hours: formatDuration(payslipStandardPaidHours), rate: formatCurrency(payslipResult.hourlyRate || 0, payslipResult.currency) })
+                        : payslipResult.yearMonth}
+                    </span>
+                  </span>
+                  <span className="shrink-0 font-bold text-slate-800 text-right">{formatCurrency(payslipBaseSalary, payslipResult.currency)}</span>
+                </div>
+                <div className="flex justify-between gap-3 rounded-md bg-white/70 px-2 py-1.5">
+                  <span className="min-w-0 text-slate-500">{tAdmin("加班应得")} <span className="text-[10px] text-slate-400">{formatDuration(payslipResult.overtimePayHours)}</span></span>
+                  <span className="shrink-0 font-bold text-green-600 text-right">+ {formatCurrency(payslipResult.overtimePay, payslipResult.currency)}</span>
+                </div>
                 {/* 服务费必须显示本次工资结果使用的比例和金额；比例来自 salary_profiles 快照，金额来自 monthly_payroll_results 沉淀值。 */}
-                <div className="flex justify-between"><span className="text-slate-500">{tAdmin("服务费:")} <span className="text-[10px]">{tAdmin("{{rate}}%", { rate: payslipServiceFeeRate.toFixed(2) })}</span></span><span className="font-bold text-amber-600 text-right">+ {formatCurrency(payslipResult.serviceFeeAmount, payslipResult.currency)}</span></div>
-                <div className="flex justify-between"><span className="text-slate-500">{tAdmin("补贴/其他:")}</span><span className="font-bold text-slate-800 text-right">+ {formatCurrency(payslipResult.allowanceTotal + payslipResult.otherTotal, payslipResult.currency)}</span></div>
-                {payslipAllowanceItems.concat(payslipOtherItems).map((item) => (
-                  <div key={item.id} className="flex justify-between gap-3 pl-3 text-[11px] text-slate-500">
+                <div className="flex justify-between gap-3 rounded-md bg-amber-50 px-2 py-1.5">
+                  <span className="min-w-0 text-amber-700">{tAdmin("服务费")} <span className="text-[10px]">{tAdmin("{{rate}}%", { rate: payslipServiceFeeRate.toFixed(2) })}</span></span>
+                  <span className="shrink-0 font-bold text-amber-600 text-right">+ {formatCurrency(payslipResult.serviceFeeAmount, payslipResult.currency)}</span>
+                </div>
+                {payslipIncomeAdjustmentItems.map((item) => (
+                  <div key={item.id} className="flex justify-between gap-3 rounded-md bg-white/70 px-2 py-1.5 text-[11px] text-slate-500">
                     <span className="min-w-0 truncate">+ {item.name}{item.note ? ` · ${item.note}` : ""}</span>
-                    <span className="shrink-0 text-slate-700">{formatCurrency(item.amount, payslipResult.currency)}</span>
+                    <span className="shrink-0 font-semibold text-slate-700">{formatCurrency(item.amount, payslipResult.currency)}</span>
                   </div>
                 ))}
-                <div className="flex justify-between"><span className="text-slate-500">{tAdmin("社保扣款:")}</span><span className="text-red-500 text-right">- {formatCurrency(payslipResult.socialSecurityAmount, payslipResult.currency)}</span></div>
-                <div className="flex justify-between"><span className="text-slate-500">{tAdmin("其他扣款:")}</span><span className="text-red-500 text-right">- {formatCurrency(payslipTaxOrDeduction, payslipResult.currency)}</span></div>
+                <div className="flex justify-between gap-3 rounded-md bg-white/70 px-2 py-1.5">
+                  <span className="min-w-0 text-slate-500">{tAdmin("社保扣款")}</span>
+                  <span className="shrink-0 text-red-500 text-right">- {formatCurrency(payslipResult.socialSecurityAmount, payslipResult.currency)}</span>
+                </div>
                 {payslipDeductionItems.map((item) => (
-                  <div key={item.id} className="flex justify-between gap-3 pl-3 text-[11px] text-red-500/80">
+                  <div key={item.id} className="flex justify-between gap-3 rounded-md bg-red-50 px-2 py-1.5 text-[11px] text-red-500/80">
                     <span className="min-w-0 truncate">- {item.name}{item.note ? ` · ${item.note}` : ""}</span>
-                    <span className="shrink-0">{formatCurrency(item.amount, payslipResult.currency)}</span>
+                    <span className="shrink-0 font-semibold">{formatCurrency(item.amount, payslipResult.currency)}</span>
                   </div>
                 ))}
+                {payslipTaxOrDeduction > 0 && payslipDeductionItems.length === 0 ? (
+                  <div className="flex justify-between gap-3 rounded-md bg-red-50 px-2 py-1.5">
+                    <span className="min-w-0 text-red-500">{tAdmin("其他扣款")}</span>
+                    <span className="shrink-0 text-red-500 text-right">- {formatCurrency(payslipTaxOrDeduction, payslipResult.currency)}</span>
+                  </div>
+                ) : null}
               </div>
             </div>
 
