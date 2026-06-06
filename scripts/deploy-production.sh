@@ -83,6 +83,65 @@ require_command() {
   fi
 }
 
+
+assert_vercel_config() {
+  local config_path="$1"
+  local expected_app="$2"
+
+  # This is the release script's hard stop against the previous incident: the
+  # repository root is normally an admin Vercel project, while portal deploys use
+  # a temporary root config. Never deploy until the active config matches the app.
+  python3 - "$config_path" "$expected_app" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+config_path = Path(sys.argv[1])
+expected_app = sys.argv[2]
+config = json.loads(config_path.read_text())
+build = config.get("buildCommand", "")
+output = config.get("outputDirectory", "")
+
+expected = {
+    "admin": ("@wmshr/admin", "apps/admin/dist"),
+    "home": ("@wmshr/home", "apps/home/dist"),
+}[expected_app]
+
+if expected[0] not in build or output != expected[1]:
+    raise SystemExit(
+        f"Unsafe Vercel config for {expected_app}: "
+        f"buildCommand={build!r}, outputDirectory={output!r}. "
+        "Stop before this can alias the wrong app to a production domain."
+    )
+PY
+}
+
+assert_deployment_url() {
+  local app="$1"
+  local deployment_url="$2"
+
+  # Alias safety is intentionally based on the generated deployment hostname,
+  # not on Vercel's Ready status or shared page title. dutylix.com must never be
+  # pointed at a dutylix-admin-* deployment, and admin must never be pointed at a
+  # plain dutylix-* portal deployment.
+  case "$app:$deployment_url" in
+    admin:https://dutylix-admin-*-wang-lins-projects.vercel.app)
+      return 0
+      ;;
+    home:https://dutylix-admin-*)
+      echo "Refusing to alias admin deployment to portal domain: $deployment_url" >&2
+      exit 1
+      ;;
+    home:https://dutylix-*-wang-lins-projects.vercel.app)
+      return 0
+      ;;
+    *)
+      echo "Unexpected $app deployment URL: $deployment_url" >&2
+      exit 1
+      ;;
+  esac
+}
+
 extract_deployment_url() {
   # Vercel CLI prints several URLs; the generated production URL is the one under wang-lins-projects.vercel.app.
   # Keep this parser narrow so we never alias the Inspect URL or the custom domain by mistake.
@@ -117,6 +176,11 @@ verify_home_production() {
   verify_http_status "$HOME_CUSTOM_ORIGIN" "200"
   verify_http_status "${HOME_CUSTOM_ORIGIN}/favicon.ico" "200"
   verify_http_status "${HOME_CUSTOM_ORIGIN}/dutylix-icon.svg" "200"
+  curl -L -s -D /tmp/wmshr_home_health_headers.txt -o /tmp/wmshr_home_health_body.txt "${HOME_CUSTOM_ORIGIN}/api/health"
+  if grep -qi 'content-type: application/json' /tmp/wmshr_home_health_headers.txt; then
+    echo "Portal /api/health looks like the admin JSON API; refusing to accept dutylix.com as portal." >&2
+    exit 1
+  fi
 
   curl -L -s "$HOME_CUSTOM_ORIGIN" >"$html_file"
   # The portal is a SPA; visible CTA text lives in the emitted JS bundle rather than index.html.
@@ -150,9 +214,13 @@ deploy_home_production() {
   admin_config_backup="$(mktemp -t wmshr-admin-vercel-config.XXXXXX.json)"
 
   # Vercel only receives one root vercel.json during a monorepo root deploy.
-  # The admin config is restored even when the portal deploy fails, because leaving
-  # a portal config at the root would make the next admin release publish the wrong app.
+  # The admin config is restored through a RETURN trap even when the portal deploy
+  # fails; leaving a portal config at the root would make the next admin release
+  # publish the wrong app.
+  assert_vercel_config "${REPO_ROOT}/vercel.json" admin
   cp "${REPO_ROOT}/vercel.json" "$admin_config_backup"
+  trap 'cp "$admin_config_backup" "${REPO_ROOT}/vercel.json"; rm -f "$admin_config_backup"; trap - RETURN' RETURN
+
   cat >"${REPO_ROOT}/vercel.json" <<'JSON'
 {
   "buildCommand": "npm --workspace @wmshr/home run build",
@@ -166,6 +234,7 @@ deploy_home_production() {
   ]
 }
 JSON
+  assert_vercel_config "${REPO_ROOT}/vercel.json" home
 
   echo "+ vercel deploy ${REPO_ROOT} --prod --yes --project ${HOME_VERCEL_PROJECT}"
   # Deploy from the monorepo root so @wmshr/i18n resolves as a workspace package.
@@ -177,6 +246,8 @@ JSON
 
   cp "$admin_config_backup" "${REPO_ROOT}/vercel.json"
   rm -f "$admin_config_backup"
+  trap - RETURN
+  assert_vercel_config "${REPO_ROOT}/vercel.json" admin
   return "$deploy_status"
 }
 
@@ -262,6 +333,8 @@ main() {
     exit 1
   fi
 
+  assert_vercel_config "${REPO_ROOT}/vercel.json" admin
+
   echo "== WMSHR production release =="
   echo "Repo: $REPO_ROOT"
   echo "Domain: $CUSTOM_ORIGIN"
@@ -318,6 +391,7 @@ main() {
     echo "Could not parse Vercel production deployment URL from $deploy_log" >&2
     exit 1
   fi
+  assert_deployment_url admin "$deployment_url"
 
   run vercel alias set "$deployment_url" "$CUSTOM_DOMAIN"
 
@@ -343,6 +417,7 @@ main() {
     echo "Could not parse portal Vercel production deployment URL from $home_deploy_log" >&2
     exit 1
   fi
+  assert_deployment_url home "$home_deployment_url"
   run vercel alias set "$home_deployment_url" "$HOME_CUSTOM_DOMAIN"
   verify_home_production
 
