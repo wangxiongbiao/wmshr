@@ -11,13 +11,15 @@ import { fetchDashboardData } from "../lib/api";
 import { cn, formatCurrency } from "../lib/utils";
 
 interface DashboardProps {
+  isActive: boolean;
   onOpenSettings: () => void;
   onNav: (tabId: Extract<TabId, "attendance" | "payroll">) => void;
 }
 
-export function Dashboard({ onOpenSettings, onNav }: DashboardProps) {
+export function Dashboard({ isActive, onOpenSettings, onNav }: DashboardProps) {
   const [data, setData] = useState<DashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
+  // 看板改为始终先渲染空态指标；首次请求和后续刷新都不再用整页 loading 阻断界面。
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const loadData = async () => {
@@ -34,8 +36,13 @@ export function Dashboard({ onOpenSettings, onNav }: DashboardProps) {
   };
 
   useEffect(() => {
+    if (!isActive) {
+      return;
+    }
+
+    // 仪表盘页面被 keep-alive 后不会再因切页卸载；重新激活时要主动后台刷新，但保留上一轮成功数据继续可见。
     void loadData();
-  }, []);
+  }, [isActive]);
 
   const employeeStats = data?.employeeStats || [];
   const config = data?.config;
@@ -45,12 +52,8 @@ export function Dashboard({ onOpenSettings, onNav }: DashboardProps) {
     [employeeStats]
   );
 
-  if (loading && !data) {
-    return <div className="glass-panel rounded-xl p-10 text-center text-sm text-slate-500">{tAdmin("正在加载数据看板...")}</div>;
-  }
-
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" aria-busy={loading}>
       {error ? (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       ) : null}

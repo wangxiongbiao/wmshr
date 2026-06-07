@@ -9,7 +9,6 @@ import {useAuth} from './providers/AuthProvider';
 import {LoginScreen} from '../features/auth/screens/LoginScreen';
 import {HomeScreen} from '../features/home/screens/HomeScreen';
 import {AttendanceListScreen} from '../features/attendance/screens/AttendanceListScreen';
-import {AttendanceDetailScreen} from '../features/attendance/screens/AttendanceDetailScreen';
 import {SopListScreen} from '../features/sop/screens/SopListScreen';
 import {SopDetailScreen} from '../features/sop/screens/SopDetailScreen';
 import {MineScreen} from '../features/mine/screens/MineScreen';
@@ -35,7 +34,6 @@ function AttendanceNavigator() {
   return (
     <AttendanceStack.Navigator screenOptions={{headerShown: false}}>
       <AttendanceStack.Screen name="AttendanceList" component={AttendanceListScreen} />
-      <AttendanceStack.Screen name="AttendanceDetail" component={AttendanceDetailScreen} />
     </AttendanceStack.Navigator>
   );
 }

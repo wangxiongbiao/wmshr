@@ -15,6 +15,7 @@ function WmshrLogoMark() {
 
 interface SidebarProps {
   activeTab: TabId;
+  // 侧边栏不再直接改本地 state；上层会把 tab 点击映射到 `/:lang/:tab`，让刷新和分享链接都保持一致。
   onTabChange: (tabId: TabId) => void;
 }
 

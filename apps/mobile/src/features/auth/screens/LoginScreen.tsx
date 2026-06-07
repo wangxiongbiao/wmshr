@@ -1,4 +1,4 @@
-import React, {useEffect, useState} from 'react';
+import React, {useEffect, useMemo, useState} from 'react';
 import {Ionicons} from '@expo/vector-icons';
 import * as SecureStore from 'expo-secure-store';
 import {Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
@@ -42,6 +42,7 @@ export function LoginScreen() {
   const [rememberMe, setRememberMe] = useState(false);
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [forgotPasswordVisible, setForgotPasswordVisible] = useState(false);
+  const [loginErrorText, setLoginErrorText] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -70,18 +71,35 @@ export function LoginScreen() {
     };
   }, []);
 
+  const accountError = useMemo(() => {
+    if (!account.trim()) {
+      return t('请输入工号');
+    }
+    return null;
+  }, [account, t]);
+
+  const passwordError = useMemo(() => {
+    if (!password) {
+      return t('请输入密码');
+    }
+    return null;
+  }, [password, t]);
+
   const handleLogin = async () => {
     const nextAccount = account.trim();
     if (!nextAccount) {
+      setLoginErrorText(t('请先输入工号后再登录。'));
       showToast(t('请输入工号'));
       return;
     }
     if (!password) {
+      setLoginErrorText(t('请先输入密码后再登录。'));
       showToast(t('请输入密码'));
       return;
     }
 
     setSubmitting(true);
+    setLoginErrorText(null);
     try {
       // 登录动作只把工号密码交给 AuthProvider；AuthProvider 负责持久化登录态，页面只负责“记住我”的凭证回填。
       await login(nextAccount, password);
@@ -91,7 +109,9 @@ export function LoginScreen() {
         await SecureStore.deleteItemAsync(REMEMBERED_CREDENTIALS_KEY);
       }
     } catch (loginError) {
-      showToast(getLoginToastMessage(loginError, t));
+      const message = getLoginToastMessage(loginError, t);
+      setLoginErrorText(message);
+      showToast(message);
     } finally {
       setSubmitting(false);
     }
@@ -104,44 +124,70 @@ export function LoginScreen() {
         <Text style={sharedStyles.muted}>{t('请输入工号和密码登录')}</Text>
 
         <View style={styles.form}>
+          <View style={styles.statusCard}>
+            <Text style={styles.statusTitle}>{submitting ? t('正在登录...') : t('登录前确认')}</Text>
+            <Text style={sharedStyles.muted}>{submitting ? t('系统正在校验账号并同步员工资料，请勿重复点击。') : t('登录成功后会自动进入首页；如果勾选“记住我”，下次会自动回填工号和密码。')}</Text>
+          </View>
+
           <Text style={styles.label}>{t('工号')}</Text>
           <TextInput
             value={account}
-            onChangeText={setAccount}
+            onChangeText={(value) => {
+              setAccount(value);
+              if (loginErrorText) {
+                setLoginErrorText(null);
+              }
+            }}
             autoCapitalize="none"
             autoCorrect={false}
+            editable={!submitting}
             placeholder={t('请输入工号')}
             placeholderTextColor={colors.textMuted}
-            style={styles.input}
+            style={[styles.input, accountError && !submitting && !account.trim() && styles.inputWarning]}
           />
-          <Text style={styles.helper}>{t('例如：wms0001')}</Text>
+          <Text style={[styles.helper, accountError && !submitting && !account.trim() && styles.warningText]}>{account.trim() ? t('例如：wms0001') : accountError}</Text>
 
           <Text style={styles.label}>{t('密码')}</Text>
           <View style={styles.passwordField}>
             <TextInput
               value={password}
-              onChangeText={setPassword}
+              onChangeText={(value) => {
+                setPassword(value);
+                if (loginErrorText) {
+                  setLoginErrorText(null);
+                }
+              }}
               secureTextEntry={!passwordVisible}
+              editable={!submitting}
               placeholder={t('请输入密码')}
               placeholderTextColor={colors.textMuted}
-              style={[styles.input, styles.passwordInput]}
+              style={[styles.input, styles.passwordInput, passwordError && !submitting && !password && styles.inputWarning]}
             />
             <Pressable
               accessibilityLabel={passwordVisible ? t('隐藏密码') : t('显示密码')}
               // 密码预览只改变本输入框显示状态，不弹窗；是否持久化密码完全由“记住我”控制。
               style={styles.passwordToggle}
+              disabled={submitting}
               onPress={() => setPasswordVisible((visible) => !visible)}
             >
               <Ionicons name={passwordVisible ? 'eye-off-outline' : 'eye-outline'} size={22} color={colors.textSubtle} />
             </Pressable>
           </View>
+          <Text style={[styles.helper, passwordError && !submitting && !password && styles.warningText]}>{password ? t('密码仅用于本次登录校验。') : passwordError}</Text>
+
+          {loginErrorText ? (
+            <View style={styles.errorCard}>
+              <Ionicons name="alert-circle-outline" size={18} color={colors.warning} />
+              <Text style={styles.errorText}>{loginErrorText}</Text>
+            </View>
+          ) : null}
 
           <View style={styles.formMetaRow}>
-            <Pressable style={styles.rememberRow} onPress={() => setRememberMe((remembered) => !remembered)}>
+            <Pressable disabled={submitting} style={styles.rememberRow} onPress={() => setRememberMe((remembered) => !remembered)}>
               <Ionicons name={rememberMe ? 'checkbox-outline' : 'square-outline'} size={22} color={colors.primary} />
               <Text style={styles.rememberText}>{t('记住我')}</Text>
             </Pressable>
-            <Pressable onPress={() => setForgotPasswordVisible(true)}>
+            <Pressable disabled={submitting} onPress={() => setForgotPasswordVisible(true)}>
               <Text style={styles.linkText}>{t('忘记密码？')}</Text>
             </Pressable>
           </View>
@@ -153,7 +199,7 @@ export function LoginScreen() {
       <AppModal
         visible={forgotPasswordVisible}
         title={t('忘记密码')}
-        message={t('请联系管理员重置密码。')}
+        message={t('请联系管理员重置密码。当前页面暂不支持自助找回。')}
         onRequestClose={() => setForgotPasswordVisible(false)}
         actions={[{label: t('知道了'), onPress: () => setForgotPasswordVisible(false)}]}
       />
@@ -164,9 +210,15 @@ export function LoginScreen() {
 const styles = StyleSheet.create({
   container: {flex: 1, justifyContent: 'center'},
   form: {marginTop: 28, backgroundColor: colors.white, borderRadius: 28, padding: 22, shadowColor: colors.text, shadowOpacity: 0.06, shadowRadius: 16, shadowOffset: {width: 0, height: 8}, elevation: 3},
+  statusCard: {backgroundColor: '#eff6ff', borderRadius: 18, padding: 14, marginBottom: 8},
+  statusTitle: {fontSize: 14, fontWeight: '900', color: colors.primary},
   label: {fontSize: 13, fontWeight: '800', color: colors.textSubtle, marginTop: 14, marginBottom: 8},
   input: {height: 52, borderWidth: 1, borderColor: colors.border, borderRadius: 16, paddingHorizontal: 14, fontSize: 16, color: colors.text, backgroundColor: '#f8fafc'},
+  inputWarning: {borderColor: colors.warning},
   helper: {marginTop: 8, fontSize: 12, color: colors.textMuted},
+  warningText: {color: colors.warning, fontWeight: '700'},
+  errorCard: {marginTop: 14, flexDirection: 'row', alignItems: 'flex-start', gap: 8, padding: 12, borderRadius: 16, backgroundColor: '#fff7ed'},
+  errorText: {flex: 1, color: colors.warning, fontSize: 12, fontWeight: '800', lineHeight: 18},
   passwordField: {position: 'relative'},
   passwordInput: {paddingRight: 52},
   passwordToggle: {position: 'absolute', top: 0, right: 0, width: 52, height: 52, alignItems: 'center', justifyContent: 'center'},

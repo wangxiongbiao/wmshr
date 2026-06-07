@@ -66,10 +66,11 @@ export function EmployeeList({ employees, loading = false, onAddEmployee, onEdit
     const start = (page - 1) * pageSize;
     return filteredEmployees.slice(start, start + pageSize);
   }, [filteredEmployees, page]);
+  const showRefreshing = loading && employees.length > 0;
 
   return (
     <div className="h-full min-h-0 flex flex-col">
-      <div className="shrink-0 pb-4">
+      <div className="shrink-0 pb-4 space-y-3">
         {/* 员工列表按 Header / Content 分层：筛选和新增按钮固定在顶部，只有下面的卡片区域滚动，避免长列表把操作入口顶出视口。 */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div className="relative w-full sm:w-72">
@@ -88,12 +89,15 @@ export function EmployeeList({ employees, loading = false, onAddEmployee, onEdit
         >
           <Plus className="w-4 h-4" />{tAdmin("新增员工")}</button>
         </div>
+        {showRefreshing ? (
+          <div className="rounded-xl border border-brand-100 bg-brand-50/80 px-4 py-2 text-xs text-brand-700">
+            {tAdmin("正在后台刷新员工数据，当前先保留上一次成功加载的列表内容")}
+          </div>
+        ) : null}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-        {loading ? (
-          <div className="glass-panel rounded-xl p-10 text-center text-sm text-slate-500">{tAdmin("正在加载员工数据...")}</div>
-        ) : filteredEmployees.length === 0 ? (
+        {filteredEmployees.length === 0 ? (
           <div className="glass-panel rounded-xl p-10 text-center text-sm text-slate-500">{tAdmin("当前筛选条件下没有员工数据")}</div>
         ) : (
           // v2 员工卡片包含头像、标签和薪资字段；常规大屏保持三列，避免一行四列时字段被挤压换行。

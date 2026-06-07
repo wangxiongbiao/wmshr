@@ -29,10 +29,14 @@ import {
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { SUPPORTED_LANGUAGES } from "@wmshr/i18n";
+import { normalizeLanguage, SUPPORTED_LANGUAGES, type SupportedLanguageCode } from "@wmshr/i18n";
+import { useLocation, useNavigate } from "react-router-dom";
 import EmailFormPage from "./components/EmailFormPage";
+import { buildHomeRoute, parseHomeRoute } from "./lib/homeRoute";
 import teamMeetingImage from "./assets/images/zenith_team_meeting_1779183482085.png";
 import hqOfficeImage from "./assets/images/zenith_hq_office_1779183499882.png";
+// 门户 about 区块的 founder 头像固定使用本地静态图，避免继续回退到纯文字占位头像。
+import founderAvatarImage from "./assets/images/founder-avatar.jpg";
 
 const ADMIN_PORTAL_URL = import.meta.env.VITE_ADMIN_PORTAL_URL
   || (import.meta.env.DEV ? "http://localhost:3000" : "https://admin.dutylix.com");
@@ -44,8 +48,13 @@ function WmshrLogoMark({ className = "w-6 h-6" }: { className?: string }) {
   return <img src="/dutylix-icon.svg" alt="" aria-hidden="true" className={className} />;
 }
 
-const LanguageSelector = () => {
-  const { i18n } = useTranslation();
+const LanguageSelector = ({
+  currentLanguage,
+  onLanguageChange,
+}: {
+  currentLanguage: SupportedLanguageCode;
+  onLanguageChange: (language: SupportedLanguageCode) => void;
+}) => {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -59,7 +68,7 @@ const LanguageSelector = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const currentLanguage = languages.find(l => l.code === i18n.language) || languages[0];
+  const currentLanguageOption = languages.find(l => l.code === currentLanguage) || languages[0];
 
   return (
     <div className="relative" ref={containerRef}>
@@ -68,7 +77,7 @@ const LanguageSelector = () => {
         className="flex items-center gap-2 px-3 py-1.5 glass rounded-lg text-sm font-medium hover:bg-white/10 transition-all"
       >
         <Languages className="w-4 h-4 text-brand-accent" />
-        <span className="hidden sm:inline">{currentLanguage.name}</span>
+        <span className="hidden sm:inline">{currentLanguageOption.name}</span>
       </button>
 
       <AnimatePresence>
@@ -84,13 +93,14 @@ const LanguageSelector = () => {
                 <button
                   key={lang.code}
                   onClick={() => {
-                    i18n.changeLanguage(lang.code);
+                    // 门户语言现在以 path 为唯一主状态源；这里不能只改 i18n，否则刷新后会再次丢语言。
+                    onLanguageChange(lang.code as SupportedLanguageCode);
                     setIsOpen(false);
                   }}
                   className="w-full px-4 py-2 text-left text-sm flex items-center justify-between hover:bg-white/10 transition-colors"
                 >
                   {lang.name}
-                  {i18n.language === lang.code && <Check className="w-4 h-4 text-brand-accent" />}
+                  {currentLanguage === lang.code && <Check className="w-4 h-4 text-brand-accent" />}
                 </button>
               ))}
             </div>
@@ -102,9 +112,13 @@ const LanguageSelector = () => {
 };
 
 const Nav = ({
+  currentLanguage,
+  onLanguageChange,
   onNavigateHome,
   onNavigateAdmin
 }: {
+  currentLanguage: SupportedLanguageCode;
+  onLanguageChange: (language: SupportedLanguageCode) => void;
   onNavigateHome: () => void;
   onNavigateAdmin: () => void;
 }) => {
@@ -135,7 +149,7 @@ const Nav = ({
           <a href="#solutions" onClick={onNavigateHome} className="hover:text-white transition-colors">{t('nav.features')}</a>
           <a href="#compliance" onClick={onNavigateHome} className="hover:text-white transition-colors">{t('nav.about')}</a>
           <a href="#about-us" onClick={onNavigateHome} className="hover:text-white transition-colors">{t('nav.docs')}</a>
-          <LanguageSelector />
+          <LanguageSelector currentLanguage={currentLanguage} onLanguageChange={onLanguageChange} />
           <button onClick={onNavigateAdmin} className="flex items-center gap-2 px-5 py-2.5 bg-white text-black rounded-full font-bold shadow-sm border border-black/5">
             <span>{t('nav.waitlist')}</span>
             <ArrowRight className="w-4 h-4" />
@@ -143,7 +157,7 @@ const Nav = ({
         </div>
 
         <div className="flex items-center gap-4 md:hidden">
-          <LanguageSelector />
+          <LanguageSelector currentLanguage={currentLanguage} onLanguageChange={onLanguageChange} />
           <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="p-2 glass rounded-lg">
             {mobileMenuOpen ? <X /> : <Menu />}
           </button>
@@ -470,8 +484,13 @@ const AboutSection = () => {
 
             <div className="p-8 rounded-[2.5rem] bg-white/[0.03] border border-white/5 relative group">
               <div className="flex items-center gap-6 mb-6">
-                <div className="w-20 h-20 rounded-full bg-brand-accent/20 flex items-center justify-center p-1 border border-brand-accent/20">
-                  <div className="w-full h-full rounded-full bg-brand-accent flex items-center justify-center text-2xl font-bold">GZ</div>
+                {/* 这里改为真实头像图；保留原有圆形尺寸和描边，避免破坏 about founder 卡片的既有排版。 */}
+                <div className="w-20 h-20 rounded-full bg-brand-accent/20 flex items-center justify-center p-1 border border-brand-accent/20 overflow-hidden">
+                  <img
+                    src={founderAvatarImage}
+                    alt={t('about_section.founder.name')}
+                    className="w-full h-full rounded-full object-cover"
+                  />
                 </div>
                 <div>
                   <p className="text-xs font-bold text-brand-accent uppercase tracking-[0.2em] mb-1">{t('about_section.founder.label')}</p>
@@ -539,14 +558,52 @@ const AboutSection = () => {
 };
 
 export default function App() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const routeState = parseHomeRoute(location.pathname);
+  const currentLanguage = routeState.language;
   const [showEmailForm, setShowEmailForm] = useState(false);
-  // 门户顶部 CTA 不再触发 Google OAuth；统一先进入后台登录页，由后台负责认证流程。
-  const openAdmin = () => window.location.assign(ADMIN_PORTAL_URL);
+
+  useEffect(() => {
+    if (location.pathname === "/") {
+      const detectedLanguage = normalizeLanguage(i18n.resolvedLanguage || i18n.language);
+      navigate({ pathname: buildHomeRoute(detectedLanguage), hash: location.hash }, { replace: true });
+      return;
+    }
+
+    if (location.pathname !== routeState.canonicalPath) {
+      // 门户语言 path 是唯一主状态源；非法或缺失语言时统一 replace，避免 URL 与实际语言状态分叉。
+      navigate({ pathname: routeState.canonicalPath, hash: location.hash }, { replace: true });
+    }
+  }, [i18n.language, i18n.resolvedLanguage, location.hash, location.pathname, navigate, routeState.canonicalPath]);
+
+  useEffect(() => {
+    if ((i18n.resolvedLanguage || i18n.language) !== currentLanguage) {
+      // 语言以 `/:lang` 为准，路由变化时再同步 i18n；这样刷新、分享链接和前进后退都不会丢语言。
+      void i18n.changeLanguage(currentLanguage);
+    }
+  }, [currentLanguage, i18n]);
+
+  const handleLanguageRouteChange = (language: SupportedLanguageCode) => {
+    navigate({ pathname: buildHomeRoute(language), hash: location.hash });
+  };
+
+  // 门户跳后台时显式把当前语言写进 `/:lang/dashboard`，避免 admin 只能依赖自己的 detector 重新猜语言。
+  // 这里固定落到 dashboard：admin 已把 lang/tab 都路由化，首页入口应传递完整初始状态而不是裸域名。
+  const openAdmin = () => {
+    const adminUrl = new URL(`/${currentLanguage}/dashboard`, `${ADMIN_PORTAL_URL.replace(/\/+$/, "")}/`);
+    window.location.assign(adminUrl.toString());
+  };
 
   return (
     <div className="min-h-screen bg-brand-primary text-white">
-      <Nav onNavigateHome={() => setShowEmailForm(false)} onNavigateAdmin={openAdmin} />
+      <Nav
+        currentLanguage={currentLanguage}
+        onLanguageChange={handleLanguageRouteChange}
+        onNavigateHome={() => setShowEmailForm(false)}
+        onNavigateAdmin={openAdmin}
+      />
 
       {showEmailForm ? (
         <div className="pt-24 pb-12">

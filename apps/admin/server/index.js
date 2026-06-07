@@ -2833,6 +2833,8 @@ app.get("/api/mobile/attendance/today", requireEmployeeAppAuth, async (req, res)
 app.get("/api/mobile/attendance/records", requireEmployeeAppAuth, async (req, res) => {
   try {
     const limit = Math.min(31, Math.max(1, Number(req.query.limit || 7)));
+    const offset = Math.max(0, Number(req.query.offset || 0));
+    const end = offset + limit - 1;
     const { data, error } = await supabase
       .from("attendance_records")
       .select("*")
@@ -2840,7 +2842,8 @@ app.get("/api/mobile/attendance/records", requireEmployeeAppAuth, async (req, re
       .eq("employee_id", req.employeeApp.employeeId)
       .order("date", { ascending: false })
       .order("id", { ascending: false })
-      .limit(limit);
+      // 员工端改为分页加载后，服务端必须按 offset/limit 返回稳定窗口；否则前端“加载更多”会不断重复首批数据。
+      .range(offset, end);
     if (error) throw error;
     res.json((data || []).map(mapMobileAttendanceRecord));
   } catch (error) {
@@ -2869,7 +2872,15 @@ app.post("/api/mobile/attendance/check-out", requireEmployeeAppAuth, async (req,
 app.get("/api/mobile/sops", requireEmployeeAppAuth, async (req, res) => {
   try {
     const keyword = String(req.query.keyword || "").trim();
-    const rows = await fetchSopDocuments(req.employeeApp.ownerUserId, { keyword, publishedOnly: true, employeeId: req.employeeApp.employeeId });
+    const limit = Math.min(50, Math.max(1, Number(req.query.limit || 10)));
+    const offset = Math.max(0, Number(req.query.offset || 0));
+    const rows = await fetchSopDocuments(req.employeeApp.ownerUserId, {
+      keyword,
+      publishedOnly: true,
+      employeeId: req.employeeApp.employeeId,
+      limit,
+      offset
+    });
     res.json(rows.map((row) => mapMobileSopDocument(row, req.employeeApp.employeeId)));
   } catch (error) {
     res.status(500).json({ error: error.message || "员工端SOP列表加载失败" });
@@ -4561,7 +4572,7 @@ function mapSopDocument(row, { targetIds = [], assets = [], reads = [] } = {}) {
   };
 }
 
-async function fetchSopDocuments(ownerUserId, { keyword = "", publishedOnly = false, employeeId = null } = {}) {
+async function fetchSopDocuments(ownerUserId, { keyword = "", publishedOnly = false, employeeId = null, limit = null, offset = 0 } = {}) {
   let query = supabase
     .from("sop_documents")
     .select("*")
@@ -4616,7 +4627,7 @@ async function fetchSopDocuments(ownerUserId, { keyword = "", publishedOnly = fa
     readMap.set(sopId, [...(readMap.get(sopId) || []), read]);
   }
 
-  return (documents || [])
+  const mappedDocuments = (documents || [])
     .filter((row) => {
       if (!employeeId) return true;
       if (row.target_type !== "specific") return true;
@@ -4627,6 +4638,13 @@ async function fetchSopDocuments(ownerUserId, { keyword = "", publishedOnly = fa
       assets: assetMap.get(Number(row.id)) || [],
       reads: readMap.get(Number(row.id)) || []
     }));
+
+  if (limit === null) {
+    return mappedDocuments;
+  }
+
+  // SOP 可见性依赖 target 过滤，分页必须在过滤后再切片，避免 specific 目标文档被前置全量窗口吞掉后导致前端少页或漏页。
+  return mappedDocuments.slice(offset, offset + limit);
 }
 
 async function assertSopTargetEmployeesBelongToOwner(ownerUserId, targetEmployeeIds) {

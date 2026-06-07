@@ -21,8 +21,9 @@ export async function submitAttendanceCheckIn(accessToken: string, payload: Chec
   });
 }
 
-export async function fetchAttendanceRecords(accessToken: string): Promise<AttendanceRecord[]> {
-  return httpClient<AttendanceRecord[]>('/api/mobile/attendance/records?limit=31', {
+export async function fetchAttendanceRecords(accessToken: string, {limit = 7, offset = 0}: {limit?: number; offset?: number} = {}): Promise<AttendanceRecord[]> {
+  const query = `?limit=${encodeURIComponent(String(limit))}&offset=${encodeURIComponent(String(offset))}`;
+  return httpClient<AttendanceRecord[]>(`/api/mobile/attendance/records${query}`, {
     headers: authHeaders(accessToken),
   });
 }

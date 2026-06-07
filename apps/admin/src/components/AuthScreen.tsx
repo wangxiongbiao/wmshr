@@ -4,8 +4,10 @@
  */
 
 import { useTranslation } from "react-i18next";
+import type { SupportedLanguageCode } from "@wmshr/i18n";
 
 interface AuthScreenProps {
+  currentLanguage: SupportedLanguageCode;
   loading?: boolean;
   onGoogleLogin: () => void;
   error?: string;
@@ -31,8 +33,10 @@ function GoogleIcon() {
   );
 }
 
-export function AuthScreen({ loading = false, onGoogleLogin, error }: AuthScreenProps) {
+export function AuthScreen({ currentLanguage, loading = false, onGoogleLogin, error }: AuthScreenProps) {
   const { t } = useTranslation(["auth", "common"]);
+  // admin 已把语言固定在 `/:lang/:tab`；这里返回官网时必须把当前 lang 回传给门户，避免从后台返回后又掉回裸站默认语言。
+  const homeUrl = new URL(`/${currentLanguage}`, `${HOME_SITE_URL.replace(/\/+$/, "")}/`).toString();
 
   return (
     <div className="min-h-screen overflow-hidden bg-[#eef5f2] text-slate-950">
@@ -41,8 +45,9 @@ export function AuthScreen({ loading = false, onGoogleLogin, error }: AuthScreen
 
       <main className="relative min-h-screen px-5 py-5 lg:px-10 lg:py-8 flex items-center">
         <a
-          href={HOME_SITE_URL}
-          className="absolute right-5 top-5 lg:right-10 lg:top-8 rounded-full border border-white/70 bg-white/75 px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm backdrop-blur-xl transition hover:-translate-y-0.5 hover:bg-white hover:text-slate-900"
+          href={homeUrl}
+          // 返回官网按钮必须压过右侧登录卡片：同层绝对定位下显式抬高 z-index，避免大屏重叠时被卡片阴影或面板遮住。
+          className="absolute right-5 top-5 z-50 lg:right-10 lg:top-8 rounded-full border border-white/70 bg-white/75 px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm backdrop-blur-xl transition hover:-translate-y-0.5 hover:bg-white hover:text-slate-900"
         >
           {t("返回官网")}
         </a>

@@ -12,7 +12,8 @@ import { createSop, deleteSop, fetchSops, markSopRead, updateSop } from "../lib/
 
 interface SopManagerProps {
   employees: Employee[];
-  addToast: (msg: string) => void;
+  addToast: (message: string) => void;
+  isActive: boolean;
 }
 
 // Predefined SOP templates for one-click load.
@@ -83,7 +84,7 @@ function createSopTemplates() {
 ];
 }
 
-export function SopManager({ employees, addToast }: SopManagerProps) {
+export function SopManager({ employees, addToast, isActive }: SopManagerProps) {
   const { i18n } = useTranslation("admin");
   // SOP 快速模板包含预渲染 HTML 字符串，必须随语言变化重新生成；否则切换语言后模板菜单和载入正文会继续使用旧语言。
   const sopTemplates = useMemo(() => createSopTemplates(), [i18n.resolvedLanguage, i18n.language]);
@@ -106,8 +107,13 @@ export function SopManager({ employees, addToast }: SopManagerProps) {
   };
 
   useEffect(() => {
+    if (!isActive) {
+      return;
+    }
+
+    // SOP 模块重新激活时后台刷新列表，但保留当前草稿、检索词和详情展开状态，避免页面回退成冷启动。
     void loadSops();
-  }, []);
+  }, [isActive]);
 
   // UI state controllers
   const [activeMode, setActiveMode] = useState<'manager' | 'simulator'>('manager');
@@ -155,6 +161,7 @@ export function SopManager({ employees, addToast }: SopManagerProps) {
       return false;
     });
   }, [sops, simulatedEmployeeId]);
+  const showRefreshing = isLoadingSops && sops.length > 0;
 
   // Filtered SOPs shown in the management panel table
   const filteredSops = useMemo(() => {
@@ -460,7 +467,8 @@ export function SopManager({ employees, addToast }: SopManagerProps) {
       
       {/* Unified Control Toolbar (Combines Mode Switcher, Search input, and Create button) */}
       {!isCreating && (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-3 flex flex-col md:flex-row items-center justify-between gap-3">
+        <div className="space-y-3">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-3 flex flex-col md:flex-row items-center justify-between gap-3">
           
           {/* 1. View Mode Toggles */}
           <div className="bg-slate-100 rounded-lg p-1 flex gap-1 items-center w-full md:w-auto shadow-inner">
@@ -536,6 +544,12 @@ export function SopManager({ employees, addToast }: SopManagerProps) {
             </button>
           )}
 
+        </div>
+          {showRefreshing ? (
+            <div className="rounded-xl border border-brand-100 bg-brand-50/80 px-4 py-2 text-xs text-brand-700">
+              {tAdmin("正在后台刷新 SOP 列表，当前先保留上一次成功加载的内容")}
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -1069,14 +1083,8 @@ export function SopManager({ employees, addToast }: SopManagerProps) {
             <div className={`${selectedSopForDetails ? "xl:col-span-2" : "xl:col-span-3"} space-y-4`}>
 
             {/* List entries for current SOPs */}
-            <div className="space-y-3">
-              {isLoadingSops ? (
-                <div className="bg-white rounded-xl p-12 text-center border border-slate-100 text-slate-400">
-                  <Clock className="w-12 h-12 text-slate-200 mx-auto mb-3 animate-pulse" />
-                  <p className="text-sm font-semibold">{tAdmin("正在从后台加载SOP规范...")}</p>
-                  <p className="text-xs text-slate-400 mt-1">{tAdmin("当前数据来自账号级数据库，不再读取浏览器本地缓存")}</p>
-                </div>
-              ) : filteredSops.length === 0 ? (
+            <div className="space-y-3" aria-busy={isLoadingSops}>
+              {filteredSops.length === 0 ? (
                 <div className="bg-white rounded-xl p-12 text-center border border-slate-100 text-slate-400">
                   <FileText className="w-12 h-12 text-slate-200 mx-auto mb-3" />
                   <p className="text-sm font-semibold">{tAdmin("没有找到匹配检索的SOP规范")}</p>

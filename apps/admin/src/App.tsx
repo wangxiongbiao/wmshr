@@ -6,6 +6,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { tAdmin } from "./lib/i18nText";
 import { useTranslation } from "react-i18next";
+import { normalizeLanguage } from "@wmshr/i18n";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Sidebar } from "./components/Sidebar";
 import { Header } from "./components/Header";
 import { Dashboard } from "./components/Dashboard";
@@ -32,7 +34,7 @@ import {
   EmployeeUpsertPayload
 } from "./types";
 import { INITIAL_EMPLOYEES } from "./constants";
-import { motion, AnimatePresence } from "motion/react";
+import { motion } from "motion/react";
 import { CheckCircle, Sparkles } from "lucide-react";
 import {
   createAttendanceRule,
@@ -55,6 +57,7 @@ import {
 } from "./lib/api";
 import { AuthScreen } from "./components/AuthScreen";
 import { useDialog } from "./components/DialogProvider";
+import { ADMIN_TABS, buildAdminRoute, parseAdminRoute } from "./lib/adminRoute";
 import { supabase } from "./lib/supabase";
 import type { Session } from "@supabase/supabase-js";
 import {
@@ -82,14 +85,19 @@ function getOAuthErrorFromCurrentUrl() {
 }
 
 export default function App() {
-  const { t } = useTranslation(["admin", "auth"]);
+  const { t, i18n } = useTranslation(["admin", "auth"]);
   const { confirm } = useDialog();
-  const searchParams = new URLSearchParams(window.location.search);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const isGooglePopupCallback =
     searchParams.get(GOOGLE_POPUP_QUERY_KEY) === GOOGLE_POPUP_QUERY_VALUE && Boolean(window.opener);
+  const routeState = useMemo(() => parseAdminRoute(location.pathname), [location.pathname]);
+  const activeTab = routeState.tab;
+  const currentLanguage = routeState.language;
+  const [visitedTabs, setVisitedTabs] = useState<TabId[]>(() => [activeTab]);
 
   // 员工管理、考勤计算、薪资核算按 v2 可见界面顺序恢复；旧后台兼容字段只留在接口层处理。
-  const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const [session, setSession] = useState<Session | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [googleSigningIn, setGoogleSigningIn] = useState(false);
@@ -136,6 +144,77 @@ export default function App() {
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
     }, 3000);
+  };
+
+  useEffect(() => {
+    if (isGooglePopupCallback) {
+      return;
+    }
+
+    if (location.pathname === "/") {
+      const detectedLanguage = normalizeLanguage(i18n.resolvedLanguage || i18n.language);
+      navigate(buildAdminRoute(detectedLanguage, activeTab), { replace: true });
+      return;
+    }
+
+    if (location.pathname !== routeState.canonicalPath) {
+      // 所有非法/不完整 admin 路径都统一 replace 到规范 URL，避免页面状态和 URL 分叉。
+      navigate({ pathname: routeState.canonicalPath, search: location.search, hash: location.hash }, { replace: true });
+    }
+  }, [activeTab, i18n.language, i18n.resolvedLanguage, isGooglePopupCallback, location.hash, location.pathname, location.search, navigate, routeState.canonicalPath]);
+
+  useEffect(() => {
+    if (isGooglePopupCallback) {
+      return;
+    }
+
+    if ((i18n.resolvedLanguage || i18n.language) !== currentLanguage) {
+      // 当路由 lang 变化时强制同步 i18n，确保刷新、分享链接和页面内切语言都以 URL 为准。
+      void i18n.changeLanguage(currentLanguage);
+    }
+  }, [currentLanguage, i18n, isGooglePopupCallback]);
+
+  const navigateToTab = (tab: TabId) => {
+    navigate(buildAdminRoute(currentLanguage, tab));
+  };
+
+  const handleLanguageRouteChange = (language: ReturnType<typeof normalizeLanguage>) => {
+    navigate(buildAdminRoute(language, activeTab));
+  };
+
+  const renderModulePage = (tab: TabId, isActive: boolean) => {
+    switch (tab) {
+      case "dashboard":
+        return (
+          <Dashboard
+            isActive={isActive}
+            onOpenSettings={() => navigateToTab("attendance")}
+            onNav={navigateToTab}
+          />
+        );
+      case "employees":
+        return (
+          <EmployeeList
+            employees={employees}
+            loading={employeesLoading}
+            onAddEmployee={openCreateEmployee}
+            onEditEmployee={(employee) => void openEditEmployee(employee)}
+            onManageAppAccount={(employee) => void openEmployeeAppAccountModal(employee)}
+            onDeleteEmployee={(employee) => void handleDeleteEmployee(employee)}
+          />
+        );
+      case "attendance":
+        return <AttendanceTable employees={employees} isActive={isActive} />;
+      case "payroll":
+        return <PayrollTable employees={employees} isActive={isActive} />;
+      case "sop":
+        return (
+          // SOP 页面需要保留编辑态、检索词和已展开详情，因此切页时必须缓存页面实例，只在重新激活时后台刷新列表数据。
+          <SopManager employees={employees} addToast={addToast} isActive={isActive} />
+        );
+      default:
+        return null;
+    }
   };
 
   const clearPopupPollTimer = () => {
@@ -317,6 +396,22 @@ export default function App() {
     void prepareWorkspaceForSession();
   }, [session?.access_token]);
 
+  useEffect(() => {
+    // 一级模块缓存只保留已经真正访问过的页面实例，避免首次进入后台时把 5 个模块全部冷启动挂载。
+    setVisitedTabs((prev) => (prev.includes(activeTab) ? prev : [...prev, activeTab]));
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (!session?.access_token) {
+      return;
+    }
+
+    // employees / attendance / payroll / sop 都依赖员工主数据；切回这些页面时后台刷新员工列表，但保持当前页面实例与旧内容不先清空。
+    if (["employees", "attendance", "payroll", "sop"].includes(activeTab)) {
+      void loadEmployeeModuleData();
+    }
+  }, [activeTab, session?.access_token]);
+
   const prepareWorkspaceForSession = async () => {
     setWorkspaceBootstrapChecking(true);
     try {
@@ -442,7 +537,7 @@ export default function App() {
         loadAttendanceRuleModuleData()
       ]);
       setWorkspaceBootstrapDismissed(true);
-      setActiveTab("attendance");
+      navigateToTab("attendance");
       addToast(result.message || tAdmin("已为当前账号初始化后台业务数据"));
     } catch (error) {
       addToast(error instanceof Error ? error.message : tAdmin("初始化后台失败"));
@@ -715,15 +810,21 @@ export default function App() {
   }
 
   if (!session) {
-    return <AuthScreen loading={googleSigningIn} onGoogleLogin={handleGoogleLogin} error={authError} />;
+    return <AuthScreen currentLanguage={currentLanguage} loading={googleSigningIn} onGoogleLogin={handleGoogleLogin} error={authError} />;
   }
 
   return (
     <div className="text-slate-700 h-screen flex overflow-hidden font-sans antialiased">
-      <Sidebar activeTab={activeTab} onTabChange={setActiveTab} />
+      <Sidebar activeTab={activeTab} onTabChange={navigateToTab} />
 
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-[#f8fafc] relative">
-        <Header title={pageTitle} userEmail={session.user.email} onSignOut={handleSignOut} />
+        <Header
+          title={pageTitle}
+          currentLanguage={currentLanguage}
+          onLanguageChange={handleLanguageRouteChange}
+          userEmail={session.user.email}
+          onSignOut={handleSignOut}
+        />
 
         <div className="flex-1 overflow-y-auto p-6 scroll-smooth relative">
           {showWorkspaceBootstrapCard && (
@@ -753,45 +854,25 @@ export default function App() {
               </div>
             </div>
           )}
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={activeTab}
-              // 业务页需要拿到主内容区高度；员工列表内部按 Header / Content 分层，只有 Content 滚动。
-              className="h-full min-h-0"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.2 }}
-            >
-              {/* 各业务模块先以 v2 可见界面为准挂载，再按界面重写/对接接口，避免旧后台字段反向污染 UI。 */}
-              {activeTab === 'dashboard' && (
-                <Dashboard
-                  onOpenSettings={() => setActiveTab('attendance')}
-                  onNav={setActiveTab}
-                />
-              )}
-              {activeTab === 'employees' && (
-                <EmployeeList
-                  employees={employees}
-                  loading={employeesLoading}
-                  onAddEmployee={openCreateEmployee}
-                  onEditEmployee={(employee) => void openEditEmployee(employee)}
-                  onManageAppAccount={(employee) => void openEmployeeAppAccountModal(employee)}
-                  onDeleteEmployee={(employee) => void handleDeleteEmployee(employee)}
-                />
-              )}
-              {activeTab === 'attendance' && (
-                <AttendanceTable employees={employees} />
-              )}
-              {activeTab === 'payroll' && (
-                <PayrollTable employees={employees} />
-              )}
-              {activeTab === 'sop' && (
-                // SOP 先按 v2 可见模块原样挂载，当前版本仍使用组件内 localStorage；后续按迁移方案替换为 owner_user_id 隔离的真实接口。
-                <SopManager employees={employees} addToast={addToast} />
-              )}
-            </motion.div>
-          </AnimatePresence>
+          <div className="relative h-full min-h-0">
+            {ADMIN_TABS.filter((tab) => visitedTabs.includes(tab)).map((tab) => {
+              const isTabActive = tab === activeTab;
+
+              return (
+                <motion.div
+                  key={tab}
+                  // keep-alive 容器通过“已访问即常驻挂载”保留一级模块实例；切页只隐藏未激活页面，避免返回时重新冷启动。
+                  className={`absolute inset-0 min-h-0 ${isTabActive ? "block" : "hidden"}`}
+                  initial={false}
+                  animate={{ opacity: isTabActive ? 1 : 0, y: isTabActive ? 0 : 8 }}
+                  transition={{ duration: 0.18 }}
+                  aria-hidden={!isTabActive}
+                >
+                  {renderModulePage(tab, isTabActive)}
+                </motion.div>
+              );
+            })}
+          </div>
         </div>
       </main>
 
@@ -856,19 +937,16 @@ export default function App() {
 
       {/* Toasts */}
       <div className="fixed top-4 right-4 z-[60] flex flex-col gap-2 pointer-events-none">
-        <AnimatePresence>
-          {toasts.map(t => (
-            <motion.div
-              key={t.id}
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              className="pointer-events-auto px-4 py-3 rounded-lg shadow-lg text-sm font-medium text-white bg-slate-800 flex items-center gap-2"
-            >
-              <CheckCircle className="w-4 h-4 text-green-400" /> {t.msg}
-            </motion.div>
-          ))}
-        </AnimatePresence>
+        {toasts.map(t => (
+          <motion.div
+            key={t.id}
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="pointer-events-auto px-4 py-3 rounded-lg shadow-lg text-sm font-medium text-white bg-slate-800 flex items-center gap-2"
+          >
+            <CheckCircle className="w-4 h-4 text-green-400" /> {t.msg}
+          </motion.div>
+        ))}
       </div>
     </div>
   );

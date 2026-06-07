@@ -29,6 +29,7 @@ import { Pagination } from "./Pagination";
 
 interface PayrollTableProps {
   employees: Employee[];
+  isActive: boolean;
 }
 
 const REVIEW_STATUS_CLASS_NAMES: Record<string, string> = {
@@ -80,7 +81,7 @@ function Modal({
   );
 }
 
-export function PayrollTable({ employees }: PayrollTableProps) {
+export function PayrollTable({ employees, isActive }: PayrollTableProps) {
   const { confirm, prompt } = useDialog();
   const { i18n } = useTranslation("admin");
   // PayrollTable 的可见文案仍集中通过 tAdmin() 渲染；这里显式订阅 react-i18next 语言状态，保证 Header 切换语言后整块薪资核算 UI 会重新渲染，而不是继续显示旧语言。
@@ -134,12 +135,17 @@ export function PayrollTable({ employees }: PayrollTableProps) {
   };
 
   useEffect(() => {
+    if (!isActive) {
+      return;
+    }
+
     const timer = window.setTimeout(() => {
+      // 薪资页缓存后再次激活时，继续沿用当前筛选条件后台刷新，但保留已生成的结果表先可见。
       void loadData();
     }, keyword.trim() ? 350 : 0);
 
     return () => window.clearTimeout(timer);
-  }, [calculationStatus, keyword, reviewStatus, yearMonth]);
+  }, [calculationStatus, isActive, keyword, reviewStatus, yearMonth]);
 
   useEffect(() => {
     setHasPromptedAutoGenerate(false);
@@ -160,6 +166,7 @@ export function PayrollTable({ employees }: PayrollTableProps) {
 
   useEffect(() => {
     const shouldPrompt =
+      isActive &&
       hasLoadedResultsOnce &&
       !loading &&
       !submitting &&
@@ -420,6 +427,7 @@ export function PayrollTable({ employees }: PayrollTableProps) {
     const start = (page - 1) * pageSize;
     return results.slice(start, start + pageSize);
   }, [page, results]);
+  const showRefreshing = loading && results.length > 0;
   const payoutFilter = calculationStatus === "confirmed" ? "paid" : reviewStatus === "pending" ? "pending" : "all";
   const payslipResult = payslipDetail?.result || null;
   const payslipEmployee = payslipDetail?.employee || null;
@@ -563,6 +571,9 @@ export function PayrollTable({ employees }: PayrollTableProps) {
         {/* 薪资列表同样按 Header / Content 分层：筛选搜索条固定，长表格只在内容区滚动，避免搜索入口被表格行顶走。 */}
         <div className="p-4 bg-slate-50 border-b border-slate-100 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-2.5">
+            {showRefreshing ? (
+              <span className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand-50 border border-brand-100 text-brand-700">{tAdmin("刷新中")}</span>
+            ) : null}
             <button
               onClick={() => applyPayoutStatusFilter("all")}
               className={cn("px-3 py-1.5 text-xs font-semibold rounded-lg transition-all", payoutFilter === "all" ? "bg-brand-600 text-white shadow-sm" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-100")}
@@ -600,9 +611,7 @@ export function PayrollTable({ employees }: PayrollTableProps) {
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
-        {loading ? (
-          <div className="px-6 py-10 text-center text-sm text-slate-500">{tAdmin("正在加载薪酬结果...")}</div>
-        ) : results.length === 0 ? (
+        {results.length === 0 ? (
           <div className="p-12 text-center text-slate-400">
             <Receipt className="w-12 h-12 text-slate-200 mx-auto mb-3" />
             <p className="text-sm">{tAdmin("没有找到符合筛选条件的员工薪资数据")}</p>

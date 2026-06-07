@@ -1,7 +1,7 @@
 import React, {useState} from 'react';
 import {Ionicons} from '@expo/vector-icons';
 import {NativeStackScreenProps} from '@react-navigation/native-stack';
-import {Pressable, Text, View} from 'react-native';
+import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {useTranslation} from 'react-i18next';
 import {useAuth} from '../../../application/providers/AuthProvider';
 import {useToast} from '../../../application/providers/ToastProvider';
@@ -38,11 +38,17 @@ export function MineScreen({navigation}: Props) {
         <Text style={sharedStyles.profileName}>{employee?.name ?? t('员工')}</Text>
         <Text style={sharedStyles.muted}>{employee?.role ?? '--'} · {employee?.dept ?? '--'} · {employee?.country ?? '--'}</Text>
       </View>
+
+      <View style={styles.summaryCard}>
+        <Text style={sharedStyles.cardTitle}>{t('当前可用操作')}</Text>
+        <Text style={sharedStyles.muted}>{t('你可以在这里查看个人信息、切换语言，或在离开设备前安全退出登录。')}</Text>
+      </View>
+
       <Pressable style={sharedStyles.listCard} onPress={() => navigation.navigate('Settings')}>
         <Ionicons name="settings-outline" size={24} color={colors.primary} />
         <View style={sharedStyles.flexOne}>
           <Text style={sharedStyles.cardTitle}>{t('设置')}</Text>
-          <Text style={sharedStyles.muted}>{t('语言、通知和账号安全')}</Text>
+          <Text style={sharedStyles.muted}>{t('当前仅开放语言切换，其余通知和账号安全入口暂未开放。')}</Text>
         </View>
       </Pressable>
       <AppButton title={t('退出登录')} icon="log-out-outline" onPress={() => setLogoutConfirmVisible(true)} variant="secondary" />
@@ -60,3 +66,7 @@ export function MineScreen({navigation}: Props) {
     </ScreenContainer>
   );
 }
+
+const styles = StyleSheet.create({
+  summaryCard: {backgroundColor: '#eff6ff', borderRadius: 22, padding: 16, marginBottom: 12},
+});

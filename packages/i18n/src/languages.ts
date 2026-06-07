@@ -18,6 +18,9 @@ export const DEFAULT_LANGUAGE: SupportedLanguageCode = "zh";
 export function normalizeLanguage(input?: string | null): SupportedLanguageCode {
   if (!input) return DEFAULT_LANGUAGE;
   const lowered = input.toLowerCase();
+  // 路由层已经直接使用 `zht` 作为繁体规范值；这里必须先单独识别它，不能让通用 `zh*` 分支把它吞回简体 `zh`。
+  // 若后续要扩更多中文别名，仍应保证“显式繁体 key 优先、区域别名其次、通用 zh 最后”的顺序。
+  if (lowered === "zht") return "zht";
   if (lowered.startsWith("zh-tw") || lowered.startsWith("zh-hk") || lowered.startsWith("zh-mo")) return "zht";
   if (lowered.startsWith("zh")) return "zh";
   if (lowered.startsWith("en")) return "en";

@@ -11,7 +11,6 @@ export type MainTabParamList = {
 
 export type AttendanceStackParamList = {
   AttendanceList: undefined;
-  AttendanceDetail: {recordId: string};
 };
 
 export type SopStackParamList = {

@@ -6,9 +6,14 @@ function authHeaders(accessToken: string) {
   return {Authorization: `Bearer ${accessToken}`};
 }
 
-export async function fetchSopDocuments(accessToken: string, keyword = ''): Promise<SopDocument[]> {
-  const query = keyword.trim() ? `?keyword=${encodeURIComponent(keyword.trim())}` : '';
-  return httpClient<SopDocument[]>(`/api/mobile/sops${query}`, {
+export async function fetchSopDocuments(accessToken: string, {keyword = '', limit = 10, offset = 0}: {keyword?: string; limit?: number; offset?: number} = {}): Promise<SopDocument[]> {
+  const params = new URLSearchParams();
+  if (keyword.trim()) {
+    params.set('keyword', keyword.trim());
+  }
+  params.set('limit', String(limit));
+  params.set('offset', String(offset));
+  return httpClient<SopDocument[]>(`/api/mobile/sops?${params.toString()}`, {
     headers: authHeaders(accessToken),
   });
 }

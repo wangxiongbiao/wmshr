@@ -28,6 +28,7 @@ import { Pagination } from "./Pagination";
 
 interface AttendanceTableProps {
   employees: Employee[];
+  isActive: boolean;
 }
 
 type CreateAttendanceForm = Omit<AttendanceRecordUpdatePayload, "type"> & {
@@ -133,7 +134,7 @@ function Modal({
   );
 }
 
-export function AttendanceTable({ employees }: AttendanceTableProps) {
+export function AttendanceTable({ employees, isActive }: AttendanceTableProps) {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | "all">("all");
   const [timeFilterType, setTimeFilterType] = useState<"all" | "day" | "month">("all");
   const [selectedDate, setSelectedDate] = useState("");
@@ -206,8 +207,13 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
   };
 
   useEffect(() => {
+    if (!isActive) {
+      return;
+    }
+
+    // 考勤页被缓存后切回来时需要按当前筛选条件后台重拉数据，但不能先清空表格主体。
     void loadData();
-  }, [selectedDate, selectedEmployeeId, selectedMonth, timeFilterType]);
+  }, [isActive, selectedDate, selectedEmployeeId, selectedMonth, timeFilterType]);
 
   useEffect(() => {
     void fetchAttendanceConfig()
@@ -233,6 +239,7 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
     const start = (page - 1) * pageSize;
     return sortedRows.slice(start, start + pageSize);
   }, [page, sortedRows]);
+  const showRefreshing = loading && calculations.length > 0;
 
   const isAllSelected = paginatedRows.length > 0 && paginatedRows.every((row) => selectedIds.has(row.id));
 
@@ -537,6 +544,9 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
         <div className="p-4 border-b border-slate-100 bg-white flex justify-between items-center">
           <h3 className="font-semibold text-slate-800 text-sm flex items-center gap-2">
             <span>{tAdmin("考勤明细与自动计算")}</span>
+            {showRefreshing ? (
+              <span className="text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded-full font-normal border border-brand-100">{tAdmin("刷新中")}</span>
+            ) : null}
             {isFiltered && (
               <span className="text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded-full font-normal border border-brand-100 animate-pulse">{tAdmin("已启用筛选")}</span>
             )}
@@ -602,11 +612,7 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                <tr>
-                  <td colSpan={14} className="px-6 py-12 text-center text-slate-400 text-sm">{tAdmin("正在加载考勤记录...")}</td>
-                </tr>
-              ) : sortedRows.length === 0 ? (
+              {sortedRows.length === 0 ? (
                 <tr>
                   <td colSpan={14} className="px-6 py-12 text-center text-slate-400 text-sm">{tAdmin("没有找到符合筛选条件的考勤记录")}</td>
                 </tr>
@@ -686,17 +692,7 @@ export function AttendanceTable({ employees }: AttendanceTableProps) {
           disabled={loading}
           onPageChange={setPage}
         />
-        <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4 text-slate-400 flex-wrap">
-          <span>{tAdmin("共 {{count}} 条已筛选考勤", { count: sortedRows.length })}</span>
-          <span>•</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-400" />{tAdmin("待打卡 = 当天底稿，暂不计入薪资")}</span>
-          <span>•</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400" />{tAdmin("缺勤 = 历史日期结算后无打卡记录")}</span>
-          <span>•</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-400" />{tAdmin("假期 = 员工休假状态")}</span>
-        </div>
-        </div>
+        {/* 用户要求移除考勤计算底部说明条；这里只保留分页摘要，避免重复占用表格下方空间。 */}
       </div>
 
       <Modal

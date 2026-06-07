@@ -4,16 +4,18 @@
  */
 
 import { useTranslation } from "react-i18next";
-import { SUPPORTED_LANGUAGES } from "@wmshr/i18n";
+import { SUPPORTED_LANGUAGES, type SupportedLanguageCode } from "@wmshr/i18n";
 
 interface HeaderProps {
   title: string;
+  currentLanguage: SupportedLanguageCode;
+  onLanguageChange: (language: SupportedLanguageCode) => void;
   userEmail?: string | null;
   onSignOut?: () => void;
 }
 
-export function Header({ title, userEmail, onSignOut }: HeaderProps) {
-  const { t, i18n } = useTranslation(["admin", "common"]);
+export function Header({ title, currentLanguage, onLanguageChange, userEmail, onSignOut }: HeaderProps) {
+  const { t } = useTranslation(["admin", "common"]);
 
   return (
     <header className="bg-white border-b border-slate-200 h-16 flex items-center justify-between px-6 flex-shrink-0">
@@ -22,8 +24,9 @@ export function Header({ title, userEmail, onSignOut }: HeaderProps) {
         <label className="hidden md:flex items-center gap-2 text-xs text-slate-500">
           <span>{t("语言")}</span>
           <select
-            value={i18n.resolvedLanguage || i18n.language}
-            onChange={(event) => void i18n.changeLanguage(event.target.value)}
+            value={currentLanguage}
+            // 语言切换必须交给上层路由处理，才能在替换 lang 时保留当前业务 tab，不回退到默认 dashboard。
+            onChange={(event) => onLanguageChange(event.target.value as SupportedLanguageCode)}
             className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600 outline-none"
           >
             {SUPPORTED_LANGUAGES.map((language) => (

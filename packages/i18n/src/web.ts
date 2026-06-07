@@ -20,7 +20,9 @@ export function createWebI18n(options: { defaultNS: I18nNamespace; instance?: I1
       lng: DEFAULT_LANGUAGE,
       interpolation: { escapeValue: false },
       detection: {
-        order: ["querystring", "localStorage", "navigator"],
+        // Web 端语言路由一旦存在就必须压过 localStorage；否则刷新或分享 `/:lang/...` 链接时会被旧缓存语言抢回去。
+        order: ["path", "localStorage", "navigator"],
+        lookupFromPathIndex: 0,
         lookupQuerystring: "lang",
         lookupLocalStorage: LANGUAGE_STORAGE_KEY,
         caches: ["localStorage"],
