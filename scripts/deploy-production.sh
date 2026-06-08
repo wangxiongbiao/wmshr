@@ -240,6 +240,10 @@ deploy_home_production() {
   "installCommand": "npm install --include=optional",
   "rewrites": [
     {
+      "source": "/api/(.*)",
+      "destination": "/api/[...path].js"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

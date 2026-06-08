@@ -67,6 +67,24 @@ async function startServer() {
     }
   });
 
+  app.get("/api/public/mobile-app-update", async (_req, res) => {
+    try {
+      // 门户前端只通过本站同源接口取最新包信息，避免把后台域名和跨域细节散落到 React 组件里。
+      // 这里转发后台统一公开更新接口，保证门户下载按钮和移动端更新弹窗消费的是同一份版本数据。
+      const response = await fetch(`${PUBLIC_ADMIN_API_BASE_URL}/api/public/mobile-app-update`);
+      const payload = await response.text();
+      const contentType = response.headers.get("content-type");
+
+      if (contentType) {
+        res.setHeader("Content-Type", contentType);
+      }
+
+      res.status(response.status).send(payload);
+    } catch (error: any) {
+      res.status(502).json({ error: error.message || "Unable to load mobile app update" });
+    }
+  });
+
   app.get("/api/public/google-auth-url", async (req, res) => {
     try {
       const redirectTo = String(req.query.redirectTo || "");

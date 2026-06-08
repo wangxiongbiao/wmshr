@@ -18,7 +18,6 @@ import {
   fetchPayrollResultDetail,
   fetchPayrollResults,
   generateMonthlyPayroll,
-  generateOnePayroll,
   rejectPayrollResult,
   runNightlyPayrollNow,
 } from "../lib/api";
@@ -233,13 +232,12 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
     setSubmitting(true);
     try {
       // 异常薪资不再在动作列硬拦截；异常说明统一放到员工列左侧入口和异常详情弹窗，工资条生成/查看仍按正常发放流程走。
-      // 预览行没有真实结果 id，必须先单人工资生成再拉详情，不能直接拿 id<=0 调详情接口。
-      const sourceResult = result.id > 0 ? result : await generateOnePayroll(result.employeeId, result.yearMonth);
-      const nextDetail = await fetchPayrollResultDetail(sourceResult.id);
+      // 薪资结果只允许由夜间定时任务或“立即核算薪资”按钮更新；打开工资条只读当前结果详情，避免查看动作隐式改写薪资数据。
+      const nextDetail = await fetchPayrollResultDetail(result.id);
       // v2 工资条是发放签收入口，必须用详情接口拿到员工、薪资项和汇总，不能用列表行直接确认。
       setPayslipDetail(nextDetail);
       setSignName("");
-      setIsCashPaid(sourceResult.calculationStatus === "confirmed");
+      setIsCashPaid(result.calculationStatus === "confirmed");
       setIsPayslipOpen(true);
       await loadData();
     } catch (nextError) {
@@ -259,7 +257,7 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
   const handleGenerateMonthly = async () => {
     const confirmed = await confirm({
       title: tAdmin("确认生成薪酬结果"),
-      message: tAdmin("将为当前筛选月份生成员工薪酬结果。已存在结果的员工不会重复生成，是否继续？"),
+      message: tAdmin("将按当前考勤、补扣项和薪资档案刷新当前筛选月份员工薪酬结果，是否继续？"),
       confirmText: tAdmin("开始生成"),
       cancelText: tAdmin("取消"),
       tone: "default"
@@ -488,7 +486,8 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
   const payoutFilter = calculationStatus === "confirmed" ? "paid" : reviewStatus === "pending" ? "pending" : "all";
   const payslipResult = payslipDetail?.result || null;
   const payslipEmployee = payslipDetail?.employee || null;
-  const payslipWorkingDays = payslipResult && payslipResult.standardHours > 0 ? Math.round(payslipResult.validHours / payslipResult.standardHours) : 0;
+  const payslipEffectiveAttendanceDays = payslipResult?.effectiveAttendanceDays || 0;
+  const payslipMealAllowanceDayUnits = payslipResult?.mealAllowanceDayUnits || 0;
   const payslipTaxOrDeduction = payslipResult ? Math.max(0, payslipResult.totalDeduction - payslipResult.socialSecurityAmount) : 0;
   const payslipBaseSalary = payslipResult
     ? (payslipResult.salaryType === "fixed" ? payslipResult.fixedSalary || 0 : payslipResult.hourlyPay)
@@ -499,6 +498,7 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
   const payslipDeductionItems = payslipDetail?.adjustmentItems.filter((item) => item.type === "deduction") || [];
   const payslipIncomeAdjustmentItems = payslipAllowanceItems.concat(payslipOtherItems);
   const payslipStandardPaidHours = payslipResult ? Math.max(0, payslipResult.validHours - payslipResult.overtimePayHours) : 0;
+  const payslipMealAllowancePerDay = payslipEmployee?.mealAllowance || 0;
 
   return (
     <div className="h-full min-h-0 flex flex-col gap-6" data-i18n-language={translationRenderLanguage}>
@@ -660,7 +660,7 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
                 <thead>
                   <tr className="bg-slate-50/50 text-slate-500 text-xs uppercase border-b border-slate-100">
                     <th className="px-6 py-3.5 font-semibold">{tAdmin("员工详情")}</th>
-                    <th className="px-4 py-3.5 font-semibold text-center">{tAdmin("上班天数")}</th>
+                    <th className="px-4 py-3.5 font-semibold text-center">{tAdmin("有效出勤天数")}</th>
                     <th className="px-4 py-3.5 font-semibold text-center">{tAdmin("有效工时")}</th>
                     <th className="px-4 py-3.5 font-semibold text-center text-blue-500">{tAdmin("加班")}</th>
                     <th className="px-4 py-3.5 font-semibold text-center text-blue-600">{tAdmin("总加班时长")}</th>
@@ -674,8 +674,8 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {paginatedResults.map((item) => {
-                    // v2 原型展示“上班天数”；正式接口当前给的是月度汇总工时，因此按标准工时折算天数，后续接口若返回天数再直接替换这里。
-                    const workingDays = item.standardHours > 0 ? Math.round(item.validHours / item.standardHours) : 0;
+                    // 薪资结果现在直接返回“有效出勤天数”，列表和工资条都必须复用同一字段，避免再次回退到工时反推天数的旧错误口径。
+                    const effectiveAttendanceDays = item.effectiveAttendanceDays || 0;
                     const isPaid = item.calculationStatus === "confirmed";
                     const hasException = Boolean(item.blockedReason || item.exceptionDetails?.length);
                     const baseSalary = item.salaryType === "fixed"
@@ -712,7 +712,7 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
                           </div>
                         </td>
                         <td className="px-4 py-4 text-center">
-                          <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold font-mono text-xs">{tAdmin("{{days}} 天", { days: workingDays })}</span>
+                          <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold font-mono text-xs">{tAdmin("{{days}} 天", { days: effectiveAttendanceDays })}</span>
                         </td>
                         <td className="px-4 py-4 text-center text-xs font-mono text-slate-600">
                           {formatDuration(item.validHours)}
@@ -923,7 +923,7 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
             <div className="space-y-2 border-y border-dashed border-slate-200 py-3.5 font-mono text-xs">
               {/* Payslip hour labels keep defaultValue deliberately: employee-facing payroll checks must show a readable label even if a locale resource is temporarily empty. */}
               <div className="grid grid-cols-[minmax(180px,1fr)_auto] items-center gap-3"><span className="min-w-0 whitespace-nowrap font-medium text-slate-600">{tAdmin("标准计薪时限（每日标准工时）:", { defaultValue: "标准计薪时限（每日标准工时）:" })}</span><span className="font-semibold text-slate-800">{formatDuration(payslipResult.standardHours)}</span></div>
-              <div className="grid grid-cols-[minmax(180px,1fr)_auto] items-center gap-3"><span className="min-w-0 whitespace-nowrap font-medium text-slate-600">{tAdmin("本月有效上班天数:", { defaultValue: "本月有效上班天数:" })}</span><span className="font-bold text-slate-800">{tAdmin("{{days}} 天", { days: payslipWorkingDays })}</span></div>
+              <div className="grid grid-cols-[minmax(180px,1fr)_auto] items-center gap-3"><span className="min-w-0 whitespace-nowrap font-medium text-slate-600">{tAdmin("本月有效出勤天数:", { defaultValue: "本月有效出勤天数:" })}</span><span className="font-bold text-slate-800">{tAdmin("{{days}} 天", { days: payslipEffectiveAttendanceDays })}</span></div>
               <div className="grid grid-cols-[minmax(180px,1fr)_auto] items-center gap-3"><span className="min-w-0 whitespace-nowrap font-medium text-slate-600">{tAdmin("本月累计上班工时:", { defaultValue: "本月累计上班工时:" })}</span><span className="font-semibold text-slate-800">{formatDuration(payslipResult.validHours)}</span></div>
               <div className="grid grid-cols-[minmax(180px,1fr)_auto] items-center gap-3"><span className="min-w-0 whitespace-nowrap font-medium text-slate-600">{tAdmin("本月有效加班工时:", { defaultValue: "本月有效加班工时:" })}</span><span className="font-bold text-blue-600">{formatDuration(payslipResult.overtimePayHours)}</span></div>
             </div>
@@ -948,6 +948,14 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
                 <div className="flex justify-between gap-3 rounded-md bg-white/70 px-2 py-1.5">
                   <span className="min-w-0 text-slate-500">{tAdmin("加班应得")} <span className="text-[10px] text-slate-400">{formatDuration(payslipResult.overtimePayHours)}</span></span>
                   <span className="shrink-0 font-bold text-green-600 text-right">+ {formatCurrency(payslipResult.overtimePay, payslipResult.currency)}</span>
+                </div>
+                <div className="flex justify-between gap-3 rounded-md bg-white/70 px-2 py-1.5">
+                  <span className="min-w-0 text-slate-500">{tAdmin("餐补")} <span className="text-[10px] text-slate-400">{tAdmin("折算 {{days}} 天 × {{amount}}", { days: payslipMealAllowanceDayUnits, amount: formatCurrency(payslipMealAllowancePerDay, payslipResult.currency) })}</span></span>
+                  <span className="shrink-0 font-bold text-slate-800 text-right">+ {formatCurrency(payslipResult.mealAllowanceTotal, payslipResult.currency)}</span>
+                </div>
+                <div className="flex justify-between gap-3 rounded-md bg-white/70 px-2 py-1.5">
+                  <span className="min-w-0 text-slate-500">{tAdmin("全勤奖")}</span>
+                  <span className="shrink-0 font-bold text-slate-800 text-right">+ {formatCurrency(payslipResult.attendanceBonusAmount, payslipResult.currency)}</span>
                 </div>
                 {/* 服务费必须显示本次工资结果使用的比例和金额；比例来自 salary_profiles 快照，金额来自 monthly_payroll_results 沉淀值。 */}
                 <div className="flex justify-between gap-3 rounded-md bg-amber-50 px-2 py-1.5">

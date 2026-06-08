@@ -42,11 +42,15 @@ import founderAvatarImage from "./assets/images/founder-avatar.jpg";
 const ADMIN_PORTAL_URL = import.meta.env.VITE_ADMIN_PORTAL_URL
   || (import.meta.env.DEV ? "http://localhost:3000" : "https://admin.dutylix.com");
 
-// 门户默认直接指向当前可安装的 APK 产物直链；运行时若配置了环境变量，则优先使用环境变量覆盖默认地址。
-// 如果后续替换为新的 EAS 构建产物，必须同步更新这里和 `.env.example`，避免门户继续落到已过期的旧包。
-const DEFAULT_ANDROID_DOWNLOAD_URL = "https://expo.dev/artifacts/eas/6ZB1qU7jksmLFkVqfAFWzr.apk";
-const ANDROID_DOWNLOAD_URL = import.meta.env.VITE_ANDROID_DOWNLOAD_URL || DEFAULT_ANDROID_DOWNLOAD_URL;
+// 门户下载区现在统一从数据库里的最新 Android 包记录读取地址；不要再把 APK 直链硬编码回组件或环境变量。
+// 如果后续出新包，更新数据库中的 `public.mobile_app_releases` 即可，门户按钮和二维码会自动切到新地址。
 const DOWNLOAD_SECTION_HASH = "#download";
+
+type MobileAndroidUpdatePayload = {
+  version: string;
+  content: string;
+  url: string;
+};
 
 const languages = SUPPORTED_LANGUAGES.map(({ code, nativeName }) => ({ code, name: nativeName }));
 
@@ -581,10 +585,41 @@ export default function App() {
   const routeState = parseHomeRoute(location.pathname);
   const currentLanguage = routeState.language;
   const [showEmailForm, setShowEmailForm] = useState(false);
+  // 门户下载区固定读取数据库里当前“最新 Android 安装包”记录；不要再回退到组件内硬编码 URL，否则出新包后门户会和后台配置再次脱节。
+  const [androidDownloadUrl, setAndroidDownloadUrl] = useState("");
   // 下载链接一旦触发，就先锁住按钮并给出等待提醒，避免同一个会话里重复点击同一安装包造成重复下载。
   const [hasTriggeredAndroidDownload, setHasTriggeredAndroidDownload] = useState(false);
   // 二维码固定编码当前 Android 下载直链，保证桌面点击下载和手机扫码下载始终指向同一个包地址。
   const [androidDownloadQrCodeDataUrl, setAndroidDownloadQrCodeDataUrl] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    // 下载区只需要当前最新包地址；这里保持最小读取面，只拿 `/api/public/mobile-app-update` 返回的唯一对象。
+    void fetch("/api/public/mobile-app-update")
+      .then(async (response) => {
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(payload.error || "Android 更新信息加载失败");
+        }
+
+        return response.json() as Promise<MobileAndroidUpdatePayload>;
+      })
+      .then((payload) => {
+        if (!cancelled) {
+          setAndroidDownloadUrl(String(payload.url || "").trim());
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAndroidDownloadUrl("");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (location.pathname === "/") {
@@ -627,15 +662,15 @@ export default function App() {
   }, [location.hash, location.pathname, showEmailForm]);
 
   useEffect(() => {
-    if (!ANDROID_DOWNLOAD_URL) {
+    if (!androidDownloadUrl) {
       setAndroidDownloadQrCodeDataUrl("");
       return;
     }
 
     let cancelled = false;
 
-    // 二维码直接编码当前下载地址，后续如果切换环境变量或默认 APK 链接，这里会自动随下载地址一起更新。
-    void QRCode.toDataURL(ANDROID_DOWNLOAD_URL, {
+    // 二维码直接编码数据库里当前最新下载地址，保证桌面点击和手机扫码不会落到不同版本的安装包。
+    void QRCode.toDataURL(androidDownloadUrl, {
       errorCorrectionLevel: "M",
       margin: 1,
       width: 220,
@@ -656,7 +691,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [ANDROID_DOWNLOAD_URL]);
+  }, [androidDownloadUrl]);
 
   const handleLanguageRouteChange = (language: SupportedLanguageCode) => {
     navigate({ pathname: buildHomeRoute(language), hash: location.hash });
@@ -681,7 +716,7 @@ export default function App() {
   };
 
   const triggerAndroidDownload = () => {
-    if (!ANDROID_DOWNLOAD_URL || hasTriggeredAndroidDownload) {
+    if (!androidDownloadUrl || hasTriggeredAndroidDownload) {
       return;
     }
 
@@ -690,7 +725,7 @@ export default function App() {
 
     // 这里用临时锚点触发浏览器原生下载导航；真正是否直接下载取决于目标 URL 返回的 Content-Disposition/文件类型。
     const downloadLink = document.createElement("a");
-    downloadLink.href = ANDROID_DOWNLOAD_URL;
+    downloadLink.href = androidDownloadUrl;
     downloadLink.rel = "noopener noreferrer";
     downloadLink.click();
   };
@@ -796,7 +831,7 @@ export default function App() {
             <button
               type="button"
               onClick={triggerAndroidDownload}
-              disabled={!ANDROID_DOWNLOAD_URL || hasTriggeredAndroidDownload}
+              disabled={!androidDownloadUrl || hasTriggeredAndroidDownload}
               className="mx-auto inline-flex items-center justify-center gap-3 px-8 py-4 bg-brand-accent text-white rounded-2xl font-bold text-lg shadow-2xl shadow-brand-accent/30 hover:bg-brand-accent/90 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/40 disabled:shadow-none transition-all"
             >
               <Smartphone className="w-5 h-5" />

@@ -289,8 +289,12 @@ export function calculateDailyAttendanceRow(employee, record, config, date, owne
     ? Number(employee.fixed_salary) / 30
     : Math.max(0, validHours - overtimePayHours) * hourlyRate;
   const overtimePay = overtimePayHours * overtimeFeeInEmployeeCurrency;
-  // 餐补按员工档案中的每日固定金额发放，只在真实正常出勤记录上计入；病假/缺勤/休假/异常行都必须为 0，避免薪资前置数据把非正常考勤误算补贴。
-  const mealAllowanceAmount = record.type === "normal" ? Number(employee.meal_allowance || 0) : 0;
+  // 餐补按“当日有效工时 / 当日标准工时”折算；满勤一天拿整额，半天拿一半，最多不超过一天额度。
+  // 非正常考勤（请假/病假/缺勤/异常）在前面的早退分支已直接返回 0，这里只处理真实出勤行的折算金额。
+  const mealAllowanceRatio = standardHours > 0 ? Math.min(validHours / standardHours, 1) : 0;
+  const mealAllowanceAmount = record.type === "normal"
+    ? Number(employee.meal_allowance || 0) * mealAllowanceRatio
+    : 0;
 
   return buildAttendanceResultPayload({
     ownerUserId,

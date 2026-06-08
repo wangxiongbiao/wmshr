@@ -378,6 +378,12 @@ export interface MonthlyPayrollResult {
   fixedSalary: number | null;
   hourlyRate: number | null;
   currency: CurrencyCode;
+  // 工资条里的“有效出勤天数”必须直接来自后端明确定义，不能由前端用工时占比反推。
+  effectiveAttendanceDays: number;
+  // 餐补折算天数允许出现 0.5、0.75 这类小数；工资条说明必须直接使用后端折算结果，不能由前端自行再推。
+  mealAllowanceDayUnits: number;
+  mealAllowanceTotal: number;
+  attendanceBonusAmount: number;
   validHours: number;
   standardHours: number;
   hourlyPay: number;

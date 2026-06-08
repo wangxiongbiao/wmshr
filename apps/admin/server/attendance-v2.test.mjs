@@ -67,6 +67,19 @@ function normalRecord(overrides = {}) {
   assert.equal(row.total_pay, 350);
 }
 
+// 餐补按有效工时占标准工时比例折算：上一整天拿整额，半天只拿一半。
+{
+  const row = calculateDailyAttendanceRow(
+    baseEmployee({ meal_allowance: 100 }),
+    normalRecord({ in_time: "08:30", out_time: "13:30" }),
+    DEFAULT_ATTENDANCE_CONFIG,
+    date,
+    ownerUserId
+  );
+  assert.equal(row.valid_hours, 4);
+  assert.equal(row.meal_allowance_amount, 50);
+}
+
 // 全局规则币种可以不是员工币种；服务端必须先换算到员工薪资币种，再计算个人考勤行金额。
 {
   const config = { ...DEFAULT_ATTENDANCE_CONFIG, ot_hourly_fee: 2, currency: "USD" };

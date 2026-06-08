@@ -24,10 +24,10 @@
   - 若重试成功，继续执行生产发布脚本
   - 若仍失败，再进一步改用 Git 传输层参数或检查远端连通性
 
-  ### 2026-06-07 问题 3
-  - 原因：门户新增 `qrcode` 依赖后，Vite 旧的依赖预构建缓存仍在被浏览器和 dev server 使用，出现 `Outdated Optimize Dep`；同时 `home-web.log` 中出现对 `apps/home/node_modules/i18next/dist/esm/i18next.js` 的旧解析路径读取失败，说明 workspace hoisted 依赖与本地 Vite 优化缓存状态不一致。
-  - 导致的问题：首页本地开发环境报错，浏览器日志出现 `GET /node_modules/.vite/deps/qrcode.js ... 504 (Outdated Optimize Dep)`，页面资源加载异常。
-  - 解决方式：删除 `apps/home/node_modules/.vite` 的依赖优化缓存，随后执行项目现有重启脚本 `npm run restart:dev`，让 `home-web` 基于当前依赖树重新生成 Vite 预构建结果；最终用 `http://127.0.0.1:3001/` 作为重复可核验的验收入口确认服务恢复。
+### 2026-06-07 问题 3
+- 原因：门户新增 `qrcode` 依赖后，Vite 旧的依赖预构建缓存仍在被浏览器和 dev server 使用，出现 `Outdated Optimize Dep`；同时 `home-web.log` 中出现对 `apps/home/node_modules/i18next/dist/esm/i18next.js` 的旧解析路径读取失败，说明 workspace hoisted 依赖与本地 Vite 优化缓存状态不一致。
+- 导致的问题：首页本地开发环境报错，浏览器日志出现 `GET /node_modules/.vite/deps/qrcode.js ... 504 (Outdated Optimize Dep)`，页面资源加载异常。
+- 解决方式：删除 `apps/home/node_modules/.vite` 的依赖优化缓存，随后执行项目现有重启脚本 `npm run restart:dev`，让 `home-web` 基于当前依赖树重新生成 Vite 预构建结果；最终用 `http://127.0.0.1:3001/` 作为重复可核验的验收入口确认服务恢复。
 
 ### 2026-06-07 问题 4
 - 原因：执行一键生产发布脚本时，代码检查、构建、测试、Supabase 推送、migration 校验、git fetch / commit / push 全部成功，但在 `vercel deploy --prod --yes` 阶段触发 Vercel 文件体积限制，CLI 输出 `Uploading (0.0B/2.4GB)` 后报错 `File size limit exceeded (100 MB)`，说明当前发布上下文把不应进入 Vercel 的大体积文件一并带上了。
@@ -43,3 +43,36 @@
 - 原因：员工端打卡链路没有做国家、IP 或地理围栏限制；后端 `upsertMobileAttendancePunch` 只校验“当前状态是否允许打上/下班卡”和“上班时间说明是否必填”，经检查海外场景更可能命中的是日期/时间口径不一致：移动端展示使用设备本地时间，提交时却把 `new Date().toISOString()` 作为 `clientTime` 上送，服务端又直接用字符串切片得到 UTC 的日期和时间（`normalizeMobileDate` / `normalizeMobileTime`），`/api/mobile/attendance/today` 默认日期也取服务端 UTC `getTodayDateKey()`，没有统一到业务时区 `Asia/Bangkok`。
 - 导致的问题：用户在海外、尤其跨时区较大时，首页看到的“今天”和后端实际判定的“打卡日期/时段”可能不是同一天或同一班次，最终在 `currentStatus.status` 与当前动作不一致时被后端拒绝，并报出“当前状态不允许上班打卡/下班打卡”。
 - 解决方式：后端改为以服务端当前时间作为唯一业务判定时间源，并统一换算到 `Asia/Bangkok` 生成打卡日期和时间；`/api/mobile/attendance/today` 也改为沿用同一业务日口径。前端保留上送 `clientTime`，并新增 `timeZone` 与 `timezoneOffsetMinutes` 只用于排查，后端把客户端时间/时区与服务端入账时间一起写入 `attendance_records.note`，便于后续确认用户是在哪个时区发起打卡。最终执行 `HOME=/Users/admin npm --workspace @wmshr/mobile run lint`、`HOME=/Users/admin npm --workspace @wmshr/admin run lint`、`HOME=/Users/admin npm run build:admin` 全部通过。
+
+### 2026-06-08 问题 7
+- 原因：门户线上下载区依赖同源接口 `/api/public/mobile-app-update` 读取最新 Android 包地址，但 `https://dutylix.com/api/public/mobile-app-update` 当前返回的是门户首页 HTML，而不是 JSON；同时源后端 `https://admin.dutylix.com/api/mobile/app-update` 也返回 `{"error":"Android 更新信息未配置完整"}`，说明门户生产站既没有可用的同源代理结果，后台也没有可下发的完整包信息。
+- 导致的问题：门户顶部仍有“下载”入口，但点击后只是回到首页 `#download` 区块；由于前端在接口失败时会把 `androidDownloadUrl` 置空，下载区按钮会处于 disabled 状态，二维码也不会渲染，因此用户会看到“有下载入口但没有可用下载界面/下载内容”。
+- 原计划：发布后通过门户线上下载区完成页面级验收，并验证旧 `/:lang/download` 链接会无感回到首页下载区块且能显示真实下载内容。
+- 替代验证：已改用源码核对 + 线上 HTTP 探测完成验收；确认 `/:lang/download` 在线上返回 200，前端源码会在运行时把它 replace 到 `/:lang#download`，但 `dutylix.com/api/public/mobile-app-update` 线上实际返回 `text/html` 首页内容，`admin.dutylix.com/api/mobile/app-update` 返回配置不完整错误，因此当前阻塞点不是下载路由丢失，而是下载数据源不可用。
+- 当前判断：本次问题分两层：1）门户生产域名缺少可工作的 `mobile-app-update` 同源接口；2）后台最新 Android 安装包记录本身未配置完整。两层任一未修复，下载区都不会恢复为可下载状态。
+- 已尝试：
+  - `curl -I -L -s https://dutylix.com/zh-CN/download`
+  - `curl -s -D ... https://dutylix.com/api/public/mobile-app-update`
+  - `curl -s https://admin.dutylix.com/api/mobile/app-update`
+  - 核对 `apps/home/src/App.tsx` 与 `apps/home/server.ts` 中的下载入口、旧路由跳转和同源代理逻辑
+- 下一步：
+  - 先补齐门户生产环境的 `mobile-app-update` 同源接口发布方式（或改成直接读取可控后端接口）
+  - 再补齐后台 `mobile_app_releases` 当前最新 Android 包配置
+  - 修复后重新做一次门户下载区线上页面级验收
+
+  ### 2026-06-08 问题 8
+  - 原因：工资条前端把“上班天数”写成 `Math.round(validHours / standardHours)`，其中 `standardHours` 是整月标准工时，不是单日标准工时；例如 Soe 2026-06 的 `validHours=43.5`、`standardHours=48`，前端直接四舍五入得到 `1`。
+  - 导致的问题：工资条里的“上班天数”会把整月真实出勤天数错误压缩成 0/1 这类失真值，和考勤逐日结果明显不一致。
+  - 当前判断：这不是考勤原始数据少了，而是工资条展示公式口径错了；当前后端月汇总也没有单独提供正式的 `working_days` 字段，前端用工时比值硬推天数，本身就不可靠。
+  - 已尝试：
+    - 查询 Soe（employee_id=15）2026-06 的 `attendance_calculation_results`
+    - 查询同月 `monthly_attendance_summaries` 与 `monthly_payroll_results`
+    - 读取 `apps/admin/src/components/PayrollTable.tsx` 中工资条 `payslipWorkingDays` 计算公式
+  - 下一步：
+    - 先确定“上班天数”的业务定义（完整出勤天数 / 有效出勤天数 / 有记录且非请假缺勤天数）
+    - 再改为后端按明确定义提供字段，前端禁止继续用 `validHours / standardHours` 反推
+
+### 2026-06-08 问题 9
+- 原因：薪资月结果原公式没有把餐补纳入 `gross_pay / net_pay`，且全勤奖在薪资计算阶段仍会被“有缺勤自动清零”的旧逻辑覆盖，导致工资条和业务预期不一致。
+- 导致的问题：税后实发偏低，员工配置好的餐补和全勤奖不能按最新业务口径稳定进入薪资核算。
+- 解决方式：把餐补改为 `员工单日餐补 × 有效出勤天数` 纳入月薪总额；同时移除薪资计算阶段对全勤奖的缺勤自动清零逻辑，直接使用员工档案配置值；并在工资条说明中单独展示餐补与全勤奖金额来源。

@@ -19,9 +19,7 @@ const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || process
 const EMPLOYEE_APP_DEFAULT_PASSWORD = "Aa123456";
 const EMPLOYEE_APP_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const EMPLOYEE_APP_TOKEN_SECRET = process.env.EMPLOYEE_APP_TOKEN_SECRET || SUPABASE_SERVICE_ROLE_KEY || SUPABASE_PUBLISHABLE_KEY || "wmshr-local-mobile-token-secret";
-const MOBILE_ANDROID_LATEST_VERSION = String(process.env.MOBILE_ANDROID_LATEST_VERSION || "").trim();
-const MOBILE_ANDROID_LATEST_CONTENT = String(process.env.MOBILE_ANDROID_LATEST_CONTENT || "").trim();
-const MOBILE_ANDROID_LATEST_URL = String(process.env.MOBILE_ANDROID_LATEST_URL || "").trim();
+const MOBILE_ANDROID_RELEASE_PLATFORM = "android";
 
 if (!SUPABASE_URL || (!SUPABASE_SERVICE_ROLE_KEY && !SUPABASE_PUBLISHABLE_KEY)) {
   throw new Error("Missing SUPABASE_URL and a usable Supabase API key in apps/admin/.env or Vercel environment variables");
@@ -135,18 +133,27 @@ function validateGoogleAuthRedirectUrl(redirectTo) {
   return null;
 }
 
-function getMobileAndroidUpdatePayload() {
-  const payload = {
-    version: MOBILE_ANDROID_LATEST_VERSION,
-    content: MOBILE_ANDROID_LATEST_CONTENT,
-    url: MOBILE_ANDROID_LATEST_URL,
-  };
+async function getMobileAndroidUpdatePayload() {
+  const { data, error } = await supabase
+    .from("mobile_app_releases")
+    .select("version, content, url")
+    .eq("platform", MOBILE_ANDROID_RELEASE_PLATFORM)
+    .maybeSingle();
 
-  if (!payload.version || !payload.content || !payload.url) {
+  if (error) {
+    throw error;
+  }
+
+  // 门户下载区和 App 在线更新都共用这条 Android 最新包记录；这里必须强制三元组完整，避免页面拿到半截数据后出现“按钮能点但包失效”。
+  if (!data?.version || !data?.content || !data?.url) {
     throw new Error("Android 更新信息未配置完整");
   }
 
-  return payload;
+  return {
+    version: String(data.version).trim(),
+    content: String(data.content).trim(),
+    url: String(data.url).trim(),
+  };
 }
 
 async function fetchWorkspaceBootstrapState(ownerUserId) {
@@ -1061,6 +1068,11 @@ function mapPayrollResultRow(row, employeeMap = new Map()) {
     fixedSalary: row.fixed_salary === null ? null : Number(row.fixed_salary),
     hourlyRate: row.hourly_rate === null ? null : Number(row.hourly_rate),
     currency: row.currency,
+    // “有效出勤天数”必须由后端按日考勤结果明确给出；前端不能再用月工时/标准工时反推，否则会把整月工时占比误显示成 0/1 天。
+    effectiveAttendanceDays: Number(row.effective_attendance_days || 0),
+    mealAllowanceDayUnits: Number(row.meal_allowance_day_units || 0),
+    mealAllowanceTotal: Number(row.meal_allowance_total || 0),
+    attendanceBonusAmount: Number(row.attendance_bonus_amount || 0),
     validHours: Number(row.valid_hours),
     standardHours: Number(row.standard_hours),
     hourlyPay: Number(row.hourly_pay),
@@ -1096,6 +1108,24 @@ function buildPayrollPreviewRow(payload) {
   };
 }
 
+function buildLivePayrollListRow(payload, existingPayrollResult = null) {
+  if (!existingPayrollResult) {
+    return buildPayrollPreviewRow(payload);
+  }
+
+  return {
+    ...payload,
+    // 列表金额必须始终按当前考勤、补扣项和薪资档案实时重算；
+    // 但若库里已有工资结果，仍要借用真实主键和锁定状态，避免前端动作入口丢失目标记录。
+    id: Number(existingPayrollResult.id),
+    created_at: existingPayrollResult.created_at,
+    updated_at: existingPayrollResult.updated_at,
+    confirmed_at: existingPayrollResult.confirmed_at,
+    calculation_status: existingPayrollResult.calculation_status,
+    review_status: existingPayrollResult.review_status
+  };
+}
+
 function getMonthEndDate(yearMonth) {
   return getMonthRange(yearMonth).periodEndDate;
 }
@@ -1106,6 +1136,43 @@ function getMonthStartDate(yearMonth) {
 
 function sumBy(rows, predicate) {
   return roundToTwo(rows.filter(predicate).reduce((sum, row) => sum + Number(row.amount), 0));
+}
+
+function countEffectiveAttendanceDays(dailyCalculations = []) {
+  // 有效出勤天数按“当日有效工时 > 0”统计；这与工资条的人类理解一致，也避免请假/缺勤/零工时异常日被误算成已出勤。
+  return dailyCalculations.filter((row) => Number(row.valid_hours || 0) > 0).length;
+}
+
+function calculateMealAllowanceDayUnits(dailyCalculations = []) {
+  // 餐补按单日工时占比折算：整天算 1 天，半天算 0.5 天，超出标准工时也最多按 1 天记。
+  return roundToTwo(dailyCalculations.reduce((sum, row) => {
+    const standardHours = Number(row.standard_hours || 0);
+    const validHours = Number(row.valid_hours || 0);
+    if (standardHours <= 0 || validHours <= 0) {
+      return sum;
+    }
+    return sum + Math.min(validHours / standardHours, 1);
+  }, 0));
+}
+
+function shouldGrantAttendanceBonus(dailyCalculations = [], yearMonth) {
+  const currentYearMonth = getBangkokDateKey().slice(0, 7);
+  if (!yearMonth || String(yearMonth) >= currentYearMonth) {
+    // 全勤奖要求“整个月每天完整上班”；当月未结束时不能提前发放。
+    return false;
+  }
+  if (!dailyCalculations.length) {
+    return false;
+  }
+  return dailyCalculations.every((row) => {
+    const status = String(row.status || "");
+    const standardHours = Number(row.standard_hours || 0);
+    const validHours = Number(row.valid_hours || 0);
+    return ["normal", "manual_adjusted"].includes(status)
+      && !row.has_exception
+      && standardHours > 0
+      && validHours >= standardHours;
+  });
 }
 
 function normalizeSalaryAdjustmentPayload(body) {
@@ -2010,10 +2077,10 @@ function buildMonthlyPayrollPayloadFromContext(context, yearMonth, ownerUserId, 
   const allowanceTotal = sumBy(adjustmentItems, (item) => item.type === "allowance");
   const deductionTotal = sumBy(adjustmentItems, (item) => item.type === "deduction");
   const otherTotal = sumBy(adjustmentItems, (item) => item.type === "other");
-  const monthlyAbsentCount = Number(attendanceSummary?.absent_count || 0);
-  // 全勤奖仍读取员工档案配置，但必须受当月考勤汇总约束：只要出现缺勤，本月全勤奖归零。
-  // 这里依赖 recalculateMonthlyAttendance 先刷新 monthly_attendance_summaries，避免薪资生成继续沿用员工档案里的固定全勤奖。
-  const attendanceBonus = monthlyAbsentCount > 0 ? 0 : getNonNegativePayrollAmount(employee.attendance_bonus);
+  // 全勤奖只在“该月每个应计算日都完整上班”时发放；请假、缺勤、异常、半天班都会清空。
+  const attendanceBonus = shouldGrantAttendanceBonus(dailyCalculations, yearMonth)
+    ? getNonNegativePayrollAmount(employee.attendance_bonus)
+    : 0;
   const socialSecurity = calculateEmployeeSocialSecurity(employee, dailyCalculations);
   const validHours = Number(attendanceSummary?.total_valid_hours || 0);
   const standardHours = Number(attendanceSummary?.total_standard_hours || 0);
@@ -2029,7 +2096,11 @@ function buildMonthlyPayrollPayloadFromContext(context, yearMonth, ownerUserId, 
     const fee = row.attendance_rule_id ? Number(ruleFeeMap.get(Number(row.attendance_rule_id)) || 0) : 0;
     return sum + Number(row.overtime_pay_hours || 0) * fee;
   }, 0)) : 0;
-  const grossPay = roundToTwo(basePay + serviceFeeAmount + overtimePay + attendanceBonus + allowanceTotal + otherTotal);
+  const effectiveAttendanceDays = countEffectiveAttendanceDays(dailyCalculations);
+  const mealAllowanceDayUnits = calculateMealAllowanceDayUnits(dailyCalculations);
+  // 餐补按“单日餐补 × 折算出勤天数”进入月薪；满勤一天算 1，半天算 0.5，请假/缺勤/异常仍为 0。
+  const mealAllowanceTotal = roundToTwo(getNonNegativePayrollAmount(employee.meal_allowance) * mealAllowanceDayUnits);
+  const grossPay = roundToTwo(basePay + serviceFeeAmount + overtimePay + attendanceBonus + mealAllowanceTotal + allowanceTotal + otherTotal);
   const totalDeduction = roundToTwo(socialSecurity + deductionTotal);
   const netPay = roundToTwo(grossPay - totalDeduction);
   const exceptionCount = Number(attendanceSummary?.exception_count || 0);
@@ -2045,6 +2116,11 @@ function buildMonthlyPayrollPayloadFromContext(context, yearMonth, ownerUserId, 
     fixed_salary: fixedSalary,
     hourly_rate: hourlyRate,
     currency: salaryConfig.currency,
+    // 这些字段仅作为接口响应的展示补充，不入库；写库仍只使用 monthly_payroll_results 已存在列，避免为一个展示修正扩大数据库变更范围。
+    effective_attendance_days: effectiveAttendanceDays,
+    meal_allowance_day_units: mealAllowanceDayUnits,
+    meal_allowance_total: mealAllowanceTotal,
+    attendance_bonus_amount: attendanceBonus,
     valid_hours: roundToTwo(validHours),
     standard_hours: roundToTwo(standardHours),
     hourly_pay: roundToTwo(hourlyPay),
@@ -2090,11 +2166,19 @@ async function calculateMonthlyPayroll(employeeId, yearMonth, ownerUserId, { ski
   }
 
   const employeeMap = new Map([[Number(employee.id), employee]]);
-  const row = await upsertMonthlyPayrollResult(buildMonthlyPayrollPayloadFromContext(context, yearMonth, ownerUserId, { forceRecalculate }));
+  const payload = buildMonthlyPayrollPayloadFromContext(context, yearMonth, ownerUserId, { forceRecalculate });
+  const {
+    effective_attendance_days,
+    meal_allowance_day_units,
+    meal_allowance_total,
+    attendance_bonus_amount,
+    ...dbPayload
+  } = payload;
+  const row = await upsertMonthlyPayrollResult(dbPayload);
 
   return {
     row,
-    mapped: mapPayrollResultRow(row, employeeMap),
+    mapped: mapPayrollResultRow({ ...row, effective_attendance_days, meal_allowance_day_units, meal_allowance_total, attendance_bonus_amount }, employeeMap),
     skipped: false
   };
 }
@@ -2111,24 +2195,20 @@ async function fetchPayrollResultDetail(resultId, ownerUserId) {
     throw error;
   }
 
-  const [employeeResult, summaryResult, adjustmentItemsResult] = await Promise.all([
-    supabase.from("employees").select("*").eq("owner_user_id", ownerUserId).eq("id", Number(row.employee_id)).maybeSingle(),
-    supabase.from("monthly_attendance_summaries").select("*").eq("owner_user_id", ownerUserId).eq("employee_id", Number(row.employee_id)).eq("year_month", row.year_month).maybeSingle(),
-    supabase.from("salary_adjustment_items").select("*").eq("owner_user_id", ownerUserId).eq("employee_id", Number(row.employee_id)).eq("year_month", row.year_month).order("created_at", { ascending: false })
-  ]);
+  const context = await getPayrollSourceContext(Number(row.employee_id), row.year_month, ownerUserId);
+  const employeeMap = new Map([[Number(context.employee.id), context.employee]]);
+  const liveResultRow = buildLivePayrollListRow(
+    // 详情和列表需要保持同一实时计算口径；详情页不能再直接回显历史沉淀金额，否则用户会看到列表与工资条不一致。
+    buildMonthlyPayrollPayloadFromContext(context, row.year_month, ownerUserId, { previewOnly: true }),
+    row
+  );
 
-  if (employeeResult.error) throw employeeResult.error;
-  if (summaryResult.error) throw summaryResult.error;
-  if (adjustmentItemsResult.error) throw adjustmentItemsResult.error;
-
-  const employeeMap = employeeResult.data ? new Map([[Number(employeeResult.data.id), employeeResult.data]]) : new Map();
-  const salaryProfile = await fetchSalaryProfileForMonth(Number(row.employee_id), row.year_month, ownerUserId);
   return {
-    result: mapPayrollResultRow(row, employeeMap),
-    employee: employeeResult.data ? mapEmployeeRow(employeeResult.data) : null,
-    salaryProfile: salaryProfile ? mapSalaryProfileRow(salaryProfile) : null,
-    attendanceSummary: summaryResult.data ? mapAttendanceSummaryRow(summaryResult.data, employeeMap) : null,
-    adjustmentItems: (adjustmentItemsResult.data || []).map(mapSalaryAdjustmentItemRow)
+    result: mapPayrollResultRow(liveResultRow, employeeMap),
+    employee: mapEmployeeRow(context.employee),
+    salaryProfile: context.salaryProfile ? mapSalaryProfileRow(context.salaryProfile) : null,
+    attendanceSummary: context.attendanceSummary ? mapAttendanceSummaryRow(context.attendanceSummary, employeeMap) : null,
+    adjustmentItems: context.adjustmentItems.map(mapSalaryAdjustmentItemRow)
   };
 }
 
@@ -2685,10 +2765,20 @@ app.get("/api/mobile/auth/me", requireEmployeeAppAuth, async (req, res) => {
   });
 });
 
-app.get("/api/mobile/app-update", (_req, res) => {
+app.get("/api/public/mobile-app-update", async (_req, res) => {
   try {
-    // 在线更新首版只返回一个当前 Android 最新版本对象；不要在这里擅自扩展成多平台、多版本历史或灰度策略。
-    res.json(getMobileAndroidUpdatePayload());
+    // 门户下载区和移动端更新弹窗都走同一个无鉴权公开接口，避免两个入口各自维护不同路径或返回结构。
+    // 这里继续只返回当前唯一最新对象，不扩成历史列表或灰度策略；如后续要做多平台，再先统一数据模型和调用方。
+    res.json(await getMobileAndroidUpdatePayload());
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Android 更新信息加载失败" });
+  }
+});
+
+app.get("/api/mobile/app-update", async (_req, res) => {
+  try {
+    // 兼容已经发出的移动端版本；新代码统一改走 `/api/public/mobile-app-update`，避免继续把公开接口挂在非 public 路径下。
+    res.json(await getMobileAndroidUpdatePayload());
   } catch (error) {
     res.status(500).json({ error: error.message || "Android 更新信息加载失败" });
   }
@@ -4048,9 +4138,13 @@ app.get("/api/admin/payroll-results", async (req, res) => {
       // 旧实现按员工逐个 getPayrollSourceContext，导致 1 + N * 7 次 Supabase 查询；列表页改为月度批量取数后只在内存中组装上下文。
       // 真实生成/重算仍走 calculateMonthlyPayroll，继续保留锁定校验、薪资档案补建和写库逻辑，避免只为列表预览引入 GET 副作用。
       const context = buildPayrollSourceContextFromBatch(employee, yearMonth, ownerUserId, batch);
-      const mappedRow = context.existingPayrollResult
-        ? mapPayrollResultRow(context.existingPayrollResult, employeeMap)
-        : mapPayrollResultRow(buildPayrollPreviewRow(buildMonthlyPayrollPayloadFromContext(context, yearMonth, ownerUserId, { previewOnly: true })), employeeMap);
+      const mappedRow = mapPayrollResultRow(
+        buildLivePayrollListRow(
+          buildMonthlyPayrollPayloadFromContext(context, yearMonth, ownerUserId, { previewOnly: true }),
+          context.existingPayrollResult
+        ),
+        employeeMap
+      );
       // 异常图标并入员工详情列后，列表行必须直接携带日级异常明细，弹窗才能展示“哪天异常、原因是什么”。
       return {
         ...mappedRow,
@@ -4159,17 +4253,13 @@ app.post("/api/admin/payroll-results/generate-monthly", async (req, res) => {
     });
 
     let successCount = 0;
-    let skippedCount = 0;
     const failures = [];
 
     for (const employee of targetEmployees) {
       try {
-        const result = await calculateMonthlyPayroll(Number(employee.id), yearMonth, ownerUserId, { skipExisting: true });
-        if (result.skipped) {
-          skippedCount += 1;
-        } else {
-          successCount += 1;
-        }
+        // 用户显式触发“生成”时也要刷新已有工资结果，不能因为库里已有旧沉淀结果而跳过。
+        await calculateMonthlyPayroll(Number(employee.id), yearMonth, ownerUserId, { forceRecalculate: true });
+        successCount += 1;
       } catch (error) {
         failures.push({
           employeeId: Number(employee.id),
@@ -4180,7 +4270,7 @@ app.post("/api/admin/payroll-results/generate-monthly", async (req, res) => {
 
     res.json({
       successCount,
-      skippedCount,
+      skippedCount: 0,
       failureCount: failures.length,
       failures
     });
