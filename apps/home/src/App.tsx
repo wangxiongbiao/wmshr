@@ -28,6 +28,7 @@ import {
   Briefcase
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
+import QRCode from "qrcode";
 import { useTranslation } from "react-i18next";
 import { normalizeLanguage, SUPPORTED_LANGUAGES, type SupportedLanguageCode } from "@wmshr/i18n";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -582,6 +583,8 @@ export default function App() {
   const [showEmailForm, setShowEmailForm] = useState(false);
   // 下载链接一旦触发，就先锁住按钮并给出等待提醒，避免同一个会话里重复点击同一安装包造成重复下载。
   const [hasTriggeredAndroidDownload, setHasTriggeredAndroidDownload] = useState(false);
+  // 二维码固定编码当前 Android 下载直链，保证桌面点击下载和手机扫码下载始终指向同一个包地址。
+  const [androidDownloadQrCodeDataUrl, setAndroidDownloadQrCodeDataUrl] = useState("");
 
   useEffect(() => {
     if (location.pathname === "/") {
@@ -622,6 +625,38 @@ export default function App() {
 
     return () => window.cancelAnimationFrame(frame);
   }, [location.hash, location.pathname, showEmailForm]);
+
+  useEffect(() => {
+    if (!ANDROID_DOWNLOAD_URL) {
+      setAndroidDownloadQrCodeDataUrl("");
+      return;
+    }
+
+    let cancelled = false;
+
+    // 二维码直接编码当前下载地址，后续如果切换环境变量或默认 APK 链接，这里会自动随下载地址一起更新。
+    void QRCode.toDataURL(ANDROID_DOWNLOAD_URL, {
+      errorCorrectionLevel: "M",
+      margin: 1,
+      width: 220,
+      color: {
+        dark: "#111827",
+        light: "#FFFFFFFF",
+      },
+    }).then((dataUrl) => {
+      if (!cancelled) {
+        setAndroidDownloadQrCodeDataUrl(dataUrl);
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        setAndroidDownloadQrCodeDataUrl("");
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ANDROID_DOWNLOAD_URL]);
 
   const handleLanguageRouteChange = (language: SupportedLanguageCode) => {
     navigate({ pathname: buildHomeRoute(language), hash: location.hash });
@@ -773,6 +808,24 @@ export default function App() {
               <p className="mt-4 text-sm md:text-base text-brand-accent" role="status" aria-live="polite">
                 {t('downloadSection.waitingReminder')}
               </p>
+            ) : null}
+            {androidDownloadQrCodeDataUrl ? (
+              <div className="mt-10 mx-auto max-w-sm rounded-[2rem] border border-white/10 bg-white/5 p-6 text-center">
+                <div className="mx-auto flex w-fit items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em] text-white/70">
+                  <Smartphone className="w-4 h-4" />
+                  {t('downloadSection.qrTitle')}
+                </div>
+                <div className="mx-auto mt-5 flex w-fit rounded-[1.5rem] bg-white p-4 shadow-xl shadow-black/20">
+                  <img
+                    src={androidDownloadQrCodeDataUrl}
+                    alt={t('downloadSection.qrTitle')}
+                    className="h-44 w-44 rounded-xl"
+                  />
+                </div>
+                <p className="mt-5 text-sm md:text-base leading-relaxed text-white/60">
+                  {t('downloadSection.qrDescription')}
+                </p>
+              </div>
             ) : null}
           </div>
         </div>

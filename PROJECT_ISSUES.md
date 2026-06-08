@@ -23,3 +23,8 @@
   - 先用 `git -c http.version=HTTP/1.1 fetch origin main` 做最小重试
   - 若重试成功，继续执行生产发布脚本
   - 若仍失败，再进一步改用 Git 传输层参数或检查远端连通性
+
+  ### 2026-06-07 问题 3
+  - 原因：门户新增 `qrcode` 依赖后，Vite 旧的依赖预构建缓存仍在被浏览器和 dev server 使用，出现 `Outdated Optimize Dep`；同时 `home-web.log` 中出现对 `apps/home/node_modules/i18next/dist/esm/i18next.js` 的旧解析路径读取失败，说明 workspace hoisted 依赖与本地 Vite 优化缓存状态不一致。
+  - 导致的问题：首页本地开发环境报错，浏览器日志出现 `GET /node_modules/.vite/deps/qrcode.js ... 504 (Outdated Optimize Dep)`，页面资源加载异常。
+  - 解决方式：删除 `apps/home/node_modules/.vite` 的依赖优化缓存，随后执行项目现有重启脚本 `npm run restart:dev`，让 `home-web` 基于当前依赖树重新生成 Vite 预构建结果；最终用 `http://127.0.0.1:3001/` 作为重复可核验的验收入口确认服务恢复。

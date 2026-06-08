@@ -81,6 +81,8 @@ export const portalTranslations = {
         androidButton: 'Download for Android',
         androidButtonWaiting: 'Downloaded · Please wait',
         waitingReminder: 'The installation package has been triggered. Please wait for the current download to finish before trying again.',
+        qrTitle: 'Scan to download directly',
+        qrDescription: 'Open your phone camera or scanner app and scan the QR code to download the current Android package directly.',
       },
       stats: {
         throughput: 'Countries Covered',
@@ -261,6 +263,8 @@ export const portalTranslations = {
         androidButton: '下载安卓版',
         androidButtonWaiting: '已下载，请等待',
         waitingReminder: '安装包下载已触发，请先等待本次下载完成后再继续操作。',
+        qrTitle: '扫码直接下载',
+        qrDescription: '使用手机相机或扫码工具扫描下方二维码，即可直接下载当前 Android 安装包。',
       },
       stats: {
         throughput: '覆盖国家',
