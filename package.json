@@ -12,6 +12,15 @@
     "dev:admin": "npm --workspace @wmshr/admin run dev",
     "dev:admin:api": "npm --workspace @wmshr/admin run dev:api",
     "dev:mobile": "npm --workspace @wmshr/mobile run start",
+    "prepare:desktop:config:local": "cp electron/runtime-config.local.json electron/runtime-config.json",
+    "prepare:desktop:config:online": "cp electron/runtime-config.online.json electron/runtime-config.json",
+    "export:mobile:web": "npm --workspace @wmshr/mobile run export:web",
+    "export:mobile:web:online": "npm --workspace @wmshr/mobile run export:web:online",
+    "desktop:dev": "npm run prepare:desktop:config:local && npm run export:mobile:web && electron .",
+    "build:desktop:mac": "npm run prepare:desktop:config:local && npm run export:mobile:web && electron-builder --mac",
+    "build:desktop:mac:dir": "npm run prepare:desktop:config:local && npm run export:mobile:web && electron-builder --mac dir",
+    "build:desktop:mac:online": "npm run prepare:desktop:config:online && npm run export:mobile:web:online && electron-builder --mac --config electron-builder.online.json",
+    "build:desktop:mac:online:dir": "npm run prepare:desktop:config:online && npm run export:mobile:web:online && electron-builder --mac dir --config electron-builder.online.json",
     "build:admin": "npm --workspace @wmshr/admin run build",
     "build:home": "npm --workspace @wmshr/home run build",
     "lint": "npm run lint --workspaces --if-present",
@@ -20,8 +29,36 @@
     "restart:dev": "bash scripts/restart-dev-services.sh",
     "deploy:prod": "bash scripts/deploy-production.sh"
   },
+  "main": "electron/main.cjs",
+  "build": {
+    "appId": "com.wmshr.desktop",
+    "productName": "WMSHR App",
+    "electronDist": "node_modules/electron/dist",
+    "directories": {
+      "output": "release/mac"
+    },
+    "files": [
+      "electron/**/*",
+      "apps/mobile/dist-web/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.business",
+      "identity": null,
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    }
+  },
   "overrides": {
+    "expo-font": "~14.0.12",
     "react": "19.1.0",
     "react-dom": "19.1.0"
+  },
+  "devDependencies": {
+    "electron": "^39.2.6",
+    "electron-builder": "^26.0.12",
+    "expo-font": "~14.0.12"
   }
 }

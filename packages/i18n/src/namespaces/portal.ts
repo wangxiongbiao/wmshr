@@ -74,6 +74,14 @@ export const portalTranslations = {
         viewPlatform: 'View Platform',
         initializing: 'Connecting global payment rails...',
       },
+      downloadSection: {
+        badge: 'ANDROID DOWNLOAD',
+        title: 'Download the Android app',
+        description: 'Tap the button below to download the latest Android installation package directly.',
+        androidButton: 'Download for Android',
+        androidButtonWaiting: 'Downloaded · Please wait',
+        waitingReminder: 'The installation package has been triggered. Please wait for the current download to finish before trying again.',
+      },
       stats: {
         throughput: 'Countries Covered',
         latency: 'Currencies',
@@ -246,6 +254,14 @@ export const portalTranslations = {
         viewPlatform: '查看平台',
         initializing: '正在连接全球支付网络...',
       },
+      downloadSection: {
+        badge: '安卓下载',
+        title: '下载 Android 客户端',
+        description: '点击下方按钮即可直接拉起最新 Android 安装包下载。',
+        androidButton: '下载安卓版',
+        androidButtonWaiting: '已下载，请等待',
+        waitingReminder: '安装包下载已触发，请先等待本次下载完成后再继续操作。',
+      },
       stats: {
         throughput: '覆盖国家',
         latency: '支持币种',
@@ -399,6 +415,12 @@ export const portalTranslations = {
         getStarted: '立即使用',
         viewPlatform: '查看平台',
         initializing: '正在連接全球支付網絡...',
+      },
+      downloadSection: {
+        badge: '安卓下載',
+        title: '下載 Android 用戶端',
+        description: '點擊下方按鈕即可直接觸發最新 Android 安裝包下載。',
+        androidButton: '下載 Android 版',
       },
       about_section: {
         badge: '我們的使命',
@@ -590,6 +612,12 @@ export const portalTranslations = {
         viewPlatform: 'ดูแพลตฟอร์ม',
         initializing: 'กำลังเชื่อมต่อช่องทางการชำระเงินทั่วโลก...',
       },
+      downloadSection: {
+        badge: 'ดาวน์โหลด ANDROID',
+        title: 'ดาวน์โหลดแอป Android',
+        description: 'แตะปุ่มด้านล่างเพื่อดาวน์โหลดแพ็กเกจติดตั้ง Android ล่าสุดโดยตรง',
+        androidButton: 'ดาวน์โหลดสำหรับ Android',
+      },
       stats: {
         throughput: 'ประเทศที่ครอบคลุม',
         latency: 'สกุลเงิน',
@@ -718,6 +746,12 @@ export const portalTranslations = {
         getStarted: 'Mulai Sekarang',
         viewPlatform: 'Lihat Platform',
         initializing: 'Menghubungkan jaringan pembayaran global...',
+      },
+      downloadSection: {
+        badge: 'UNDUH ANDROID',
+        title: 'Unduh aplikasi Android',
+        description: 'Ketuk tombol di bawah untuk langsung mengunduh paket instalasi Android terbaru.',
+        androidButton: 'Unduh untuk Android',
       },
       stats: {
         throughput: 'Negara Tercover',
@@ -848,6 +882,12 @@ export const portalTranslations = {
         viewPlatform: 'Lihat Platform',
         initializing: 'Menghubungkan rangkaian pembayaran global...',
       },
+      downloadSection: {
+        badge: 'MUAT TURUN ANDROID',
+        title: 'Muat turun aplikasi Android',
+        description: 'Tekan butang di bawah untuk terus memuat turun pakej pemasangan Android terkini.',
+        androidButton: 'Muat turun untuk Android',
+      },
       stats: {
         throughput: 'Negara Diliputi',
         latency: 'Mata Wang',
@@ -977,6 +1017,12 @@ export const portalTranslations = {
         viewPlatform: 'Ver Plataforma',
         initializing: 'Conectando redes de pago globales...',
       },
+      downloadSection: {
+        badge: 'DESCARGA ANDROID',
+        title: 'Descargar la app de Android',
+        description: 'Pulsa el botón de abajo para descargar directamente el paquete de instalación Android más reciente.',
+        androidButton: 'Descargar para Android',
+      },
       stats: {
         throughput: 'Países Cubiertos',
         latency: 'Monedas',
@@ -1105,6 +1151,12 @@ export const portalTranslations = {
         getStarted: 'Começar Agora',
         viewPlatform: 'Ver Plataforma',
         initializing: 'Conectando redes de pagamento globais...',
+      },
+      downloadSection: {
+        badge: 'DOWNLOAD ANDROID',
+        title: 'Baixar o app Android',
+        description: 'Toque no botão abaixo para baixar diretamente o pacote de instalação Android mais recente.',
+        androidButton: 'Baixar para Android',
       },
       stats: {
         throughput: 'Países Cobertos',

@@ -18,9 +18,10 @@ export function Header({ title, currentLanguage, onLanguageChange, userEmail, on
   const { t } = useTranslation(["admin", "common"]);
 
   return (
-    <header className="bg-white border-b border-slate-200 h-16 flex items-center justify-between px-6 flex-shrink-0">
-      <h2 className="text-lg font-semibold text-slate-800">{title}</h2>
-      <div className="flex items-center gap-3 text-right">
+    <header className="bg-white border-b border-slate-200 min-h-16 flex items-center justify-between gap-4 px-6 py-3 flex-shrink-0">
+      {/* 顶部标题来自 tab 翻译；这里必须允许长文案在一行放不下时占据更多垂直空间，而不是把右侧操作区硬挤出可视区域。 */}
+      <h2 className="min-w-0 flex-1 text-lg font-semibold text-slate-800 leading-tight break-words">{title}</h2>
+      <div className="flex items-center gap-3 text-right flex-shrink-0">
         <label className="hidden md:flex items-center gap-2 text-xs text-slate-500">
           <span>{t("语言")}</span>
           <select

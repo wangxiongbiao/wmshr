@@ -7,12 +7,14 @@ export function buildHomeRoute(language: SupportedLanguageCode) {
 }
 
 export function parseHomeRoute(pathname: string) {
-  const [rawLanguage] = pathname.replace(/^\/+|\/+$/g, "").split("/");
+  const [rawLanguage, rawPage] = pathname.replace(/^\/+|\/+$/g, "").split("/");
   const language = normalizeLanguage(rawLanguage || DEFAULT_HOME_LANGUAGE);
-  const isCanonical = rawLanguage === language;
+  const isLegacyDownloadPath = rawPage === "download";
+  const isCanonical = rawLanguage === language && !rawPage;
 
   return {
     language,
+    isLegacyDownloadPath,
     isCanonical,
     canonicalPath: buildHomeRoute(language),
   };

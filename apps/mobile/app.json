@@ -3,15 +3,21 @@
     "name": "WMSHR App",
     "slug": "wmshr-app",
     "version": "0.1.0",
+    "scheme": "wmshrapp",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "assetBundlePatterns": [
       "**/*"
     ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.wmshr.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
+      "package": "com.wmshr.app",
       "adaptiveIcon": {
         "backgroundColor": "#2563eb"
       }
@@ -21,7 +27,14 @@
     },
     "plugins": [
       "expo-asset",
-      "expo-secure-store"
-    ]
+      "expo-secure-store",
+      "expo-font"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "39c2194c-2705-4784-8901-a50c4b684744"
+      }
+    },
+    "owner": "nonogogo"
   }
 }

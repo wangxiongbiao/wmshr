@@ -1,8 +1,8 @@
-import React, {useCallback, useState} from 'react';
+import React, {useCallback, useMemo, useRef, useState} from 'react';
+import {NativeScrollEvent, NativeSyntheticEvent, Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
 import {useFocusEffect} from '@react-navigation/native';
 import {Ionicons} from '@expo/vector-icons';
 import {NativeStackScreenProps} from '@react-navigation/native-stack';
-import {Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
 import {useTranslation} from 'react-i18next';
 import {SopStackParamList} from '../../../application/navigationTypes';
 import {useAuth} from '../../../application/providers/AuthProvider';
@@ -14,6 +14,7 @@ import {colors} from '../../../shared/constants/colors';
 import {sharedStyles} from '../../../shared/constants/styles';
 
 const PAGE_SIZE = 10;
+const END_REACHED_THRESHOLD = 120;
 
 type Props = NativeStackScreenProps<SopStackParamList, 'SopList'>;
 
@@ -27,6 +28,7 @@ export function SopListScreen({navigation}: Props) {
   const [isFetchingMore, setIsFetchingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [errorText, setErrorText] = useState<string | null>(null);
+  const canTriggerAutoLoadRef = useRef(true);
 
   const loadDocuments = useCallback(async ({append, offset, showErrorToast = false}: {append: boolean; offset: number; showErrorToast?: boolean}) => {
     if (!session?.accessToken) {
@@ -59,12 +61,41 @@ export function SopListScreen({navigation}: Props) {
 
   useFocusEffect(
     useCallback(() => {
+      canTriggerAutoLoadRef.current = true;
       void loadDocuments({append: false, offset: 0, showErrorToast: false});
     }, [loadDocuments]),
   );
 
+  const tryAutoLoadMore = useCallback(() => {
+    if (isFetchingMore || !hasMore || documents.length === 0 || !hasFetchedOnce || errorText) {
+      return;
+    }
+    canTriggerAutoLoadRef.current = false;
+    void loadDocuments({append: true, offset: documents.length, showErrorToast: true});
+  }, [documents.length, errorText, hasFetchedOnce, hasMore, isFetchingMore, loadDocuments]);
+
+  const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (!canTriggerAutoLoadRef.current) {
+      return;
+    }
+    const {layoutMeasurement, contentOffset, contentSize} = event.nativeEvent;
+    const distanceToBottom = contentSize.height - (layoutMeasurement.height + contentOffset.y);
+    // 自动分页必须只在“确实接近底部”时触发，并配合 momentum 锁，避免一次快速滚动重复打出多页请求。
+    if (distanceToBottom <= END_REACHED_THRESHOLD) {
+      tryAutoLoadMore();
+    }
+  }, [tryAutoLoadMore]);
+
+  const scrollProps = useMemo(() => ({
+    onMomentumScrollBegin: () => {
+      canTriggerAutoLoadRef.current = true;
+    },
+    onScroll: handleScroll,
+    scrollEventThrottle: 16,
+  }), [handleScroll]);
+
   return (
-    <ScreenContainer>
+    <ScreenContainer scrollProps={scrollProps}>
       <View style={sharedStyles.screenTitle}>
         <Text style={sharedStyles.title}>{t('SOP 文件')}</Text>
         <Text style={sharedStyles.muted}>{t('仓库作业标准流程')}</Text>
@@ -100,10 +131,10 @@ export function SopListScreen({navigation}: Props) {
         </View>
       ) : null}
 
-      {documents.length > 0 && hasMore ? (
-        <Pressable style={styles.loadMoreButton} disabled={isFetchingMore} onPress={() => void loadDocuments({append: true, offset: documents.length, showErrorToast: true})}>
-          <Text style={styles.loadMoreText}>{isFetchingMore ? t('继续加载中...') : t('加载更多')}</Text>
-        </Pressable>
+      {documents.length > 0 && isFetchingMore ? (
+        <View style={styles.autoLoadHint}>
+          <Text style={styles.autoLoadHintText}>{t('正在加载更多 SOP...')}</Text>
+        </View>
       ) : null}
     </ScreenContainer>
   );
@@ -114,7 +145,7 @@ const styles = StyleSheet.create({
   placeholderCard: {backgroundColor: colors.white, borderRadius: 22, padding: 18, alignItems: 'center', gap: 10},
   retryButton: {marginTop: 6, height: 44, minWidth: 120, borderRadius: 16, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16},
   retryButtonText: {color: colors.white, fontSize: 15, fontWeight: '900'},
-  loadMoreButton: {marginTop: 4, height: 44, borderRadius: 16, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border},
-  loadMoreText: {color: colors.primary, fontSize: 14, fontWeight: '900'},
+  autoLoadHint: {marginTop: 6, alignItems: 'center', justifyContent: 'center'},
+  autoLoadHintText: {color: colors.textMuted, fontSize: 13, fontWeight: '700'},
   readHint: {color: colors.success, fontWeight: '800'},
 });

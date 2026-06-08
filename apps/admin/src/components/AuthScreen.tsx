@@ -68,12 +68,12 @@ export function AuthScreen({ currentLanguage, loading = false, onGoogleLogin, er
 
                 <div className="relative grid h-full min-h-[360px] grid-cols-[0.9fr_1.1fr] gap-4">
                   <div className="flex flex-col justify-end gap-4">
-                    <div className="w-44 rounded-[1.35rem] border border-white/70 bg-white/70 p-4 shadow-xl shadow-slate-900/5 backdrop-blur-md">
+                    <div className="w-full max-w-44 rounded-[1.35rem] border border-white/70 bg-white/70 p-4 shadow-xl shadow-slate-900/5 backdrop-blur-md">
                       <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">{t("安全登录")}</p>
                       <p className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">08:30</p>
                       <p className="mt-2 text-xs text-slate-500">{t("Google 账号进入")}</p>
                     </div>
-                    <div className="ml-10 w-52 rounded-[1.35rem] border border-white/70 bg-slate-950/80 p-4 text-white shadow-2xl shadow-slate-900/20 backdrop-blur-md">
+                    <div className="ml-6 w-full max-w-52 rounded-[1.35rem] border border-white/70 bg-slate-950/80 p-4 text-white shadow-2xl shadow-slate-900/20 backdrop-blur-md">
                       <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-cyan-100/70">{t("薪资边界")}</p>
                       <div className="mt-4 space-y-2">
                         <div className="h-2 w-28 rounded-full bg-white/70" />
@@ -85,20 +85,20 @@ export function AuthScreen({ currentLanguage, loading = false, onGoogleLogin, er
 
                   <div className="relative flex items-center justify-center">
                     <div className="absolute h-72 w-72 rounded-full border border-white/70 bg-white/25" />
-                    <div className="relative h-80 w-64 rotate-3 rounded-[2rem] border border-white/80 bg-white/80 p-5 shadow-2xl shadow-slate-900/10 backdrop-blur-md">
-                      <div className="flex items-center justify-between border-b border-slate-200 pb-4">
-                        <div>
+                    <div className="relative min-h-80 w-64 rotate-3 rounded-[2rem] border border-white/80 bg-white/80 p-5 shadow-2xl shadow-slate-900/10 backdrop-blur-md">
+                      <div className="flex items-start justify-between gap-3 border-b border-slate-200 pb-4">
+                        <div className="min-w-0 flex-1">
                           <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">{t("专属工作台")}</p>
-                          <p className="mt-1 text-lg font-semibold text-slate-900">{t("只显示你的团队数据")}</p>
+                          <p className="mt-1 text-lg font-semibold leading-tight text-slate-900">{t("只显示你的团队数据")}</p>
                         </div>
-                        <span className="rounded-full bg-emerald-100 px-3 py-1 text-[10px] font-bold text-emerald-700">{t("在线")}</span>
+                        <span className="rounded-full bg-emerald-100 px-3 py-1 text-[10px] font-bold text-emerald-700 text-center leading-tight flex-shrink-0">{t("在线")}</span>
                       </div>
                       <div className="mt-5 space-y-4">
                         {[[t("安全登录"), "8.0h"], [t("薪资边界"), "1.25h"], [t("专属工作台"), t("在线")]].map(([label, value], index) => (
                           <div key={label}>
-                            <div className="mb-2 flex justify-between text-xs text-slate-500">
-                              <span>{label}</span>
-                              <span>{value}</span>
+                            <div className="mb-2 flex items-start justify-between gap-2 text-xs text-slate-500">
+                              <span className="flex-1 leading-tight">{label}</span>
+                              <span className="flex-shrink-0 text-right">{value}</span>
                             </div>
                             <div className="h-2 overflow-hidden rounded-full bg-slate-100">
                               <div className={`h-full rounded-full ${index === 0 ? "w-[82%] bg-slate-800" : index === 1 ? "w-[38%] bg-cyan-400" : "w-[58%] bg-emerald-400"}`} />
@@ -157,12 +157,15 @@ export function AuthScreen({ currentLanguage, loading = false, onGoogleLogin, er
               <button
                 onClick={onGoogleLogin}
                 disabled={loading}
+                // 登录按钮是登录页最关键的文案承载位：这里保留图标+主文案结构，但允许文案换行，避免长翻译把主 CTA 裁掉。
                 className="group flex w-full items-center justify-center gap-3 rounded-2xl border border-slate-200 bg-slate-950 px-5 py-4 text-sm font-semibold text-white shadow-xl shadow-slate-900/15 transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white">
                   <GoogleIcon />
                 </span>
-                {loading ? t("正在打开 Google 授权...") : t("使用 Google 账号进入后台")}
+                <span className="flex-1 whitespace-normal text-center leading-tight">
+                  {loading ? t("正在打开 Google 授权...") : t("使用 Google 账号进入后台")}
+                </span>
               </button>
 
               {error && (

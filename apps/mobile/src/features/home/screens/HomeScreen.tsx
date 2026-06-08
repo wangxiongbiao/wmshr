@@ -36,6 +36,11 @@ function getStatusHint(status: TodayAttendanceStatus, t: (value: string) => stri
   return t('今天的上下班打卡都已完成。');
 }
 
+function isAndroidLocationServicesInvalid(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return Platform.OS === 'android' && (message.includes('LocationServices.API') || message.includes('SERVICE_INVALID'));
+}
+
 export function HomeScreen() {
   const { t } = useTranslation('app');
   const {employee, session} = useAuth();
@@ -117,8 +122,28 @@ export function HomeScreen() {
       }
 
       setPhase('locating');
-      const location = await Location.getCurrentPositionAsync({accuracy: Location.Accuracy.Balanced});
-      if (!Number.isFinite(location.coords.latitude) || !Number.isFinite(location.coords.longitude)) {
+      const providerStatus = Platform.OS === 'android' ? await Location.getProviderStatusAsync().catch(() => null) : null;
+      let location = null;
+
+      try {
+        location = await Location.getCurrentPositionAsync({accuracy: Location.Accuracy.Balanced, mayShowUserSettingsDialog: false});
+      } catch (error) {
+        if (!isAndroidLocationServicesInvalid(error)) {
+          throw error;
+        }
+
+        // 某些安卓真机/ROM 缺少可用的 Google LocationServices 时，expo-location 的 fused current location 会直接报 SERVICE_INVALID；
+        // 这里回退到系统原生 last known provider，优先保住打卡闭环，而不是把整条流程卡死在 Google 定位实现上。
+        location = await Location.getLastKnownPositionAsync({maxAge: 15 * 60 * 1000, requiredAccuracy: 3000});
+        if (!location) {
+          if (providerStatus?.gpsAvailable || providerStatus?.networkAvailable) {
+            throw new Error(t('当前设备实时定位服务不可用，且暂时没有可复用的位置缓存。请先在系统地图中完成一次定位后再重试打卡。'));
+          }
+          throw new Error(t('当前设备未提供可用定位服务，请先在系统设置中打开定位后再重试打卡。'));
+        }
+      }
+
+      if (!location || !Number.isFinite(location.coords.latitude) || !Number.isFinite(location.coords.longitude)) {
         throw new Error(t('定位失败，不能打卡。请重试定位；如果一直失败，请重启 App 后再试。'));
       }
 

@@ -1,12 +1,17 @@
 import React, {PropsWithChildren} from 'react';
-import {ScrollView, StyleSheet} from 'react-native';
+import {ScrollView, ScrollViewProps, StyleSheet} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {colors} from '../constants/colors';
 
-export function ScreenContainer({children}: PropsWithChildren) {
+type Props = PropsWithChildren<{
+  scrollProps?: Omit<ScrollViewProps, 'contentContainerStyle' | 'showsVerticalScrollIndicator'>;
+}>;
+
+export function ScreenContainer({children, scrollProps}: Props) {
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      {/* 页面级自动分页依赖 ScrollView 的 onScroll / onMomentumScrollBegin；容器统一透传，避免每个页面复制一份壳层。 */}
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} {...scrollProps}>
         {children}
       </ScrollView>
     </SafeAreaView>

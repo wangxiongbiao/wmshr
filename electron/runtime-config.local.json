@@ -1,0 +1,4 @@
+{
+  "apiBaseUrl": "http://172.16.11.231:8788",
+  "appEnv": "local"
+}

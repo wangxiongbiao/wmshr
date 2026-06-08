@@ -41,6 +41,12 @@ import founderAvatarImage from "./assets/images/founder-avatar.jpg";
 const ADMIN_PORTAL_URL = import.meta.env.VITE_ADMIN_PORTAL_URL
   || (import.meta.env.DEV ? "http://localhost:3000" : "https://admin.dutylix.com");
 
+// 门户默认直接指向当前可安装的 APK 产物直链；运行时若配置了环境变量，则优先使用环境变量覆盖默认地址。
+// 如果后续替换为新的 EAS 构建产物，必须同步更新这里和 `.env.example`，避免门户继续落到已过期的旧包。
+const DEFAULT_ANDROID_DOWNLOAD_URL = "https://expo.dev/artifacts/eas/6ZB1qU7jksmLFkVqfAFWzr.apk";
+const ANDROID_DOWNLOAD_URL = import.meta.env.VITE_ANDROID_DOWNLOAD_URL || DEFAULT_ANDROID_DOWNLOAD_URL;
+const DOWNLOAD_SECTION_HASH = "#download";
+
 const languages = SUPPORTED_LANGUAGES.map(({ code, nativeName }) => ({ code, name: nativeName }));
 
 function WmshrLogoMark({ className = "w-6 h-6" }: { className?: string }) {
@@ -115,11 +121,13 @@ const Nav = ({
   currentLanguage,
   onLanguageChange,
   onNavigateHome,
+  onNavigateDownload,
   onNavigateAdmin
 }: {
   currentLanguage: SupportedLanguageCode;
   onLanguageChange: (language: SupportedLanguageCode) => void;
-  onNavigateHome: () => void;
+  onNavigateHome: (targetHash?: string) => void;
+  onNavigateDownload: () => void;
   onNavigateAdmin: () => void;
 }) => {
   const { t } = useTranslation();
@@ -136,7 +144,7 @@ const Nav = ({
     <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${isScrolled ? "py-4 glass border-b shadow-2xl shadow-black/50" : "py-8"}`}>
       <div className="max-w-7xl mx-auto px-6 flex justify-between items-center">
         <div
-          onClick={onNavigateHome}
+          onClick={() => onNavigateHome()}
           className="flex items-center gap-2 cursor-pointer group"
         >
           <div className="w-10 h-10 rounded-xl flex items-center justify-center rotate-12 group-hover:rotate-0 transition-transform shadow-lg shadow-brand-accent/20">
@@ -146,12 +154,16 @@ const Nav = ({
         </div>
 
         <div className="hidden md:flex items-center gap-8 text-sm font-medium text-white/70">
-          <a href="#solutions" onClick={onNavigateHome} className="hover:text-white transition-colors">{t('nav.features')}</a>
-          <a href="#compliance" onClick={onNavigateHome} className="hover:text-white transition-colors">{t('nav.about')}</a>
-          <a href="#about-us" onClick={onNavigateHome} className="hover:text-white transition-colors">{t('nav.docs')}</a>
+          <button type="button" onClick={() => onNavigateHome("#solutions")} className="hover:text-white transition-colors">{t('nav.features')}</button>
+          <button type="button" onClick={onNavigateDownload} className="hover:text-white transition-colors">{t('nav.about')}</button>
+          <button type="button" onClick={() => onNavigateHome("#about-us")} className="hover:text-white transition-colors">{t('nav.docs')}</button>
           <LanguageSelector currentLanguage={currentLanguage} onLanguageChange={onLanguageChange} />
-          <button onClick={onNavigateAdmin} className="flex items-center gap-2 px-5 py-2.5 bg-white text-black rounded-full font-bold shadow-sm border border-black/5">
-            <span>{t('nav.waitlist')}</span>
+          <button
+            onClick={onNavigateAdmin}
+            // 门户导航按钮会承载不同语言的较长 CTA；这里明确允许按钮文案换行，避免英文等长文案把圆角按钮直接挤爆。
+            className="flex items-center gap-2 px-5 py-2.5 bg-white text-black rounded-full font-bold shadow-sm border border-black/5 max-w-[13rem] text-left leading-tight"
+          >
+            <span className="flex-1 whitespace-normal">{t('nav.waitlist')}</span>
             <ArrowRight className="w-4 h-4" />
           </button>
         </div>
@@ -173,11 +185,14 @@ const Nav = ({
             exit={{ opacity: 0, y: -20 }}
             className="absolute top-full left-0 right-0 bg-brand-primary/95 backdrop-blur-2xl border-b border-white/10 p-6 flex flex-col gap-4 md:hidden z-40"
           >
-            <a href="#solutions" onClick={() => { onNavigateHome(); setMobileMenuOpen(false); }} className="text-xl font-display">{t('nav.features')}</a>
-            <a href="#compliance" onClick={() => { onNavigateHome(); setMobileMenuOpen(false); }} className="text-xl font-display">{t('nav.about')}</a>
-            <a href="#about-us" onClick={() => { onNavigateHome(); setMobileMenuOpen(false); }} className="text-xl font-display">{t('nav.docs')}</a>
-            <button onClick={() => { onNavigateAdmin(); setMobileMenuOpen(false); }} className="flex items-center justify-center gap-3 w-full py-4 bg-white text-black rounded-xl font-bold mt-4">
-              <span>{t('nav.waitlist')}</span>
+            <button type="button" onClick={() => { onNavigateHome("#solutions"); setMobileMenuOpen(false); }} className="text-xl font-display text-left">{t('nav.features')}</button>
+            <button type="button" onClick={() => { onNavigateDownload(); setMobileMenuOpen(false); }} className="text-xl font-display text-left">{t('nav.about')}</button>
+            <button type="button" onClick={() => { onNavigateHome("#about-us"); setMobileMenuOpen(false); }} className="text-xl font-display text-left">{t('nav.docs')}</button>
+            <button
+              onClick={() => { onNavigateAdmin(); setMobileMenuOpen(false); }}
+              className="flex items-center justify-center gap-3 w-full py-4 bg-white text-black rounded-xl font-bold mt-4 text-center leading-tight"
+            >
+              <span className="whitespace-normal">{t('nav.waitlist')}</span>
               <ArrowRight className="w-5 h-5" />
             </button>
           </motion.div>
@@ -231,7 +246,7 @@ const DashboardShowcase = () => {
                 }`}
               >
                 <scene.icon className="w-5 h-5" />
-                <span className="text-xs font-bold uppercase tracking-widest">{scene.label}</span>
+                <span className="flex-1 text-left text-xs font-bold uppercase tracking-widest whitespace-normal leading-tight">{scene.label}</span>
               </button>
             ))}
           </div>
@@ -263,7 +278,8 @@ const DashboardShowcase = () => {
               <h4 className="text-2xl font-bold tracking-tight text-white/90">
                 {t(`dashboard.sceneTitles.s${activeScene + 1}`)}
               </h4>
-              <p className="text-sm text-white/40 max-w-md line-clamp-1">
+              {/* dashboard 场景说明是典型的多语言长文案位：这里取消单行裁切并保留固定最大宽度，避免翻译一长就直接丢信息。 */}
+              <p className="text-sm text-white/40 max-w-md leading-relaxed min-h-[2.5rem]">
                 {t(`dashboard.sceneDescs.s${activeScene + 1}`)}
               </p>
             </div>
@@ -518,7 +534,7 @@ const AboutSection = () => {
               <div className="absolute inset-0 bg-gradient-to-t from-brand-primary via-transparent to-transparent opacity-60" />
               <div className="absolute bottom-10 left-10 right-10">
                 <h4 className="text-2xl font-bold mb-2">{t('about_section.team.title')}</h4>
-                <p className="text-sm text-white/60 line-clamp-2">{t('about_section.team.desc')}</p>
+                <p className="text-sm text-white/60 leading-relaxed">{t('about_section.team.desc')}</p>
               </div>
             </div>
             {/* Decorative element */}
@@ -564,6 +580,8 @@ export default function App() {
   const routeState = parseHomeRoute(location.pathname);
   const currentLanguage = routeState.language;
   const [showEmailForm, setShowEmailForm] = useState(false);
+  // 下载链接一旦触发，就先锁住按钮并给出等待提醒，避免同一个会话里重复点击同一安装包造成重复下载。
+  const [hasTriggeredAndroidDownload, setHasTriggeredAndroidDownload] = useState(false);
 
   useEffect(() => {
     if (location.pathname === "/") {
@@ -572,11 +590,17 @@ export default function App() {
       return;
     }
 
+    if (routeState.isLegacyDownloadPath) {
+      // 历史上下载入口曾落到 `/:lang/download`；这里保留无感跳回首页下载区块，避免旧分享链接直接失效。
+      navigate({ pathname: routeState.canonicalPath, hash: DOWNLOAD_SECTION_HASH }, { replace: true });
+      return;
+    }
+
     if (location.pathname !== routeState.canonicalPath) {
       // 门户语言 path 是唯一主状态源；非法或缺失语言时统一 replace，避免 URL 与实际语言状态分叉。
       navigate({ pathname: routeState.canonicalPath, hash: location.hash }, { replace: true });
     }
-  }, [i18n.language, i18n.resolvedLanguage, location.hash, location.pathname, navigate, routeState.canonicalPath]);
+  }, [i18n.language, i18n.resolvedLanguage, location.hash, location.pathname, navigate, routeState.canonicalPath, routeState.isLegacyDownloadPath]);
 
   useEffect(() => {
     if ((i18n.resolvedLanguage || i18n.language) !== currentLanguage) {
@@ -585,8 +609,33 @@ export default function App() {
     }
   }, [currentLanguage, i18n]);
 
+  useEffect(() => {
+    if (!location.hash || showEmailForm) {
+      return;
+    }
+
+    // 下载入口现在回到首页同页滚动；这里显式滚动到 hash 目标，保证从其它路由状态切回首页时也能稳定落到目标区块。
+    const targetId = decodeURIComponent(location.hash.slice(1));
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(targetId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [location.hash, location.pathname, showEmailForm]);
+
   const handleLanguageRouteChange = (language: SupportedLanguageCode) => {
     navigate({ pathname: buildHomeRoute(language), hash: location.hash });
+  };
+
+  const navigateToHome = (targetHash = "") => {
+    setShowEmailForm(false);
+    // 顶部导航的首页锚点既要支持首页内滚动，也要支持从其它状态回首页后继续定位到对应区块。
+    navigate({ pathname: buildHomeRoute(currentLanguage), hash: targetHash }, { replace: false });
+  };
+
+  const navigateToDownload = () => {
+    // 独立下载页已移除；下载入口统一回到首页下载区块，避免路由和页面内容继续分叉。
+    navigateToHome(DOWNLOAD_SECTION_HASH);
   };
 
   // 门户跳后台时显式把当前语言写进 `/:lang/dashboard`，避免 admin 只能依赖自己的 detector 重新猜语言。
@@ -596,12 +645,28 @@ export default function App() {
     window.location.assign(adminUrl.toString());
   };
 
+  const triggerAndroidDownload = () => {
+    if (!ANDROID_DOWNLOAD_URL || hasTriggeredAndroidDownload) {
+      return;
+    }
+
+    // 下载动作一旦发出就立即锁定按钮，产品要求当前会话内只允许触发一次，避免连续点击产生重复下载任务。
+    setHasTriggeredAndroidDownload(true);
+
+    // 这里用临时锚点触发浏览器原生下载导航；真正是否直接下载取决于目标 URL 返回的 Content-Disposition/文件类型。
+    const downloadLink = document.createElement("a");
+    downloadLink.href = ANDROID_DOWNLOAD_URL;
+    downloadLink.rel = "noopener noreferrer";
+    downloadLink.click();
+  };
+
   return (
     <div className="min-h-screen bg-brand-primary text-white">
       <Nav
         currentLanguage={currentLanguage}
         onLanguageChange={handleLanguageRouteChange}
-        onNavigateHome={() => setShowEmailForm(false)}
+        onNavigateHome={navigateToHome}
+        onNavigateDownload={navigateToDownload}
         onNavigateAdmin={openAdmin}
       />
 
@@ -641,13 +706,16 @@ export default function App() {
               <div className="flex flex-col sm:flex-row gap-4 justify-center">
                 <button
                   onClick={() => setShowEmailForm(true)}
-                  className="group px-10 py-5 bg-brand-accent text-white rounded-2xl font-bold text-lg flex items-center justify-center gap-2 hover:bg-brand-accent/90 transition-all shadow-2xl shadow-brand-accent/40"
+                  className="group px-10 py-5 bg-brand-accent text-white rounded-2xl font-bold text-lg flex items-center justify-center gap-2 hover:bg-brand-accent/90 transition-all shadow-2xl shadow-brand-accent/40 w-full sm:w-auto"
                 >
-                  {t('hero.getStarted')}
+                  <span className="whitespace-normal text-center leading-tight">{t('hero.getStarted')}</span>
                   <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                 </button>
-                <button className="px-10 py-5 glass text-white rounded-2xl font-bold text-lg hover:bg-white/10 transition-all border-white/5">
-                  {t('hero.viewPlatform')}
+                <button
+                  onClick={navigateToDownload}
+                  className="px-10 py-5 glass text-white rounded-2xl font-bold text-lg hover:bg-white/10 transition-all border-white/5 w-full sm:w-auto"
+                >
+                  <span className="whitespace-normal text-center leading-tight">{t('hero.viewPlatform')}</span>
                 </button>
               </div>
             </motion.div>
@@ -674,6 +742,39 @@ export default function App() {
               <p className="text-[10px] uppercase tracking-[0.2em] text-white/40 font-bold">{stat.label}</p>
             </div>
           ))}
+        </div>
+      </section>
+
+      <section id="download" className="py-24">
+        <div className="max-w-5xl mx-auto px-6">
+          <div className="glass rounded-[2rem] border border-white/10 p-10 md:p-14 text-center shadow-2xl shadow-black/20">
+            <div className="inline-flex items-center gap-3 px-4 py-2 rounded-full bg-brand-accent/10 text-brand-accent text-xs font-bold uppercase tracking-[0.2em] mb-8">
+              <Smartphone className="w-4 h-4" />
+              {t('downloadSection.badge')}
+            </div>
+            <h2 className="text-3xl md:text-5xl font-display font-bold tracking-tight mb-5">
+              {t('downloadSection.title')}
+            </h2>
+            <p className="text-white/60 text-base md:text-lg leading-relaxed max-w-2xl mx-auto mb-10">
+              {t('downloadSection.description')}
+            </p>
+            <button
+              type="button"
+              onClick={triggerAndroidDownload}
+              disabled={!ANDROID_DOWNLOAD_URL || hasTriggeredAndroidDownload}
+              className="mx-auto inline-flex items-center justify-center gap-3 px-8 py-4 bg-brand-accent text-white rounded-2xl font-bold text-lg shadow-2xl shadow-brand-accent/30 hover:bg-brand-accent/90 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/40 disabled:shadow-none transition-all"
+            >
+              <Smartphone className="w-5 h-5" />
+              {hasTriggeredAndroidDownload
+                ? t('downloadSection.androidButtonWaiting')
+                : t('downloadSection.androidButton')}
+            </button>
+            {hasTriggeredAndroidDownload ? (
+              <p className="mt-4 text-sm md:text-base text-brand-accent" role="status" aria-live="polite">
+                {t('downloadSection.waitingReminder')}
+              </p>
+            ) : null}
+          </div>
         </div>
       </section>
 
@@ -751,9 +852,9 @@ export default function App() {
             <div className="flex justify-center relative z-10">
               <button
                 onClick={() => setShowEmailForm(true)}
-                className="px-10 py-5 bg-white text-brand-accent rounded-2xl font-bold text-xl hover:scale-105 active:scale-95 transition-all shadow-xl block"
+                className="px-10 py-5 bg-white text-brand-accent rounded-2xl font-bold text-xl hover:scale-105 active:scale-95 transition-all shadow-xl block w-full sm:w-auto"
               >
-                {t('cta.getStarted')}
+                <span className="whitespace-normal text-center leading-tight">{t('cta.getStarted')}</span>
               </button>
             </div>
           </div>

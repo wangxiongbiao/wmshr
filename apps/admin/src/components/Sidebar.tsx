@@ -32,7 +32,7 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
 
   return (
     // 侧边栏只缩窄容器宽度，导航顺序和入口保持 v2 layout；避免为视觉调整牵动业务模块挂载逻辑。
-    <aside className="w-52 bg-white border-r border-slate-200 flex flex-col z-20 flex-shrink-0">
+    <aside className="w-60 bg-white border-r border-slate-200 flex flex-col z-20 flex-shrink-0">
       <div className="h-16 flex items-center px-6 border-b border-slate-100">
         <div className="w-8 h-8 rounded-lg flex items-center justify-center mr-2 shadow-sm shadow-brand-600/20">
           <WmshrLogoMark />
@@ -45,15 +45,16 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
             key={item.id}
             onClick={() => onTabChange(item.id)}
             className={cn(
-              "w-full flex items-center px-3 py-2.5 text-sm rounded-lg transition-all text-slate-600 text-left",
+              // 侧栏入口是后台多语言最容易溢出的高频位置；这里允许两行内自然换行，优先保证入口语义完整可读。
+              "w-full flex items-start gap-3 px-3 py-3 text-sm rounded-lg transition-all text-slate-600 text-left",
               activeTab === item.id ? "nav-item-active" : "hover:bg-slate-50"
             )}
           >
             <item.icon className={cn(
-              "w-5 h-5 mr-3 flex-shrink-0",
+              "w-5 h-5 mt-0.5 flex-shrink-0",
                activeTab === item.id ? "text-brand-600" : "text-slate-400"
             )} />
-            {item.label}
+            <span className="flex-1 whitespace-normal leading-tight">{item.label}</span>
           </button>
         ))}
       </nav>

@@ -1,6 +1,7 @@
 node_modules/
 dist/
 build/
+release/
 coverage/
 .vite/
 
@@ -17,6 +18,7 @@ yarn-error.log*
 .expo/
 .expo-shared/
 .metro-cache/
+apps/mobile/dist-web/
 
 supabase/.temp/
 

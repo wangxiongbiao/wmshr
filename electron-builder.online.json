@@ -1,0 +1,10 @@
+{
+  "appId": "com.wmshr.desktop.online",
+  "productName": "WMSHR App Online",
+  "directories": {
+    "output": "release/mac-online"
+  },
+  "mac": {
+    "artifactName": "${productName}-${version}.${ext}"
+  }
+}

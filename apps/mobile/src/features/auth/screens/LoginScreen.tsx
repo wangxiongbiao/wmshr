@@ -1,10 +1,10 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import {Ionicons} from '@expo/vector-icons';
-import * as SecureStore from 'expo-secure-store';
 import {Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
 import {useTranslation} from 'react-i18next';
 import {useAuth} from '../../../application/providers/AuthProvider';
 import {useToast} from '../../../application/providers/ToastProvider';
+import {deletePersistentItem, getPersistentItem, setPersistentItem} from '../../../shared/utils/persistentStorage';
 import {AppButton} from '../../../shared/components/AppButton';
 import {AppModal} from '../../../shared/components/AppModal';
 import {ScreenContainer} from '../../../shared/components/ScreenContainer';
@@ -47,7 +47,7 @@ export function LoginScreen() {
   useEffect(() => {
     let mounted = true;
     async function loadRememberedCredentials() {
-      const rawCredentials = await SecureStore.getItemAsync(REMEMBERED_CREDENTIALS_KEY).catch(() => null);
+      const rawCredentials = await getPersistentItem(REMEMBERED_CREDENTIALS_KEY);
       if (!mounted || !rawCredentials) {
         return;
       }
@@ -61,7 +61,7 @@ export function LoginScreen() {
           setRememberMe(true);
         }
       } catch {
-        await SecureStore.deleteItemAsync(REMEMBERED_CREDENTIALS_KEY);
+        await deletePersistentItem(REMEMBERED_CREDENTIALS_KEY);
       }
     }
 
@@ -104,9 +104,9 @@ export function LoginScreen() {
       // 登录动作只把工号密码交给 AuthProvider；AuthProvider 负责持久化登录态，页面只负责“记住我”的凭证回填。
       await login(nextAccount, password);
       if (rememberMe) {
-        await SecureStore.setItemAsync(REMEMBERED_CREDENTIALS_KEY, JSON.stringify({account: nextAccount, password}));
+        await setPersistentItem(REMEMBERED_CREDENTIALS_KEY, JSON.stringify({account: nextAccount, password}));
       } else {
-        await SecureStore.deleteItemAsync(REMEMBERED_CREDENTIALS_KEY);
+        await deletePersistentItem(REMEMBERED_CREDENTIALS_KEY);
       }
     } catch (loginError) {
       const message = getLoginToastMessage(loginError, t);

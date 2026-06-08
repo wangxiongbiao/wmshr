@@ -1,8 +1,8 @@
 import React, {createContext, PropsWithChildren, useCallback, useContext, useEffect, useMemo, useState} from 'react';
-import * as SecureStore from 'expo-secure-store';
 import i18next from 'i18next';
 import {fetchCurrentEmployee, loginEmployeeApp} from '../../features/auth/services/authApi';
 import {EmployeeProfile} from '../../features/auth/types';
+import {deletePersistentItem, getPersistentItem, setPersistentItem} from '../../shared/utils/persistentStorage';
 
 type AuthSession = {
   accessToken: string;
@@ -39,7 +39,7 @@ export function AuthProvider({children}: PropsWithChildren) {
   useEffect(() => {
     let mounted = true;
     async function restoreAuthState() {
-      const rawState = await SecureStore.getItemAsync(AUTH_STATE_KEY).catch(() => null);
+      const rawState = await getPersistentItem(AUTH_STATE_KEY);
       if (!mounted) {
         return;
       }
@@ -56,10 +56,10 @@ export function AuthProvider({children}: PropsWithChildren) {
           setEmployee(persistedState.employee);
         } else {
           // 过期 token 不恢复，避免用户看到已登录界面后接口立即失败；后续若有 refresh token，应在这里接入刷新流程。
-          await SecureStore.deleteItemAsync(AUTH_STATE_KEY);
+          await deletePersistentItem(AUTH_STATE_KEY);
         }
       } catch {
-        await SecureStore.deleteItemAsync(AUTH_STATE_KEY);
+        await deletePersistentItem(AUTH_STATE_KEY);
       } finally {
         if (mounted) {
           setLoading(false);
@@ -79,14 +79,14 @@ export function AuthProvider({children}: PropsWithChildren) {
     setSession(nextSession);
     setEmployee(response.employee);
     // 登录成功后同步写入本地安全存储，实现 App 重启后的本地持久化登录；不要在页面层重复写 token。
-    await SecureStore.setItemAsync(AUTH_STATE_KEY, JSON.stringify({session: nextSession, employee: response.employee}));
+    await setPersistentItem(AUTH_STATE_KEY, JSON.stringify({session: nextSession, employee: response.employee}));
   }, []);
 
   const logout = useCallback(async () => {
     setSession(null);
     setEmployee(null);
     // 退出登录只清除登录态，不清除“记住我”的账号密码；用户明确取消记住我时由登录页清理凭证。
-    await SecureStore.deleteItemAsync(AUTH_STATE_KEY);
+    await deletePersistentItem(AUTH_STATE_KEY);
   }, []);
 
   const refreshProfile = useCallback(async () => {

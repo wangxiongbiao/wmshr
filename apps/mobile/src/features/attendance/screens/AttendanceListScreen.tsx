@@ -1,6 +1,6 @@
-import React, {useCallback, useState} from 'react';
+import React, {useCallback, useMemo, useRef, useState} from 'react';
+import {NativeScrollEvent, NativeSyntheticEvent, Pressable, StyleSheet, Text, View} from 'react-native';
 import {useFocusEffect} from '@react-navigation/native';
-import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {useTranslation} from 'react-i18next';
 import {useAuth} from '../../../application/providers/AuthProvider';
 import {useToast} from '../../../application/providers/ToastProvider';
@@ -11,6 +11,7 @@ import {colors} from '../../../shared/constants/colors';
 import {sharedStyles} from '../../../shared/constants/styles';
 
 const PAGE_SIZE = 7;
+const END_REACHED_THRESHOLD = 120;
 
 function getRecordMeta(item: AttendanceRecord, t: (value: string) => string) {
   const isIncomplete = item.checkInTime === '--:--' || item.checkOutTime === '--:--' || item.hours === t('未完整');
@@ -32,6 +33,7 @@ export function AttendanceListScreen() {
   const [isFetchingMore, setIsFetchingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [errorText, setErrorText] = useState<string | null>(null);
+  const canTriggerAutoLoadRef = useRef(true);
 
   const loadRecords = useCallback(async ({append, offset, showErrorToast = false}: {append: boolean; offset: number; showErrorToast?: boolean}) => {
     if (!session?.accessToken) {
@@ -64,12 +66,41 @@ export function AttendanceListScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      canTriggerAutoLoadRef.current = true;
       void loadRecords({append: false, offset: 0, showErrorToast: false});
     }, [loadRecords]),
   );
 
+  const tryAutoLoadMore = useCallback(() => {
+    if (isFetchingMore || !hasMore || records.length === 0 || !hasFetchedOnce || errorText) {
+      return;
+    }
+    canTriggerAutoLoadRef.current = false;
+    void loadRecords({append: true, offset: records.length, showErrorToast: true});
+  }, [errorText, hasFetchedOnce, hasMore, isFetchingMore, loadRecords, records.length]);
+
+  const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (!canTriggerAutoLoadRef.current) {
+      return;
+    }
+    const {layoutMeasurement, contentOffset, contentSize} = event.nativeEvent;
+    const distanceToBottom = contentSize.height - (layoutMeasurement.height + contentOffset.y);
+    // 自动分页必须只在“确实接近底部”时触发，并配合 momentum 锁，避免一次快速滚动重复打出多页请求。
+    if (distanceToBottom <= END_REACHED_THRESHOLD) {
+      tryAutoLoadMore();
+    }
+  }, [tryAutoLoadMore]);
+
+  const scrollProps = useMemo(() => ({
+    onMomentumScrollBegin: () => {
+      canTriggerAutoLoadRef.current = true;
+    },
+    onScroll: handleScroll,
+    scrollEventThrottle: 16,
+  }), [handleScroll]);
+
   return (
-    <ScreenContainer>
+    <ScreenContainer scrollProps={scrollProps}>
       <View style={sharedStyles.screenTitle}>
         <Text style={sharedStyles.title}>{t('考勤记录')}</Text>
         <Text style={sharedStyles.muted}>{t('最近 31 天打卡明细')}</Text>
@@ -111,10 +142,10 @@ export function AttendanceListScreen() {
         </View>
       ) : null}
 
-      {records.length > 0 && hasMore ? (
-        <Pressable style={styles.loadMoreButton} disabled={isFetchingMore} onPress={() => void loadRecords({append: true, offset: records.length, showErrorToast: true})}>
-          <Text style={styles.loadMoreText}>{isFetchingMore ? t('继续加载中...') : t('加载更多')}</Text>
-        </Pressable>
+      {records.length > 0 && isFetchingMore ? (
+        <View style={styles.autoLoadHint}>
+          <Text style={styles.autoLoadHintText}>{t('正在加载更多记录...')}</Text>
+        </View>
       ) : null}
     </ScreenContainer>
   );
@@ -125,8 +156,8 @@ const styles = StyleSheet.create({
   placeholderCard: {backgroundColor: colors.white, borderRadius: 22, padding: 18, alignItems: 'center', gap: 10},
   retryButton: {marginTop: 6, height: 44, minWidth: 120, borderRadius: 16, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16},
   retryButtonText: {color: colors.white, fontSize: 15, fontWeight: '900'},
-  loadMoreButton: {marginTop: 4, height: 44, borderRadius: 16, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border},
-  loadMoreText: {color: colors.primary, fontSize: 14, fontWeight: '900'},
+  autoLoadHint: {marginTop: 6, alignItems: 'center', justifyContent: 'center'},
+  autoLoadHintText: {color: colors.textMuted, fontSize: 13, fontWeight: '700'},
   recordCard: {alignItems: 'flex-start'},
   recordHeaderRow: {flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12},
   timeRangeText: {fontSize: 14, color: colors.text, fontWeight: '800', marginTop: 8},
