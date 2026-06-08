@@ -165,7 +165,10 @@ export function HomeScreen() {
         locationName,
         description: trimmedDescription,
         deviceId: `${Platform.OS}:${Platform.Version}`,
+        // 服务端现在会用固定业务时区作为唯一判定时间源；这里保留客户端时间与时区，只用于排查跨时区打卡问题，不参与允许/不允许判定。
         clientTime: new Date().toISOString(),
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        timezoneOffsetMinutes: new Date().getTimezoneOffset(),
       });
 
       setTodayStatus(nextStatus);

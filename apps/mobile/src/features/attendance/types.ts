@@ -22,6 +22,8 @@ export interface CheckInPayload {
   description?: string;
   deviceId?: string;
   clientTime: string;
+  timeZone?: string;
+  timezoneOffsetMinutes?: number;
 }
 
 export interface AttendanceRecord {

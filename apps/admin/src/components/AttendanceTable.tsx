@@ -25,6 +25,7 @@ import {
 import { ModalShell } from "./ModalShell";
 import { cn, formatCurrency as formatPayrollCurrency, formatDuration } from "../lib/utils";
 import { Pagination } from "./Pagination";
+import { SearchableSelect } from "./SearchableSelect";
 
 interface AttendanceTableProps {
   employees: Employee[];
@@ -175,6 +176,21 @@ export function AttendanceTable({ employees, isActive }: AttendanceTableProps) {
     const employeeId = Number(createForm.employeeId);
     return employees.find((employee) => Number(employee.id) === employeeId) || null;
   }, [createForm.employeeId, employees]);
+  const employeeFilterOptions = useMemo(() => {
+    return [
+      {
+        value: "all",
+        label: tAdmin("所有员工 (全部)"),
+        description: tAdmin("不过滤员工")
+      },
+      ...employees.map((employee) => ({
+        value: String(employee.id),
+        label: formatEmployeeDisplayName(employee),
+        description: [employee.employeeNo, employee.role].filter(Boolean).join(" · "),
+        keywords: [employee.name, employee.nickname, employee.employeeNo, employee.role, employee.dept]
+      }))
+    ];
+  }, [employees]);
 
   const loadData = async () => {
     const requestId = ++loadRequestIdRef.current;
@@ -312,6 +328,19 @@ export function AttendanceTable({ employees, isActive }: AttendanceTableProps) {
       tAdmin("今天上班费用"), tAdmin("餐补费用"), tAdmin("加班费"), tAdmin("服务费"), tAdmin("合计费用"), tAdmin("考勤状态"), tAdmin("备注")
     ];
     const countryNames: Record<string, string> = { MM: tAdmin("缅甸"), TH: tAdmin("泰国"), CN: tAdmin("中国"), VN: tAdmin("越南"), KH: tAdmin("柬埔寨") };
+    const totals = sortedRows.reduce(
+      (acc, item) => {
+        acc.validHours += Number(item.validHours || 0);
+        acc.overtimeHours += Number(item.overtimePayHours || 0);
+        acc.workPay += Number(item.workPay || 0);
+        acc.mealAllowance += Number(item.mealAllowanceAmount || 0);
+        acc.overtimePay += Number(item.overtimePay || 0);
+        acc.serviceFee += Number(item.serviceFeeAmount || 0);
+        acc.totalPay += getAttendanceTotalPayWithService(item);
+        return acc;
+      },
+      { validHours: 0, overtimeHours: 0, workPay: 0, mealAllowance: 0, overtimePay: 0, serviceFee: 0, totalPay: 0 }
+    );
     const rows = sortedRows.map((item) => {
       const baseDailyWage = item.fixedSalary && item.fixedSalary > 0 ? item.fixedSalary / 30 : item.standardHours * (item.hourlyRate || 0);
       const displayHourlyRate = item.fixedSalary && item.fixedSalary > 0 ? baseDailyWage / Math.max(1, item.standardHours) : item.hourlyRate || 0;
@@ -337,8 +366,30 @@ export function AttendanceTable({ employees, isActive }: AttendanceTableProps) {
         item.note || ""
       ];
     });
+    // 导出底部合计必须和当前筛选结果同口径：只汇总工时/金额列，不伪造单价、时间点或状态字段。
+    const summaryRow = [
+      tAdmin("合计"),
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      `${totals.validHours.toFixed(2)}h`,
+      `${totals.overtimeHours.toFixed(2)}h`,
+      formatMoneyNumber(totals.workPay),
+      formatMoneyNumber(totals.mealAllowance),
+      formatMoneyNumber(totals.overtimePay),
+      formatMoneyNumber(totals.serviceFee),
+      formatMoneyNumber(totals.totalPay),
+      "",
+      ""
+    ];
     // v2 导出严格使用当前表格接口返回值；这里只做 CSV 转义和 BOM，不再按旧规则在浏览器重算费用。
-    const csvContent = "\ufeff" + [headers, ...rows]
+    const csvContent = "\ufeff" + [headers, ...rows, summaryRow]
       .map((row) => row.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(","))
       .join("\n");
     const url = URL.createObjectURL(new Blob([csvContent], { type: "text/csv;charset=utf-8;" }));
@@ -473,16 +524,15 @@ export function AttendanceTable({ employees, isActive }: AttendanceTableProps) {
         <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-4 w-full">
           <div>
             <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">{tAdmin("筛选员工")}</label>
-            <select
-              value={selectedEmployeeId}
-              onChange={(event) => setSelectedEmployeeId(event.target.value === "all" ? "all" : Number(event.target.value))}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none bg-white text-slate-700 h-[38px] text-sm cursor-pointer"
-            >
-              <option value="all">{tAdmin("🔍 所有员工 (全部)")}</option>
-              {employees.map((employee) => (
-                <option key={employee.id} value={employee.id}>{employee.name} ({employee.role})</option>
-              ))}
-            </select>
+            {/* 员工筛选改为本地下拉搜索，只过滤候选项展示；真正的表格筛选仍然提交 employeeId，避免把模糊输入误当成生效条件。 */}
+            <SearchableSelect
+              value={String(selectedEmployeeId)}
+              options={employeeFilterOptions}
+              onChange={(nextValue) => setSelectedEmployeeId(nextValue === "all" ? "all" : Number(nextValue))}
+              placeholder={tAdmin("请选择员工")}
+              searchPlaceholder={tAdmin("输入姓名、昵称、工号、职位过滤")}
+              emptyText={tAdmin("没有匹配的员工")}
+            />
           </div>
 
           <div>

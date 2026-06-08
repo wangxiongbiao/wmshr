@@ -32,6 +32,14 @@
 ### 2026-06-07 问题 4
 - 原因：执行一键生产发布脚本时，代码检查、构建、测试、Supabase 推送、migration 校验、git fetch / commit / push 全部成功，但在 `vercel deploy --prod --yes` 阶段触发 Vercel 文件体积限制，CLI 输出 `Uploading (0.0B/2.4GB)` 后报错 `File size limit exceeded (100 MB)`，说明当前发布上下文把不应进入 Vercel 的大体积文件一并带上了。
 - 导致的问题：生产发布在 Vercel 阶段中断，GitHub 已推送到 `main`，但线上部署未完成。
-- 当前判断：阻塞不在代码编译或数据库迁移，而在 Vercel 上传范围配置；需要检查 `vercel.json`、项目根目录发布上下文和忽略规则，缩小上传内容后再重发。
-- 已尝试：执行 `HOME=/Users/admin npm run deploy:prod`，确认失败点固定在 `vercel deploy --prod --yes`。
-- 下一步：定位哪些目录被打进 Vercel 上传上下文，补正确的忽略或发布根目录配置后重跑生产发布。
+- 解决方式：在仓库根目录新增并收敛 `.vercelignore`，排除 `.git`、`node_modules`、`release`、`.vercel`、`.dev-logs`、`.codegraph` 等本地大目录；随后重新执行同一条 `HOME=/Users/admin npm run deploy:prod`，确认上传上下文降到 `4.1KB` 并完成 admin / portal 生产发布、域名 alias 和 `curl -I` 验证。
+
+### 2026-06-08 问题 5
+- 原因：把薪资核算的员工筛选从旧关键词输入改成 `SearchableSelect` 后，`PayrollTable` 自动提示弹窗的 `useEffect` 依赖数组里仍残留已删除的 `keyword` 变量。
+- 导致的问题：`HOME=/Users/admin npm --workspace @wmshr/admin run lint` 在 `src/components/PayrollTable.tsx(229,107)` 报 `TS2304: Cannot find name 'keyword'`，导致验证阶段中断。
+- 解决方式：把该依赖改为当前真实会触发重新加载的 `selectedEmployeeId`，随后重新执行同一条 admin lint 与 `HOME=/Users/admin npm run build:admin` 通过验证。
+
+### 2026-06-08 问题 6
+- 原因：员工端打卡链路没有做国家、IP 或地理围栏限制；后端 `upsertMobileAttendancePunch` 只校验“当前状态是否允许打上/下班卡”和“上班时间说明是否必填”，经检查海外场景更可能命中的是日期/时间口径不一致：移动端展示使用设备本地时间，提交时却把 `new Date().toISOString()` 作为 `clientTime` 上送，服务端又直接用字符串切片得到 UTC 的日期和时间（`normalizeMobileDate` / `normalizeMobileTime`），`/api/mobile/attendance/today` 默认日期也取服务端 UTC `getTodayDateKey()`，没有统一到业务时区 `Asia/Bangkok`。
+- 导致的问题：用户在海外、尤其跨时区较大时，首页看到的“今天”和后端实际判定的“打卡日期/时段”可能不是同一天或同一班次，最终在 `currentStatus.status` 与当前动作不一致时被后端拒绝，并报出“当前状态不允许上班打卡/下班打卡”。
+- 解决方式：后端改为以服务端当前时间作为唯一业务判定时间源，并统一换算到 `Asia/Bangkok` 生成打卡日期和时间；`/api/mobile/attendance/today` 也改为沿用同一业务日口径。前端保留上送 `clientTime`，并新增 `timeZone` 与 `timezoneOffsetMinutes` 只用于排查，后端把客户端时间/时区与服务端入账时间一起写入 `attendance_records.note`，便于后续确认用户是在哪个时区发起打卡。最终执行 `HOME=/Users/admin npm --workspace @wmshr/mobile run lint`、`HOME=/Users/admin npm --workspace @wmshr/admin run lint`、`HOME=/Users/admin npm run build:admin` 全部通过。

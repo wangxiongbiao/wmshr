@@ -5,6 +5,7 @@ import {NavigationContainer} from '@react-navigation/native';
 import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import {useTranslation} from 'react-i18next';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {useAuth} from './providers/AuthProvider';
 import {LoginScreen} from '../features/auth/screens/LoginScreen';
 import {HomeScreen} from '../features/home/screens/HomeScreen';
@@ -58,6 +59,7 @@ function MineNavigator() {
 
 function MainTabs() {
   const { t } = useTranslation('app');
+  const insets = useSafeAreaInsets();
 
   return (
     <Tab.Navigator
@@ -66,8 +68,9 @@ function MainTabs() {
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textMuted,
         tabBarStyle: {
-          height: 74,
-          paddingBottom: 10,
+          // 底部 Tab 不能继续写死高度；安卓三键导航/手势条会抬高底部 inset，这里要把导航栏占位并入容器高度和内边距。
+          height: 64 + insets.bottom,
+          paddingBottom: Math.max(insets.bottom, 10),
           paddingTop: 8,
           borderTopWidth: 0,
           elevation: 8,

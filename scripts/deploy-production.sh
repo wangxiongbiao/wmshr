@@ -7,6 +7,14 @@ set -euo pipefail
 # monorepo root because it imports the private workspace package @wmshr/i18n; use
 # a temporary portal Vercel config during that one step so dutylix.com never gets
 # the admin build.
+#
+# Vercel upload context guard:
+# a real production incident showed that deploying the monorepo root without a
+# maintained `.vercelignore` can upload local-only heavy directories (`.git`,
+# `node_modules`, `release`, `.vercel`, `.dev-logs`, `.codegraph`, etc.), which
+# pushed the upload context to 2.4GB and failed with `File size limit exceeded`.
+# When this script changes deploy inputs, keep `.vercelignore` in sync so root
+# deploys stay small and production release failures do not recur.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PROJECT_MANAGER_DIR="/Users/admin/Desktop/GitHub-Project-Manager"
@@ -217,6 +225,10 @@ deploy_home_production() {
   # The admin config is restored through a RETURN trap even when the portal deploy
   # fails; leaving a portal config at the root would make the next admin release
   # publish the wrong app.
+  # Keep `.vercelignore` aligned with the root deploy inputs here: the portal
+  # deploy intentionally runs from REPO_ROOT, so any large local artifact not
+  # excluded by `.vercelignore` will be uploaded before Vercel even starts the
+  # remote build, and can fail the release on upload size alone.
   assert_vercel_config "${REPO_ROOT}/vercel.json" admin
   cp "${REPO_ROOT}/vercel.json" "$admin_config_backup"
   trap 'cp "$admin_config_backup" "${REPO_ROOT}/vercel.json"; rm -f "$admin_config_backup"; trap - RETURN' RETURN

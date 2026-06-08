@@ -6,7 +6,7 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { tAdmin } from "../lib/i18nText";
-import { AlertCircle, Calendar, Check, CheckCircle2, Clock, DollarSign, Download, Receipt, RefreshCw, Search, TrendingUp } from "lucide-react";
+import { AlertCircle, Calendar, Check, CheckCircle2, Clock, DollarSign, Download, Receipt, RefreshCw, TrendingUp } from "lucide-react";
 import type {
   Employee,
   MonthlyPayrollResult,
@@ -26,6 +26,8 @@ import { useDialog } from "./DialogProvider";
 import { ModalShell } from "./ModalShell";
 import { cn, formatCurrency, formatDuration, getSalaryTypeLabel } from "../lib/utils";
 import { Pagination } from "./Pagination";
+import { SearchableSelect } from "./SearchableSelect";
+import { YearMonthPicker } from "./YearMonthPicker";
 
 interface PayrollTableProps {
   employees: Employee[];
@@ -50,6 +52,10 @@ function getReviewStatusLabel(status: string) {
 
 function getDefaultYearMonth() {
   return new Date().toISOString().slice(0, 7);
+}
+
+function formatEmployeeDisplayName(employee: Pick<Employee, "name" | "nickname">) {
+  return employee.nickname ? `${employee.name}(${employee.nickname})` : employee.name;
 }
 
 function Modal({
@@ -86,7 +92,7 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
   const { i18n } = useTranslation("admin");
   // PayrollTable 的可见文案仍集中通过 tAdmin() 渲染；这里显式订阅 react-i18next 语言状态，保证 Header 切换语言后整块薪资核算 UI 会重新渲染，而不是继续显示旧语言。
   const translationRenderLanguage = i18n.resolvedLanguage || i18n.language;
-  const [keyword, setKeyword] = useState("");
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | "all">("all");
   const [yearMonth, setYearMonth] = useState(getDefaultYearMonth());
   const [calculationStatus, setCalculationStatus] = useState("all");
   const [reviewStatus, setReviewStatus] = useState("all");
@@ -106,12 +112,14 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
   const autoGeneratePromptingRef = useRef(false);
 
   const loadData = async (nextFilters?: {
-    keyword?: string;
     yearMonth?: string;
     calculationStatus?: string;
     reviewStatus?: string;
   }) => {
-    const effectiveKeyword = nextFilters?.keyword ?? keyword;
+    const selectedEmployee = selectedEmployeeId === "all"
+      ? null
+      : employees.find((employee) => Number(employee.id) === selectedEmployeeId) || null;
+    const effectiveKeyword = selectedEmployee?.employeeNo?.trim() || selectedEmployee?.name || "";
     const effectiveYearMonth = nextFilters?.yearMonth ?? yearMonth;
     const effectiveCalculationStatus = nextFilters?.calculationStatus ?? calculationStatus;
     const effectiveReviewStatus = nextFilters?.reviewStatus ?? reviewStatus;
@@ -142,10 +150,10 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
     const timer = window.setTimeout(() => {
       // 薪资页缓存后再次激活时，继续沿用当前筛选条件后台刷新，但保留已生成的结果表先可见。
       void loadData();
-    }, keyword.trim() ? 350 : 0);
+    }, 0);
 
     return () => window.clearTimeout(timer);
-  }, [calculationStatus, isActive, keyword, reviewStatus, yearMonth]);
+  }, [calculationStatus, isActive, reviewStatus, selectedEmployeeId, yearMonth]);
 
   useEffect(() => {
     setHasPromptedAutoGenerate(false);
@@ -164,6 +172,22 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
     }
   };
 
+  const employeeFilterOptions = useMemo(() => {
+    return [
+      {
+        value: "all",
+        label: tAdmin("所有员工 (全部)"),
+        description: tAdmin("不过滤员工")
+      },
+      ...employees.map((employee) => ({
+        value: String(employee.id),
+        label: formatEmployeeDisplayName(employee),
+        description: [employee.employeeNo, employee.role].filter(Boolean).join(" · "),
+        keywords: [employee.name, employee.nickname, employee.employeeNo, employee.role, employee.dept]
+      }))
+    ];
+  }, [employees, translationRenderLanguage]);
+
   useEffect(() => {
     const shouldPrompt =
       isActive &&
@@ -174,7 +198,7 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
       !hasPromptedAutoGenerate &&
       results.length === 0 &&
       employees.length > 0 &&
-      keyword.trim() === "" &&
+      selectedEmployeeId === "all" &&
       calculationStatus === "all" &&
       reviewStatus === "all";
 
@@ -203,7 +227,7 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
 
       await runGenerateMonthly();
     })();
-  }, [calculationStatus, confirm, employees.length, error, hasLoadedResultsOnce, hasPromptedAutoGenerate, keyword, loading, results.length, reviewStatus, submitting, yearMonth]);
+  }, [calculationStatus, confirm, employees.length, error, hasLoadedResultsOnce, hasPromptedAutoGenerate, loading, results.length, reviewStatus, selectedEmployeeId, submitting, yearMonth]);
 
   const openPayslip = async (result: MonthlyPayrollResult) => {
     setSubmitting(true);
@@ -356,6 +380,20 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
 
   const handleExportCSV = () => {
     const headers = [tAdmin("年月"), tAdmin("员工"), tAdmin("员工编号"), tAdmin("所属部门"), tAdmin("职位"), tAdmin("计薪方式"), tAdmin("有效工时"), tAdmin("加班时长"), tAdmin("加班费"), tAdmin("服务费"), tAdmin("应发"), tAdmin("社保扣款"), tAdmin("扣款"), tAdmin("实发"), tAdmin("发放状态"), tAdmin("币种")];
+    const totals = results.reduce(
+      (acc, item) => {
+        acc.validHours += Number(item.validHours || 0);
+        acc.overtimeHours += Number(item.overtimePayHours || 0);
+        acc.overtimePay += Number(item.overtimePay || 0);
+        acc.serviceFee += Number(item.serviceFeeAmount || 0);
+        acc.grossPay += Number(item.grossPay || 0);
+        acc.socialSecurity += Number(item.socialSecurityAmount || 0);
+        acc.deduction += Number(item.totalDeduction || 0);
+        acc.netPay += Number(item.netPay || 0);
+        return acc;
+      },
+      { validHours: 0, overtimeHours: 0, overtimePay: 0, serviceFee: 0, grossPay: 0, socialSecurity: 0, deduction: 0, netPay: 0 }
+    );
     const rows = results.map((item) => [
       item.yearMonth,
       `"${item.employeeName}"`,
@@ -374,7 +412,26 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
       item.calculationStatus === "confirmed" ? tAdmin("已发") : tAdmin("待发"),
       item.currency
     ]);
-    const csvContent = "\uFEFF" + [headers.join(","), ...rows.map((row) => row.join(","))].join("\n");
+    // 薪资导出底部合计跟随当前筛选结果，只汇总工时与金额列，避免把员工维度字段误写成伪值。
+    const summaryRow = [
+      tAdmin("合计"),
+      "",
+      "",
+      "",
+      "",
+      "",
+      totals.validHours.toFixed(2),
+      totals.overtimeHours.toFixed(2),
+      totals.overtimePay.toFixed(2),
+      totals.serviceFee.toFixed(2),
+      totals.grossPay.toFixed(2),
+      totals.socialSecurity.toFixed(2),
+      totals.deduction.toFixed(2),
+      totals.netPay.toFixed(2),
+      "",
+      results[0]?.currency || employees[0]?.currency || "THB"
+    ];
+    const csvContent = "\uFEFF" + [headers.join(","), ...rows.map((row) => row.join(",")), summaryRow.join(",")].join("\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -461,31 +518,11 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
 
         <div className="w-full sm:w-auto flex flex-wrap items-center gap-2.5">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-slate-500 whitespace-nowrap">{tAdmin("快捷月份:")}</span>
-            <select
+            <span className="text-xs font-semibold text-slate-500 whitespace-nowrap">{tAdmin("核算年月:")}</span>
+            <YearMonthPicker
               value={yearMonth}
-              onChange={(event) => {
-                setYearMonth(event.target.value);
-              }}
-              className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-mono text-sm focus:ring-2 focus:ring-brand-500 outline-none cursor-pointer"
-            >
-              {availableMonths.map((month) => (
-                <option key={month} value={month}>{tAdmin("{{month}}月", { month })}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-slate-500 whitespace-nowrap">{tAdmin("自定义:")}</span>
-            <input
-              type="month"
-              value={yearMonth}
-              onChange={(event) => {
-                if (event.target.value) {
-                  setYearMonth(event.target.value);
-                }
-              }}
-              className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-mono text-sm focus:ring-2 focus:ring-brand-500 outline-none cursor-pointer"
+              onChange={setYearMonth}
+              availableMonths={availableMonths}
             />
           </div>
 
@@ -595,17 +632,16 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <div className="relative">
-              <input
-                type="text"
-                value={keyword}
-                onChange={(event) => {
-                  setKeyword(event.target.value);
-                }}
-                placeholder={tAdmin("搜索员工、编号...")}
-                className="w-full sm:w-64 pl-8 pr-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-brand-500"
+            {/* 薪资核算的员工筛选改为可搜索下拉：本地输入只用于过滤候选员工，真正生效的仍是选中的 employeeNo/name 后端查询。 */}
+            <div className="w-full sm:w-72">
+              <SearchableSelect
+                value={String(selectedEmployeeId)}
+                options={employeeFilterOptions}
+                onChange={(nextValue) => setSelectedEmployeeId(nextValue === "all" ? "all" : Number(nextValue))}
+                placeholder={tAdmin("请选择员工")}
+                searchPlaceholder={tAdmin("输入姓名、昵称、工号、职位过滤")}
+                emptyText={tAdmin("没有匹配的员工")}
               />
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
             </div>
           </div>
         </div>

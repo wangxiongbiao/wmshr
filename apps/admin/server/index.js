@@ -19,6 +19,9 @@ const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || process
 const EMPLOYEE_APP_DEFAULT_PASSWORD = "Aa123456";
 const EMPLOYEE_APP_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const EMPLOYEE_APP_TOKEN_SECRET = process.env.EMPLOYEE_APP_TOKEN_SECRET || SUPABASE_SERVICE_ROLE_KEY || SUPABASE_PUBLISHABLE_KEY || "wmshr-local-mobile-token-secret";
+const MOBILE_ANDROID_LATEST_VERSION = String(process.env.MOBILE_ANDROID_LATEST_VERSION || "").trim();
+const MOBILE_ANDROID_LATEST_CONTENT = String(process.env.MOBILE_ANDROID_LATEST_CONTENT || "").trim();
+const MOBILE_ANDROID_LATEST_URL = String(process.env.MOBILE_ANDROID_LATEST_URL || "").trim();
 
 if (!SUPABASE_URL || (!SUPABASE_SERVICE_ROLE_KEY && !SUPABASE_PUBLISHABLE_KEY)) {
   throw new Error("Missing SUPABASE_URL and a usable Supabase API key in apps/admin/.env or Vercel environment variables");
@@ -130,6 +133,20 @@ function validateGoogleAuthRedirectUrl(redirectTo) {
   }
 
   return null;
+}
+
+function getMobileAndroidUpdatePayload() {
+  const payload = {
+    version: MOBILE_ANDROID_LATEST_VERSION,
+    content: MOBILE_ANDROID_LATEST_CONTENT,
+    url: MOBILE_ANDROID_LATEST_URL,
+  };
+
+  if (!payload.version || !payload.content || !payload.url) {
+    throw new Error("Android 更新信息未配置完整");
+  }
+
+  return payload;
 }
 
 async function fetchWorkspaceBootstrapState(ownerUserId) {
@@ -1181,6 +1198,18 @@ function getBangkokDateKey(now = new Date()) {
   const month = parts.find((part) => part.type === "month")?.value;
   const day = parts.find((part) => part.type === "day")?.value;
   return `${year}-${month}-${day}`;
+}
+
+function getBangkokTimeKey(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Bangkok",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).formatToParts(now);
+  const hour = parts.find((part) => part.type === "hour")?.value;
+  const minute = parts.find((part) => part.type === "minute")?.value;
+  return `${hour}:${minute}`;
 }
 
 function addDaysToDateKey(dateKey, dayDelta) {
@@ -2656,26 +2685,38 @@ app.get("/api/mobile/auth/me", requireEmployeeAppAuth, async (req, res) => {
   });
 });
 
+app.get("/api/mobile/app-update", (_req, res) => {
+  try {
+    // 在线更新首版只返回一个当前 Android 最新版本对象；不要在这里擅自扩展成多平台、多版本历史或灰度策略。
+    res.json(getMobileAndroidUpdatePayload());
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Android 更新信息加载失败" });
+  }
+});
 
-function normalizeMobileDate(value) {
+function normalizeMobileDate(value, fallbackDate = getBangkokDateKey()) {
   const raw = String(value || "").slice(0, 10);
-  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : getTodayDateKey();
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : fallbackDate;
 }
 
-function normalizeMobileTime(value) {
+function normalizeMobileTime(value, fallbackTime = getBangkokTimeKey()) {
   const candidate = String(value || "").slice(11, 16);
-  return /^\d{2}:\d{2}$/.test(candidate) ? candidate : new Date().toISOString().slice(11, 16);
+  return /^\d{2}:\d{2}$/.test(candidate) ? candidate : fallbackTime;
 }
 
-function buildMobileAttendanceNote({ action, locationName, latitude, longitude, accuracy, description }) {
+function buildMobileAttendanceNote({ action, locationName, latitude, longitude, accuracy, description, clientTime, clientTimeZone, clientTimezoneOffsetMinutes, serverTime }) {
   const parts = [
     `员工端${action === "check_in" ? "上班" : "下班"}打卡`,
     locationName ? `位置：${locationName}` : null,
     Number.isFinite(latitude) && Number.isFinite(longitude) ? `坐标：${latitude},${longitude}` : null,
     Number.isFinite(accuracy) ? `精度：${accuracy}m` : null,
-    description ? `说明：${description}` : null
+    description ? `说明：${description}` : null,
+    clientTime ? `客户端时间：${clientTime}` : null,
+    clientTimeZone ? `客户端时区：${clientTimeZone}` : null,
+    Number.isFinite(clientTimezoneOffsetMinutes) ? `客户端时区偏移：${clientTimezoneOffsetMinutes}` : null,
+    serverTime ? `服务端入账时间：${serverTime}` : null
   ].filter(Boolean);
-  // 当前 attendance_records 表没有独立定位列；移动端定位和异常说明先写入 note，保持 Admin 现有考勤计算和展示链路不被破坏。
+  // 当前 attendance_records 表没有独立定位/时区列；移动端定位、客户端时区和服务端入账时间先写入 note，保持 Admin 现有考勤计算和展示链路不被破坏。
   return parts.join("；");
 }
 
@@ -2730,9 +2771,14 @@ async function fetchMobileAttendanceStatus(ownerUserId, employeeId, date) {
 }
 
 async function upsertMobileAttendancePunch({ ownerUserId, employeeId, action, body }) {
-  const clientTime = String(body.clientTime || new Date().toISOString());
-  const date = normalizeMobileDate(clientTime);
-  const time = normalizeMobileTime(clientTime);
+  const now = new Date();
+  const clientTime = String(body.clientTime || "").trim();
+  const clientTimeZone = String(body.timeZone || "").trim();
+  const clientTimezoneOffsetMinutes = Number(body.timezoneOffsetMinutes);
+  // 员工端打卡的“业务日期/业务时间”必须统一由后端当前时刻推导，不能再信任设备本地时区或客户端改过的系统时间。
+  // 否则海外用户会看到一个“今天”，后端却按另一天或另一班次判定，最终误报“当前状态不允许打卡”。
+  const date = getBangkokDateKey(now);
+  const time = getBangkokTimeKey(now);
   const config = await resolveAttendanceConfig(ownerUserId);
   const existingRecord = await fetchMobileAttendanceRecord(ownerUserId, employeeId, date);
   const currentStatus = mapMobileAttendanceStatus(existingRecord, config, date);
@@ -2760,7 +2806,7 @@ async function upsertMobileAttendancePunch({ ownerUserId, employeeId, action, bo
     type: "normal",
     in_time: action === "check_in" ? time : existingRecord?.in_time || null,
     out_time: action === "check_out" ? time : existingRecord?.out_time || null,
-    note: buildMobileAttendanceNote({ action, locationName, latitude, longitude, accuracy, description }),
+    note: buildMobileAttendanceNote({ action, locationName, latitude, longitude, accuracy, description, clientTime, clientTimeZone, clientTimezoneOffsetMinutes, serverTime: now.toISOString() }),
     // 员工端打卡写入 mobile 来源，后台人工补卡仍写 manual；计算层据此避免把移动端真实打卡误标为“人工调整”。
     // 若数据库还未应用 20260606035000 迁移，接口会明确报约束错误，不能再静默伪装成 manual。
     source: "mobile",
@@ -2822,7 +2868,8 @@ function mapMobileSopDocument(row, employeeId) {
 
 app.get("/api/mobile/attendance/today", requireEmployeeAppAuth, async (req, res) => {
   try {
-    const date = normalizeMobileDate(req.query.date || getTodayDateKey());
+    // 员工端“今日状态”必须和提交打卡共用同一业务日口径；否则海外时区会出现页面展示与提交判定不是同一天的错位。
+    const date = normalizeMobileDate(req.query.date, getBangkokDateKey());
     const result = await fetchMobileAttendanceStatus(req.employeeApp.ownerUserId, req.employeeApp.employeeId, date);
     res.json(result);
   } catch (error) {
