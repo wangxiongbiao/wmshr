@@ -1,0 +1,19 @@
+# Exclude local-only artifacts and large directories from Vercel upload context.
+# Keep source, package manifests, and build inputs required by vercel.json.
+.git
+.git-backups
+.codegraph
+.codex-tmp
+.vercel
+.dev-logs
+release
+node_modules
+apps/*/node_modules
+packages/*/node_modules
+admin-v2
+apps/mobile/.expo
+apps/mobile/dist-web
+apps/mobile/node_modules
+electron
+docs
+*.log
