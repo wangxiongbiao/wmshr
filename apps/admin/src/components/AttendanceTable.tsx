@@ -17,18 +17,19 @@ import {
   fetchAttendanceCalculationDetail,
   fetchAttendanceCalculations,
   fetchAttendanceConfig,
+  fetchEmployeeAvatars,
   recalculateMonthlyAttendance,
   runAttendanceDailyMaintenance,
+  searchEmployees,
   updateAttendanceConfig,
   updateAttendanceRecord
 } from "../lib/api";
 import { ModalShell } from "./ModalShell";
 import { cn, formatCurrency as formatPayrollCurrency, formatDuration } from "../lib/utils";
 import { Pagination } from "./Pagination";
-import { SearchableSelect } from "./SearchableSelect";
+import { SearchableSelect, type SearchableSelectOption } from "./SearchableSelect";
 
 interface AttendanceTableProps {
-  employees: Employee[];
   isActive: boolean;
 }
 
@@ -40,6 +41,7 @@ type CreateAttendanceForm = Omit<AttendanceRecordUpdatePayload, "type"> & {
 
 const DEFAULT_CREATE_IN_TIME = "08:30";
 const DEFAULT_CREATE_OUT_TIME = "17:30";
+const ATTENDANCE_REFRESH_TTL_MS = 1000 * 10;
 
 const STATUS_CLASS_NAMES: Record<string, string> = {
   normal: "bg-green-100 text-green-700",
@@ -135,7 +137,10 @@ function Modal({
   );
 }
 
-export function AttendanceTable({ employees, isActive }: AttendanceTableProps) {
+export function AttendanceTable({ isActive }: AttendanceTableProps) {
+  const employeeSearchRequestIdRef = useRef(0);
+  const [avatarMap, setAvatarMap] = useState<Record<number, string | null>>({});
+  const backgroundRefreshTimersRef = useRef<number[]>([]);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | "all">("all");
   const [timeFilterType, setTimeFilterType] = useState<"all" | "day" | "month">("all");
   const [selectedDate, setSelectedDate] = useState("");
@@ -143,6 +148,7 @@ export function AttendanceTable({ employees, isActive }: AttendanceTableProps) {
   const [page, setPage] = useState(1);
   const pageSize = 20;
   const [calculations, setCalculations] = useState<AttendanceCalculationResult[]>([]);
+  const [total, setTotal] = useState(0);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [configForm, setConfigForm] = useState<AppConfig | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -169,28 +175,142 @@ export function AttendanceTable({ employees, isActive }: AttendanceTableProps) {
   const [submitting, setSubmitting] = useState(false);
   const [maintenanceMessage, setMaintenanceMessage] = useState("");
   const [error, setError] = useState("");
+  const [lastLoadedAt, setLastLoadedAt] = useState(0);
   const loadRequestIdRef = useRef(0);
+  const [selectedFilterEmployee, setSelectedFilterEmployee] = useState<Employee | null>(null);
+  const [employeeFilterSearchResults, setEmployeeFilterSearchResults] = useState<Employee[]>([]);
+  const [employeeFilterLoading, setEmployeeFilterLoading] = useState(false);
+  const [selectedCreateEmployee, setSelectedCreateEmployee] = useState<Employee | null>(null);
+  const [createEmployeeSearchResults, setCreateEmployeeSearchResults] = useState<Employee[]>([]);
+  const [createEmployeeLoading, setCreateEmployeeLoading] = useState(false);
 
   const isFiltered = selectedEmployeeId !== "all" || timeFilterType !== "all";
-  const selectedCreateEmployee = useMemo(() => {
-    const employeeId = Number(createForm.employeeId);
-    return employees.find((employee) => Number(employee.id) === employeeId) || null;
-  }, [createForm.employeeId, employees]);
+  const mergeUniqueEmployees = (rows: Array<Employee | null | undefined>) => {
+    const deduped = new Map<number, Employee>();
+    rows.forEach((employee) => {
+      if (!employee) {
+        return;
+      }
+      deduped.set(Number(employee.id), employee);
+    });
+    return Array.from(deduped.values());
+  };
   const employeeFilterOptions = useMemo(() => {
+    const optionEmployees = mergeUniqueEmployees([selectedFilterEmployee, ...employeeFilterSearchResults]);
     return [
       {
         value: "all",
         label: tAdmin("所有员工 (全部)"),
         description: tAdmin("不过滤员工")
       },
-      ...employees.map((employee) => ({
+      ...optionEmployees.map((employee) => ({
         value: String(employee.id),
         label: formatEmployeeDisplayName(employee),
         description: [employee.employeeNo, employee.role].filter(Boolean).join(" · "),
         keywords: [employee.name, employee.nickname, employee.employeeNo, employee.role, employee.dept]
       }))
     ];
-  }, [employees]);
+  }, [employeeFilterSearchResults, selectedFilterEmployee]);
+  const createEmployeeOptions = useMemo<SearchableSelectOption[]>(() => {
+    return mergeUniqueEmployees([selectedCreateEmployee, ...createEmployeeSearchResults]).map((employee) => ({
+      value: String(employee.id),
+      label: formatEmployeeDisplayName(employee),
+      description: [employee.employeeNo, employee.role].filter(Boolean).join(" · "),
+      keywords: [employee.name, employee.nickname, employee.employeeNo, employee.role, employee.dept]
+    }));
+  }, [createEmployeeSearchResults, selectedCreateEmployee]);
+
+  useEffect(() => {
+    const employeeIds = calculations
+      .map((item) => item.employeeId)
+      .filter((id, index, arr) => arr.indexOf(id) === index)
+      .filter((id) => !(id in avatarMap));
+    if (employeeIds.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    void fetchEmployeeAvatars(employeeIds).then((result) => {
+      if (cancelled) {
+        return;
+      }
+      setAvatarMap((prev) => {
+        const next = { ...prev };
+        result.items.forEach((item) => {
+          next[item.id] = item.photo;
+        });
+        return next;
+      });
+    }).catch(() => {
+      // 考勤列表头像补图失败不影响主列表展示。
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [avatarMap, calculations]);
+
+  const displayedCalculations = useMemo(
+    () => calculations.map((item) => ({
+      ...item,
+      employeePhoto: avatarMap[item.employeeId] ?? item.employeePhoto
+    })),
+    [avatarMap, calculations]
+  );
+
+  const runEmployeeSearch = async (query: string, mode: "filter" | "create") => {
+    const requestId = ++employeeSearchRequestIdRef.current;
+    const trimmedQuery = query.trim();
+    if (!trimmedQuery) {
+      if (mode === "filter") {
+        setEmployeeFilterSearchResults([]);
+        setEmployeeFilterLoading(false);
+      } else {
+        setCreateEmployeeSearchResults([]);
+        setCreateEmployeeLoading(false);
+      }
+      return;
+    }
+
+    if (mode === "filter") {
+      setEmployeeFilterLoading(true);
+    } else {
+      setCreateEmployeeLoading(true);
+    }
+
+    try {
+      const rows = await searchEmployees(trimmedQuery);
+      if (requestId !== employeeSearchRequestIdRef.current) {
+        return;
+      }
+      if (mode === "filter") {
+        setEmployeeFilterSearchResults(rows);
+      } else {
+        setCreateEmployeeSearchResults(rows);
+      }
+    } finally {
+      if (requestId !== employeeSearchRequestIdRef.current) {
+        return;
+      }
+      if (mode === "filter") {
+        setEmployeeFilterLoading(false);
+      } else {
+        setCreateEmployeeLoading(false);
+      }
+    }
+  };
+
+  const scheduleBackgroundRefresh = () => {
+    backgroundRefreshTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+    backgroundRefreshTimersRef.current = [
+      window.setTimeout(() => {
+        void loadData();
+      }, 1200),
+      window.setTimeout(() => {
+        void loadData();
+      }, 3500)
+    ];
+  };
 
   const loadData = async () => {
     const requestId = ++loadRequestIdRef.current;
@@ -200,16 +320,20 @@ export function AttendanceTable({ employees, isActive }: AttendanceTableProps) {
     setLoading(true);
     setError("");
     try {
-      const nextRows = await fetchAttendanceCalculations({
+      const nextPage = await fetchAttendanceCalculations({
         yearMonth: effectiveMonth,
         date: effectiveDate,
-        employeeId: selectedEmployeeId === "all" ? null : selectedEmployeeId
+        employeeId: selectedEmployeeId === "all" ? null : selectedEmployeeId,
+        page,
+        pageSize
       });
       if (requestId !== loadRequestIdRef.current) {
         return;
       }
-      setCalculations(nextRows);
+      setCalculations(nextPage.items);
+      setTotal(nextPage.total);
       setSelectedIds(new Set());
+      setLastLoadedAt(Date.now());
     } catch (nextError) {
       if (requestId !== loadRequestIdRef.current) {
         return;
@@ -227,9 +351,13 @@ export function AttendanceTable({ employees, isActive }: AttendanceTableProps) {
       return;
     }
 
+    if (calculations.length > 0 && Date.now() - lastLoadedAt < ATTENDANCE_REFRESH_TTL_MS) {
+      return;
+    }
+
     // 考勤页被缓存后切回来时需要按当前筛选条件后台重拉数据，但不能先清空表格主体。
     void loadData();
-  }, [isActive, selectedDate, selectedEmployeeId, selectedMonth, timeFilterType]);
+  }, [calculations.length, isActive, lastLoadedAt, page, selectedDate, selectedEmployeeId, selectedMonth, timeFilterType]);
 
   useEffect(() => {
     void fetchAttendanceConfig()
@@ -239,28 +367,22 @@ export function AttendanceTable({ employees, isActive }: AttendanceTableProps) {
       .catch((nextError) => setError(nextError instanceof Error ? nextError.message : tAdmin("考勤规则配置加载失败")));
   }, []);
 
-  const sortedRows = useMemo(() => {
-    return [...calculations].sort((a, b) => {
-      if (a.date !== b.date) return b.date.localeCompare(a.date);
-      return a.employeeName.localeCompare(b.employeeName);
-    });
-  }, [calculations]);
+  useEffect(() => {
+    // 只有筛选条件变化时才回到第一页；真实后端分页下，翻页本身会触发 loadData，不能再被返回结果反向重置。
+    setPage(1);
+  }, [selectedDate, selectedEmployeeId, selectedMonth, timeFilterType]);
 
   useEffect(() => {
-    // 后端筛选条件变化会刷新 calculations；分页回到第一页，避免旧页码切到空白表格。
-    setPage(1);
-  }, [calculations]);
-
-  const paginatedRows = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return sortedRows.slice(start, start + pageSize);
-  }, [page, sortedRows]);
+    return () => {
+      backgroundRefreshTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+    };
+  }, []);
   const showRefreshing = loading && calculations.length > 0;
 
-  const isAllSelected = paginatedRows.length > 0 && paginatedRows.every((row) => selectedIds.has(row.id));
+  const isAllSelected = calculations.length > 0 && calculations.every((row) => selectedIds.has(row.id));
 
   const toggleSelectAll = (checked: boolean) => {
-    setSelectedIds(checked ? new Set(paginatedRows.map((row) => row.id)) : new Set());
+    setSelectedIds(checked ? new Set(calculations.map((row) => row.id)) : new Set());
   };
 
   const toggleSelect = (id: number, checked: boolean) => {
@@ -280,15 +402,16 @@ export function AttendanceTable({ employees, isActive }: AttendanceTableProps) {
     setTimeFilterType("all");
     setSelectedDate("");
     setSelectedMonth("");
+    setPage(1);
   };
 
   const handleTimeFilterChange = (nextType: "all" | "day" | "month") => {
     setTimeFilterType(nextType);
     if (nextType === "day" && !selectedDate) {
-      setSelectedDate(sortedRows[0]?.date || getDefaultDate());
+      setSelectedDate(calculations[0]?.date || getDefaultDate());
     }
     if (nextType === "month" && !selectedMonth) {
-      setSelectedMonth(sortedRows[0]?.date.slice(0, 7) || getDefaultMonth());
+      setSelectedMonth(calculations[0]?.date.slice(0, 7) || getDefaultMonth());
     }
   };
 
@@ -328,7 +451,7 @@ export function AttendanceTable({ employees, isActive }: AttendanceTableProps) {
       tAdmin("今天上班费用"), tAdmin("餐补费用"), tAdmin("加班费"), tAdmin("服务费"), tAdmin("合计费用"), tAdmin("考勤状态"), tAdmin("备注")
     ];
     const countryNames: Record<string, string> = { MM: tAdmin("缅甸"), TH: tAdmin("泰国"), CN: tAdmin("中国"), VN: tAdmin("越南"), KH: tAdmin("柬埔寨") };
-    const totals = sortedRows.reduce(
+    const totals = calculations.reduce(
       (acc, item) => {
         acc.validHours += Number(item.validHours || 0);
         acc.overtimeHours += Number(item.overtimePayHours || 0);
@@ -341,7 +464,7 @@ export function AttendanceTable({ employees, isActive }: AttendanceTableProps) {
       },
       { validHours: 0, overtimeHours: 0, workPay: 0, mealAllowance: 0, overtimePay: 0, serviceFee: 0, totalPay: 0 }
     );
-    const rows = sortedRows.map((item) => {
+    const rows = calculations.map((item) => {
       const baseDailyWage = item.fixedSalary && item.fixedSalary > 0 ? item.fixedSalary / 30 : item.standardHours * (item.hourlyRate || 0);
       const displayHourlyRate = item.fixedSalary && item.fixedSalary > 0 ? baseDailyWage / Math.max(1, item.standardHours) : item.hourlyRate || 0;
       return [
@@ -434,11 +557,13 @@ export function AttendanceTable({ employees, isActive }: AttendanceTableProps) {
     try {
       if (adjustingResult.attendanceRecordId) {
         await updateAttendanceRecord(adjustingResult.attendanceRecordId, adjustForm);
+        await loadData();
       } else {
-        await createAttendanceRecord({ employeeId: adjustingResult.employeeId, ...adjustForm });
+        const response = await createAttendanceRecord({ employeeId: adjustingResult.employeeId, ...adjustForm });
+        setMaintenanceMessage(response.message || tAdmin("考勤记录已添加，后台正在继续计算"));
+        scheduleBackgroundRefresh();
       }
       setIsAdjustmentOpen(false);
-      await loadData();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : tAdmin("考勤调整失败"));
     } finally {
@@ -476,8 +601,7 @@ export function AttendanceTable({ employees, isActive }: AttendanceTableProps) {
     setSubmitting(true);
     setError("");
     try {
-      // 新增考勤记录使用后端 upsert + 重算流程，保证列表、月汇总和薪资前置数据同步更新。
-      await createAttendanceRecord({
+      const response = await createAttendanceRecord({
         employeeId,
         date: createForm.date,
         type: attendanceType,
@@ -486,7 +610,8 @@ export function AttendanceTable({ employees, isActive }: AttendanceTableProps) {
         note: createForm.note
       });
       setIsCreateOpen(false);
-      await loadData();
+      setMaintenanceMessage(response.message || tAdmin("考勤记录已添加，后台正在继续计算"));
+      scheduleBackgroundRefresh();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : tAdmin("新增考勤记录失败"));
     } finally {
@@ -524,14 +649,27 @@ export function AttendanceTable({ employees, isActive }: AttendanceTableProps) {
         <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-4 w-full">
           <div>
             <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">{tAdmin("筛选员工")}</label>
-            {/* 员工筛选改为本地下拉搜索，只过滤候选项展示；真正的表格筛选仍然提交 employeeId，避免把模糊输入误当成生效条件。 */}
+            {/* 员工筛选改为远程搜索：默认不预取员工列表，只有输入关键词后才请求无分页搜索接口，真正生效的仍是选中的 employeeId。 */}
             <SearchableSelect
               value={String(selectedEmployeeId)}
               options={employeeFilterOptions}
-              onChange={(nextValue) => setSelectedEmployeeId(nextValue === "all" ? "all" : Number(nextValue))}
+              onChange={(nextValue) => {
+                if (nextValue === "all") {
+                  setSelectedEmployeeId("all");
+                  setSelectedFilterEmployee(null);
+                  return;
+                }
+                const employee = mergeUniqueEmployees([selectedFilterEmployee, ...employeeFilterSearchResults])
+                  .find((item) => String(item.id) === nextValue) || null;
+                setSelectedEmployeeId(Number(nextValue));
+                setSelectedFilterEmployee(employee);
+              }}
+              onQueryChange={(query) => void runEmployeeSearch(query, "filter")}
+              loading={employeeFilterLoading}
               placeholder={tAdmin("请选择员工")}
-              searchPlaceholder={tAdmin("输入姓名、昵称、工号、职位过滤")}
+              searchPlaceholder={tAdmin("输入姓名、昵称、工号后搜索")}
               emptyText={tAdmin("没有匹配的员工")}
+              className="w-full sm:w-72"
             />
           </div>
 
@@ -662,11 +800,11 @@ export function AttendanceTable({ employees, isActive }: AttendanceTableProps) {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {sortedRows.length === 0 ? (
+              {displayedCalculations.length === 0 ? (
                 <tr>
                   <td colSpan={14} className="px-6 py-12 text-center text-slate-400 text-sm">{tAdmin("没有找到符合筛选条件的考勤记录")}</td>
                 </tr>
-              ) : paginatedRows.map((item) => {
+              ) : displayedCalculations.map((item) => {
                 const statusMeta = getStatusMeta(item);
                 const isNonWorkingStatus = ["pending", "absent", "leave", "sick_leave"].includes(item.status);
                 return (
@@ -737,7 +875,7 @@ export function AttendanceTable({ employees, isActive }: AttendanceTableProps) {
         <Pagination
           page={page}
           pageSize={pageSize}
-          total={sortedRows.length}
+          total={total}
           itemName={tAdmin("条考勤")}
           disabled={loading}
           onPageChange={setPage}
@@ -794,12 +932,21 @@ export function AttendanceTable({ employees, isActive }: AttendanceTableProps) {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <Field label={tAdmin("日期")}><input type="date" required value={createForm.date} onChange={(event) => setCreateForm((prev) => ({ ...prev, date: event.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500" /></Field>
             <Field label={tAdmin("员工")}>
-              <select required value={createForm.employeeId} onChange={(event) => setCreateForm((prev) => ({ ...prev, employeeId: event.target.value }))} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500">
-                <option value="">{tAdmin("请选择员工")}</option>
-                {employees.map((employee) => (
-                  <option key={employee.id} value={employee.id}>{formatEmployeeDisplayName(employee)} ({employee.role})</option>
-                ))}
-              </select>
+              <SearchableSelect
+                value={createForm.employeeId}
+                options={createEmployeeOptions}
+                onChange={(nextValue) => {
+                  const employee = mergeUniqueEmployees([selectedCreateEmployee, ...createEmployeeSearchResults])
+                    .find((item) => String(item.id) === nextValue) || null;
+                  setCreateForm((prev) => ({ ...prev, employeeId: nextValue }));
+                  setSelectedCreateEmployee(employee);
+                }}
+                onQueryChange={(query) => void runEmployeeSearch(query, "create")}
+                loading={createEmployeeLoading}
+                placeholder={tAdmin("请选择员工")}
+                searchPlaceholder={tAdmin("输入姓名、昵称、工号后搜索")}
+                emptyText={tAdmin("没有匹配的员工")}
+              />
             </Field>
             {selectedCreateEmployee ? (
               <div className="md:col-span-2 flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">

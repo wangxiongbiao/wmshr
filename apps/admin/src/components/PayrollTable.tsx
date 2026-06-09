@@ -15,11 +15,13 @@ import type {
 import {
   approvePayrollResult,
   confirmPayrollResult,
+  fetchEmployeeAvatars,
   fetchPayrollResultDetail,
   fetchPayrollResults,
   generateMonthlyPayroll,
   rejectPayrollResult,
   runNightlyPayrollNow,
+  searchEmployees,
 } from "../lib/api";
 import { useDialog } from "./DialogProvider";
 import { ModalShell } from "./ModalShell";
@@ -29,7 +31,6 @@ import { SearchableSelect } from "./SearchableSelect";
 import { YearMonthPicker } from "./YearMonthPicker";
 
 interface PayrollTableProps {
-  employees: Employee[];
   isActive: boolean;
 }
 
@@ -55,6 +56,44 @@ function getDefaultYearMonth() {
 
 function formatEmployeeDisplayName(employee: Pick<Employee, "name" | "nickname">) {
   return employee.nickname ? `${employee.name}(${employee.nickname})` : employee.name;
+}
+
+const PAYROLL_REFRESH_TTL_MS = 1000 * 15;
+
+function buildPayslipPreviewDetail(result: MonthlyPayrollResult): PayrollResultDetail {
+  return {
+    result,
+    employee: {
+      id: result.employeeId,
+      employeeNo: result.employeeNo || "",
+      name: result.employeeName,
+      nickname: "",
+      gender: "male",
+      country: "TH",
+      phone: "",
+      role: result.employeeRole,
+      dept: result.employeeDept,
+      attendanceRuleId: 0,
+      attendanceRuleName: undefined,
+      salaryType: result.salaryType,
+      hourlyRate: result.hourlyRate,
+      fixedSalary: result.fixedSalary,
+      attendanceBonus: 0,
+      socialSecurity: result.socialSecurityAmount,
+      mealAllowance: 0,
+      serviceFeeRate: 0,
+      currency: result.currency,
+      joinDate: "",
+      status: "active",
+      photo: result.employeePhoto,
+      isDeleted: false
+    },
+    salaryProfile: null,
+    attendanceSummary: null,
+    dailyStandardHours: 0,
+    adjustmentItems: [],
+    exceptionDetails: result.exceptionDetails || []
+  };
 }
 
 function Modal({
@@ -86,7 +125,7 @@ function Modal({
   );
 }
 
-export function PayrollTable({ employees, isActive }: PayrollTableProps) {
+export function PayrollTable({ isActive }: PayrollTableProps) {
   const { confirm, prompt } = useDialog();
   const { i18n } = useTranslation("admin");
   // PayrollTable 的可见文案仍集中通过 tAdmin() 渲染；这里显式订阅 react-i18next 语言状态，保证 Header 切换语言后整块薪资核算 UI 会重新渲染，而不是继续显示旧语言。
@@ -99,7 +138,14 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
   const pageSize = 20;
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // 打开工资条详情只是只读加载，不能复用“手动核算/审批提交”的提交态，否则顶部核算按钮会误显示为正在执行。
+  const [isOpeningPayslip, setIsOpeningPayslip] = useState(false);
   const [results, setResults] = useState<MonthlyPayrollResult[]>([]);
+  const [total, setTotal] = useState(0);
+  const [selectedFilterEmployee, setSelectedFilterEmployee] = useState<Employee | null>(null);
+  const [employeeSearchResults, setEmployeeSearchResults] = useState<Employee[]>([]);
+  const [employeeSearchLoading, setEmployeeSearchLoading] = useState(false);
+  const [avatarMap, setAvatarMap] = useState<Record<number, string | null>>({});
   const [error, setError] = useState("");
   const [payslipDetail, setPayslipDetail] = useState<PayrollResultDetail | null>(null);
   const [isPayslipOpen, setIsPayslipOpen] = useState(false);
@@ -109,30 +155,61 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
   const [hasLoadedResultsOnce, setHasLoadedResultsOnce] = useState(false);
   const [hasPromptedAutoGenerate, setHasPromptedAutoGenerate] = useState(false);
   const autoGeneratePromptingRef = useRef(false);
+  const lastLoadedAtRef = useRef(0);
+  const lastLoadedKeyRef = useRef("");
+
+  const buildFilterKey = (params?: {
+    yearMonth?: string;
+    calculationStatus?: string;
+    reviewStatus?: string;
+    employeeId?: number | "all";
+    page?: number;
+  }) => JSON.stringify({
+    yearMonth: params?.yearMonth ?? yearMonth,
+    calculationStatus: params?.calculationStatus ?? calculationStatus,
+    reviewStatus: params?.reviewStatus ?? reviewStatus,
+    employeeId: params?.employeeId ?? selectedEmployeeId,
+    page: params?.page ?? page
+  });
 
   const loadData = async (nextFilters?: {
     yearMonth?: string;
     calculationStatus?: string;
     reviewStatus?: string;
+    employeeId?: number | "all";
+    page?: number;
+    force?: boolean;
   }) => {
-    const selectedEmployee = selectedEmployeeId === "all"
-      ? null
-      : employees.find((employee) => Number(employee.id) === selectedEmployeeId) || null;
-    const effectiveKeyword = selectedEmployee?.employeeNo?.trim() || selectedEmployee?.name || "";
     const effectiveYearMonth = nextFilters?.yearMonth ?? yearMonth;
     const effectiveCalculationStatus = nextFilters?.calculationStatus ?? calculationStatus;
     const effectiveReviewStatus = nextFilters?.reviewStatus ?? reviewStatus;
+    const effectiveEmployeeId = nextFilters?.employeeId ?? selectedEmployeeId;
+    const effectivePage = nextFilters?.page ?? page;
+    const force = nextFilters?.force ?? false;
+    const filterKey = buildFilterKey({
+      yearMonth: effectiveYearMonth,
+      calculationStatus: effectiveCalculationStatus,
+      reviewStatus: effectiveReviewStatus,
+      employeeId: effectiveEmployeeId,
+      page: effectivePage
+    });
 
     setLoading(true);
     setError("");
     try {
-      const nextResults = await fetchPayrollResults({
-        keyword: effectiveKeyword,
+      const nextPage = await fetchPayrollResults({
         yearMonth: effectiveYearMonth,
+        employeeId: effectiveEmployeeId === "all" ? null : effectiveEmployeeId,
         calculationStatus: effectiveCalculationStatus,
-        reviewStatus: effectiveReviewStatus
+        reviewStatus: effectiveReviewStatus,
+        page: effectivePage,
+        pageSize,
+        force
       });
-      setResults(nextResults);
+      setResults(nextPage.items);
+      setTotal(nextPage.total);
+      lastLoadedAtRef.current = Date.now();
+      lastLoadedKeyRef.current = filterKey;
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : tAdmin("薪酬结果加载失败"));
     } finally {
@@ -146,13 +223,24 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
       return;
     }
 
+    const currentFilterKey = buildFilterKey();
+    const shouldReuseCurrentResults =
+      hasLoadedResultsOnce &&
+      results.length > 0 &&
+      lastLoadedKeyRef.current === currentFilterKey &&
+      Date.now() - lastLoadedAtRef.current < PAYROLL_REFRESH_TTL_MS;
+
+    if (shouldReuseCurrentResults) {
+      return;
+    }
+
     const timer = window.setTimeout(() => {
       // 薪资页缓存后再次激活时，继续沿用当前筛选条件后台刷新，但保留已生成的结果表先可见。
       void loadData();
     }, 0);
 
     return () => window.clearTimeout(timer);
-  }, [calculationStatus, isActive, reviewStatus, selectedEmployeeId, yearMonth]);
+  }, [calculationStatus, hasLoadedResultsOnce, isActive, page, results.length, reviewStatus, selectedEmployeeId, yearMonth]);
 
   useEffect(() => {
     setHasPromptedAutoGenerate(false);
@@ -163,7 +251,7 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
     setSubmitting(true);
     try {
       await generateMonthlyPayroll(yearMonth, employeeIds);
-      await loadData();
+      await loadData({ force: true });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : tAdmin("批量生成薪酬失败"));
     } finally {
@@ -171,21 +259,88 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
     }
   };
 
+  const mergeUniqueEmployees = (rows: Array<Employee | null | undefined>) => {
+    const deduped = new Map<number, Employee>();
+    rows.forEach((employee) => {
+      if (!employee) {
+        return;
+      }
+      deduped.set(Number(employee.id), employee);
+    });
+    return Array.from(deduped.values());
+  };
+
   const employeeFilterOptions = useMemo(() => {
+    const optionEmployees = mergeUniqueEmployees([selectedFilterEmployee, ...employeeSearchResults]);
     return [
       {
         value: "all",
         label: tAdmin("所有员工 (全部)"),
         description: tAdmin("不过滤员工")
       },
-      ...employees.map((employee) => ({
+      ...optionEmployees.map((employee) => ({
         value: String(employee.id),
         label: formatEmployeeDisplayName(employee),
         description: [employee.employeeNo, employee.role].filter(Boolean).join(" · "),
         keywords: [employee.name, employee.nickname, employee.employeeNo, employee.role, employee.dept]
       }))
     ];
-  }, [employees, translationRenderLanguage]);
+  }, [employeeSearchResults, selectedFilterEmployee, translationRenderLanguage]);
+
+  useEffect(() => {
+    const employeeIds = results
+      .map((item) => item.employeeId)
+      .filter((id, index, arr) => arr.indexOf(id) === index)
+      .filter((id) => !(id in avatarMap));
+    if (employeeIds.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    void fetchEmployeeAvatars(employeeIds).then((result) => {
+      if (cancelled) {
+        return;
+      }
+      setAvatarMap((prev) => {
+        const next = { ...prev };
+        result.items.forEach((item) => {
+          next[item.id] = item.photo;
+        });
+        return next;
+      });
+    }).catch(() => {
+      // 薪资列表头像补图失败不影响主列表展示。
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [avatarMap, results]);
+
+  const displayedResults = useMemo(
+    () => results.map((item) => ({
+      ...item,
+      employeePhoto: avatarMap[item.employeeId] ?? item.employeePhoto
+    })),
+    [avatarMap, results]
+  );
+
+  const handleEmployeeQueryChange = async (query: string) => {
+    const trimmedQuery = query.trim();
+    if (!trimmedQuery) {
+      setEmployeeSearchResults([]);
+      setEmployeeSearchLoading(false);
+      return;
+    }
+
+    setEmployeeSearchLoading(true);
+    try {
+      const rows = await searchEmployees(trimmedQuery);
+      setEmployeeSearchResults(rows);
+    } finally {
+      setEmployeeSearchLoading(false);
+    }
+  };
 
   useEffect(() => {
     const shouldPrompt =
@@ -196,7 +351,6 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
       !error &&
       !hasPromptedAutoGenerate &&
       results.length === 0 &&
-      employees.length > 0 &&
       selectedEmployeeId === "all" &&
       calculationStatus === "all" &&
       reviewStatus === "all";
@@ -226,10 +380,14 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
 
       await runGenerateMonthly();
     })();
-  }, [calculationStatus, confirm, employees.length, error, hasLoadedResultsOnce, hasPromptedAutoGenerate, loading, results.length, reviewStatus, selectedEmployeeId, submitting, yearMonth]);
+  }, [calculationStatus, confirm, error, hasLoadedResultsOnce, hasPromptedAutoGenerate, loading, results.length, reviewStatus, selectedEmployeeId, submitting, yearMonth]);
 
   const openPayslip = async (result: MonthlyPayrollResult) => {
-    setSubmitting(true);
+    setIsPayslipOpen(true);
+    setPayslipDetail(buildPayslipPreviewDetail(result));
+    setSignName("");
+    setIsCashPaid(result.calculationStatus === "confirmed");
+    setIsOpeningPayslip(true);
     try {
       // 异常薪资不再在动作列硬拦截；异常说明统一放到员工列左侧入口和异常详情弹窗，工资条生成/查看仍按正常发放流程走。
       // 薪资结果只允许由夜间定时任务或“立即核算薪资”按钮更新；打开工资条只读当前结果详情，避免查看动作隐式改写薪资数据。
@@ -238,12 +396,13 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
       setPayslipDetail(nextDetail);
       setSignName("");
       setIsCashPaid(result.calculationStatus === "confirmed");
-      setIsPayslipOpen(true);
-      await loadData();
+      // 点击工资条必须保持纯查看/签收语义；这里禁止顺手刷新列表，避免前端再次触发薪资列表后台计算口径链路。
     } catch (nextError) {
+      setIsPayslipOpen(false);
+      setPayslipDetail(null);
       setError(nextError instanceof Error ? nextError.message : tAdmin("工资条加载失败"));
     } finally {
-      setSubmitting(false);
+      setIsOpeningPayslip(false);
     }
   };
 
@@ -289,7 +448,7 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
       if (result.failureCount > 0) {
         setError(tAdmin("已完成 {{successCount}} 人核算，{{failureCount}} 人失败，请检查异常考勤或已锁定工资。", { successCount: result.successCount, failureCount: result.failureCount }));
       }
-      await loadData();
+      await loadData({ force: true });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : tAdmin("手动触发薪资核算失败"));
     } finally {
@@ -303,7 +462,7 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
       const approvedResult = await approvePayrollResult(resultId);
       // 工资条弹窗内核对通过后要同步本地详情状态，避免用户必须关闭重开才能继续签收确认。
       setPayslipDetail((prev) => prev && prev.result.id === resultId ? { ...prev, result: approvedResult } : prev);
-      await loadData();
+      await loadData({ force: true });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : tAdmin("标记核对通过失败"));
     } finally {
@@ -330,7 +489,7 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
       const rejectedResult = await rejectPayrollResult(resultId, reason || "");
       // 保持工资条弹窗和列表的同一条业务状态一致；驳回后用户仍可在弹窗查看原因上下文。
       setPayslipDetail((prev) => prev && prev.result.id === resultId ? { ...prev, result: rejectedResult } : prev);
-      await loadData();
+      await loadData({ force: true });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : tAdmin("驳回薪酬结果失败"));
     } finally {
@@ -359,7 +518,7 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
     try {
       const confirmedResult = await confirmPayrollResult(result.id);
       setPayslipDetail((prev) => prev && prev.result.id === result.id ? { ...prev, result: confirmedResult } : prev);
-      await loadData();
+      await loadData({ force: true });
       closePayslip();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : tAdmin("确认薪酬结果失败"));
@@ -378,7 +537,7 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
 
   const handleExportCSV = () => {
     const headers = [tAdmin("年月"), tAdmin("员工"), tAdmin("员工编号"), tAdmin("所属部门"), tAdmin("职位"), tAdmin("计薪方式"), tAdmin("有效工时"), tAdmin("加班时长"), tAdmin("加班费"), tAdmin("服务费"), tAdmin("应发"), tAdmin("社保扣款"), tAdmin("扣款"), tAdmin("实发"), tAdmin("发放状态"), tAdmin("币种")];
-    const totals = results.reduce(
+    const totals = displayedResults.reduce(
       (acc, item) => {
         acc.validHours += Number(item.validHours || 0);
         acc.overtimeHours += Number(item.overtimePayHours || 0);
@@ -392,7 +551,7 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
       },
       { validHours: 0, overtimeHours: 0, overtimePay: 0, serviceFee: 0, grossPay: 0, socialSecurity: 0, deduction: 0, netPay: 0 }
     );
-    const rows = results.map((item) => [
+    const rows = displayedResults.map((item) => [
       item.yearMonth,
       `"${item.employeeName}"`,
       item.employeeNo || "-",
@@ -427,7 +586,7 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
       totals.deduction.toFixed(2),
       totals.netPay.toFixed(2),
       "",
-      results[0]?.currency || employees[0]?.currency || "THB"
+      displayedResults[0]?.currency || selectedFilterEmployee?.currency || "THB"
     ];
     const csvContent = "\uFEFF" + [headers.join(","), ...rows.map((row) => row.join(",")), summaryRow.join(",")].join("\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
@@ -442,7 +601,7 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
   };
 
   const totals = useMemo(() => {
-    return results.reduce(
+    return displayedResults.reduce(
       (acc, item) => {
         acc.gross += item.grossPay;
         acc.deduction += item.totalDeduction;
@@ -451,37 +610,33 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
       },
       { gross: 0, deduction: 0, net: 0 }
     );
-  }, [results]);
+  }, [displayedResults]);
 
-  const displayCurrency = results[0]?.currency || employees[0]?.currency || "THB";
+  const displayCurrency = displayedResults[0]?.currency || selectedFilterEmployee?.currency || "THB";
   const availableMonths = useMemo(() => {
     // v2 原型有“快捷月份 + 自定义月份”；这里基于当前月份和已加载结果生成快捷项，避免额外引入旧后台筛选字段。
-    const monthSet = new Set<string>([yearMonth, getDefaultYearMonth(), ...results.map((item) => item.yearMonth)]);
+    const monthSet = new Set<string>([yearMonth, getDefaultYearMonth(), ...displayedResults.map((item) => item.yearMonth)]);
     return Array.from(monthSet).sort((a, b) => b.localeCompare(a));
-  }, [results, yearMonth]);
+  }, [displayedResults, yearMonth]);
   const payrollMetrics = useMemo(() => {
-    const confirmedCount = results.filter((item) => item.calculationStatus === "confirmed").length;
-    const pendingCount = Math.max(0, results.length - confirmedCount);
-    const totalHours = results.reduce((sum, item) => sum + item.validHours, 0);
-    const totalOtHours = results.reduce((sum, item) => sum + item.overtimePayHours, 0);
+    const confirmedCount = displayedResults.filter((item) => item.calculationStatus === "confirmed").length;
+    const pendingCount = Math.max(0, displayedResults.length - confirmedCount);
+    const totalHours = displayedResults.reduce((sum, item) => sum + item.validHours, 0);
+    const totalOtHours = displayedResults.reduce((sum, item) => sum + item.overtimePayHours, 0);
 
     return {
       confirmedCount,
       pendingCount,
       totalHours,
       totalOtHours,
-      progressPct: results.length > 0 ? (confirmedCount / results.length) * 100 : 0
+      progressPct: displayedResults.length > 0 ? (confirmedCount / displayedResults.length) * 100 : 0
     };
-  }, [results]);
+  }, [displayedResults]);
   useEffect(() => {
-    // 搜索、状态或月份筛选会重新加载 results；分页回到第一页，避免保留旧页码后出现空表格。
+    // 只有筛选条件变化时才回到第一页；真实后端分页下，翻页本身会触发 loadData，不能再被返回结果重置。
     setPage(1);
-  }, [results]);
+  }, [calculationStatus, reviewStatus, selectedEmployeeId, yearMonth]);
 
-  const paginatedResults = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return results.slice(start, start + pageSize);
-  }, [page, results]);
   const showRefreshing = loading && results.length > 0;
   const payoutFilter = calculationStatus === "confirmed" ? "paid" : reviewStatus === "pending" ? "pending" : "all";
   const payslipResult = payslipDetail?.result || null;
@@ -512,7 +667,6 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
                 {yearMonth}
               </span>
             </h2>
-            <p className="text-xs text-slate-400 mt-0.5">{tAdmin("以后端月度薪酬结果为准，按月份查看核算、核对与最终确认")}</p>
           </div>
         </div>
 
@@ -527,6 +681,16 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
           </div>
 
           <button
+            type="button"
+            onClick={() => void loadData({ force: true })}
+            disabled={loading || submitting}
+            className="px-3 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50 transition flex items-center gap-1.5 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
+            <span>{tAdmin("刷新")}</span>
+          </button>
+
+          <button
             onClick={handleRunNightlyPayrollNow}
             disabled={submitting}
             className="px-3 py-1.5 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 transition flex items-center gap-1.5 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
@@ -537,7 +701,7 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
 
           <button
             onClick={handleExportCSV}
-            disabled={results.length === 0}
+            disabled={displayedResults.length === 0}
             className="px-3 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50 transition flex items-center gap-1.5 shadow-sm ml-auto sm:ml-0 disabled:opacity-50"
           >
             <Download className="w-4 h-4 text-emerald-500" />
@@ -570,7 +734,7 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
             <CheckCircle2 className="w-14 h-14" />
           </div>
           <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">{tAdmin("已完成发放（确认）")}</p>
-          <p className="text-2xl font-bold font-mono text-emerald-600 mt-1">{formatCurrency(results.filter((item) => item.calculationStatus === "confirmed").reduce((sum, item) => sum + item.netPay, 0), displayCurrency)}</p>
+          <p className="text-2xl font-bold font-mono text-emerald-600 mt-1">{formatCurrency(displayedResults.filter((item) => item.calculationStatus === "confirmed").reduce((sum, item) => sum + item.netPay, 0), displayCurrency)}</p>
           <div className="flex items-center gap-1 text-[10px] text-emerald-600/80 mt-2 font-medium">
             <Check className="w-3.5 h-3.5" />
             <span>{tAdmin("包含 {{count}} 名已确认员工", { count: payrollMetrics.confirmedCount })}</span>
@@ -582,7 +746,7 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
             <AlertCircle className="w-14 h-14" />
           </div>
           <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">{tAdmin("未发放（待结）总额")}</p>
-          <p className="text-2xl font-bold font-mono text-amber-600 mt-1">{formatCurrency(Math.max(0, totals.net - results.filter((item) => item.calculationStatus === "confirmed").reduce((sum, item) => sum + item.netPay, 0)), displayCurrency)}</p>
+          <p className="text-2xl font-bold font-mono text-amber-600 mt-1">{formatCurrency(Math.max(0, totals.net - displayedResults.filter((item) => item.calculationStatus === "confirmed").reduce((sum, item) => sum + item.netPay, 0)), displayCurrency)}</p>
           <div className="flex items-center gap-1 text-[10px] text-amber-600 mt-2 font-medium">
             <Clock className="w-3.5 h-3.5" />
             <span>{tAdmin("还有 {{count}} 人待支付", { count: payrollMetrics.pendingCount })}</span>
@@ -593,7 +757,7 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
           <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">{tAdmin("工资发放核销进度")}</p>
           <div className="flex items-center justify-between mt-1">
             <p className="text-2xl font-bold text-slate-800">{payrollMetrics.progressPct.toFixed(0)}%</p>
-            <span className="text-xs bg-slate-100 text-slate-600 font-bold px-2 py-0.5 rounded-full font-mono">{tAdmin("{{confirmed}} / {{total}} 人", { confirmed: payrollMetrics.confirmedCount, total: results.length })}</span>
+            <span className="text-xs bg-slate-100 text-slate-600 font-bold px-2 py-0.5 rounded-full font-mono">{tAdmin("{{confirmed}} / {{total}} 人", { confirmed: payrollMetrics.confirmedCount, total: displayedResults.length })}</span>
           </div>
           <div className="w-full bg-slate-100 h-2 rounded-full mt-3 overflow-hidden">
             <div
@@ -615,7 +779,7 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
               onClick={() => applyPayoutStatusFilter("all")}
               className={cn("px-3 py-1.5 text-xs font-semibold rounded-lg transition-all", payoutFilter === "all" ? "bg-brand-600 text-white shadow-sm" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-100")}
             >
-              {tAdmin("全部员工 ({{count}})", { count: results.length })}
+              {tAdmin("全部员工 ({{count}})", { count: displayedResults.length })}
             </button>
             <button
               onClick={() => applyPayoutStatusFilter("pending")}
@@ -632,14 +796,26 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            {/* 薪资核算的员工筛选改为可搜索下拉：本地输入只用于过滤候选员工，真正生效的仍是选中的 employeeNo/name 后端查询。 */}
+            {/* 薪资核算的员工筛选改为远程搜索：默认不预取员工列表，只有输入关键词后才请求无分页搜索接口，真正生效的仍是选中的 employeeId。 */}
             <div className="w-full sm:w-72">
               <SearchableSelect
                 value={String(selectedEmployeeId)}
                 options={employeeFilterOptions}
-                onChange={(nextValue) => setSelectedEmployeeId(nextValue === "all" ? "all" : Number(nextValue))}
+                onChange={(nextValue) => {
+                  if (nextValue === "all") {
+                    setSelectedEmployeeId("all");
+                    setSelectedFilterEmployee(null);
+                    return;
+                  }
+                  const employee = mergeUniqueEmployees([selectedFilterEmployee, ...employeeSearchResults])
+                    .find((item) => String(item.id) === nextValue) || null;
+                  setSelectedEmployeeId(Number(nextValue));
+                  setSelectedFilterEmployee(employee);
+                }}
+                onQueryChange={(query) => void handleEmployeeQueryChange(query)}
+                loading={employeeSearchLoading}
                 placeholder={tAdmin("请选择员工")}
-                searchPlaceholder={tAdmin("输入姓名、昵称、工号、职位过滤")}
+                searchPlaceholder={tAdmin("输入姓名、昵称、工号后搜索")}
                 emptyText={tAdmin("没有匹配的员工")}
               />
             </div>
@@ -647,7 +823,7 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
-        {results.length === 0 ? (
+        {displayedResults.length === 0 ? (
           <div className="p-12 text-center text-slate-400">
             <Receipt className="w-12 h-12 text-slate-200 mx-auto mb-3" />
             <p className="text-sm">{tAdmin("没有找到符合筛选条件的员工薪资数据")}</p>
@@ -660,6 +836,7 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
                 <thead>
                   <tr className="bg-slate-50/50 text-slate-500 text-xs uppercase border-b border-slate-100">
                     <th className="px-6 py-3.5 font-semibold">{tAdmin("员工详情")}</th>
+                    <th className="px-4 py-3.5 font-semibold text-center">{tAdmin("年月")}</th>
                     <th className="px-4 py-3.5 font-semibold text-center">{tAdmin("有效出勤天数")}</th>
                     <th className="px-4 py-3.5 font-semibold text-center">{tAdmin("有效工时")}</th>
                     <th className="px-4 py-3.5 font-semibold text-center text-blue-500">{tAdmin("加班")}</th>
@@ -673,7 +850,7 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {paginatedResults.map((item) => {
+                  {displayedResults.map((item) => {
                     // 薪资结果现在直接返回“有效出勤天数”，列表和工资条都必须复用同一字段，避免再次回退到工时反推天数的旧错误口径。
                     const effectiveAttendanceDays = item.effectiveAttendanceDays || 0;
                     const isPaid = item.calculationStatus === "confirmed";
@@ -710,6 +887,9 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
                               <p className="text-[10px] text-slate-400 mt-0.5">{item.employeeDept || tAdmin("未分配")} · {item.employeeRole || tAdmin("未设置职位")}</p>
                             </div>
                           </div>
+                        </td>
+                        <td className="px-4 py-4 text-center text-xs font-mono font-semibold text-slate-700">
+                          {item.yearMonth}
                         </td>
                         <td className="px-4 py-4 text-center">
                           <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold font-mono text-xs">{tAdmin("{{days}} 天", { days: effectiveAttendanceDays })}</span>
@@ -755,16 +935,15 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
                             <div className="flex items-center justify-center gap-1.5">
                               <button
                                 onClick={() => void openPayslip(item)}
-                                disabled={submitting}
+                                disabled={submitting || isOpeningPayslip}
                                 className={cn(
-                                  "px-2.5 py-1 text-xs font-semibold rounded-lg transition flex items-center gap-1 disabled:opacity-50",
+                                  "px-2.5 py-1 text-xs font-semibold rounded-lg transition disabled:opacity-50",
                                   isPaid
                                     ? "text-brand-700 bg-brand-50 border border-brand-100 hover:bg-brand-100"
                                     : "text-white bg-brand-600 hover:bg-brand-700 shadow-sm hover:shadow"
                                 )}
                               >
-                                <Receipt className="w-3 h-3" />
-                                <span>{isPaid ? tAdmin("查看工资条") : tAdmin("生成工资条")}</span>
+                                <span>{tAdmin("工资条")}</span>
                               </button>
                             </div>
                           </div>
@@ -780,14 +959,14 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
               <Pagination
                 page={page}
                 pageSize={pageSize}
-                total={results.length}
+                total={total}
                 itemName={tAdmin("名员工")}
                 disabled={loading || submitting}
                 onPageChange={setPage}
               />
               <div className="flex flex-col sm:flex-row justify-between items-center text-xs text-slate-500">
-                <div>{tAdmin("当前筛选共显示")}<span className="font-bold text-slate-700">{results.length}</span>{tAdmin("名员工的计算记录")}</div>
-                <div>{tAdmin("薪资发放由人事及仓库管理员校对后，可通过")}<span className="font-bold text-slate-700">{tAdmin("【生成工资条】")}</span>{tAdmin("开启独立签收单，一键核对实缴")}</div>
+                <div>{tAdmin("当前筛选共显示")}<span className="font-bold text-slate-700">{total}</span>{tAdmin("名员工的计算记录")}</div>
+                <div>{tAdmin("薪资发放由人事及仓库管理员校对后，可通过")}<span className="font-bold text-slate-700">{tAdmin("【工资条】")}</span>{tAdmin("开启独立签收单，一键核对实缴")}</div>
               </div>
             </div>
           </div>
@@ -898,8 +1077,18 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
           </div>
         ) : null}
       >
-        {payslipResult ? (
+        {isOpeningPayslip && !payslipResult ? (
+          <div className="space-y-4 py-8 text-center text-sm text-slate-500">
+            <div className="mx-auto h-10 w-10 animate-spin rounded-full border-2 border-slate-200 border-t-brand-500" />
+            <p>{tAdmin("正在加载工资条详情")}</p>
+          </div>
+        ) : payslipResult ? (
           <div className="space-y-5 text-sm text-slate-700">
+            {isOpeningPayslip ? (
+              <div className="rounded-lg border border-brand-100 bg-brand-50 px-3 py-2 text-xs text-brand-700">
+                {tAdmin("正在补充工资条详细数据")}
+              </div>
+            ) : null}
             <div className="flex items-center gap-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
               <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold overflow-hidden border">
                 {payslipEmployee?.photo ? (
@@ -922,7 +1111,7 @@ export function PayrollTable({ employees, isActive }: PayrollTableProps) {
 
             <div className="space-y-2 border-y border-dashed border-slate-200 py-3.5 font-mono text-xs">
               {/* Payslip hour labels keep defaultValue deliberately: employee-facing payroll checks must show a readable label even if a locale resource is temporarily empty. */}
-              <div className="grid grid-cols-[minmax(180px,1fr)_auto] items-center gap-3"><span className="min-w-0 whitespace-nowrap font-medium text-slate-600">{tAdmin("标准计薪时限（每日标准工时）:", { defaultValue: "标准计薪时限（每日标准工时）:" })}</span><span className="font-semibold text-slate-800">{formatDuration(payslipResult.standardHours)}</span></div>
+              <div className="grid grid-cols-[minmax(180px,1fr)_auto] items-center gap-3"><span className="min-w-0 whitespace-nowrap font-medium text-slate-600">{tAdmin("每天需要上班的工时:", { defaultValue: "每天需要上班的工时:" })}</span><span className="font-semibold text-slate-800">{formatDuration(payslipDetail?.dailyStandardHours || 0)}</span></div>
               <div className="grid grid-cols-[minmax(180px,1fr)_auto] items-center gap-3"><span className="min-w-0 whitespace-nowrap font-medium text-slate-600">{tAdmin("本月有效出勤天数:", { defaultValue: "本月有效出勤天数:" })}</span><span className="font-bold text-slate-800">{tAdmin("{{days}} 天", { days: payslipEffectiveAttendanceDays })}</span></div>
               <div className="grid grid-cols-[minmax(180px,1fr)_auto] items-center gap-3"><span className="min-w-0 whitespace-nowrap font-medium text-slate-600">{tAdmin("本月累计上班工时:", { defaultValue: "本月累计上班工时:" })}</span><span className="font-semibold text-slate-800">{formatDuration(payslipResult.validHours)}</span></div>
               <div className="grid grid-cols-[minmax(180px,1fr)_auto] items-center gap-3"><span className="min-w-0 whitespace-nowrap font-medium text-slate-600">{tAdmin("本月有效加班工时:", { defaultValue: "本月有效加班工时:" })}</span><span className="font-bold text-blue-600">{formatDuration(payslipResult.overtimePayHours)}</span></div>

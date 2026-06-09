@@ -2,10 +2,12 @@ import { supabase } from "./supabase";
 import {
   AppConfig,
   AttendanceCalculationDetail,
+  AttendanceCalculationPage,
   AttendanceCalculationResult,
   AttendanceDailyMaintenanceResponse,
   AttendanceMaintenanceRunSummary,
   AttendanceRecord,
+  AttendanceRecordAsyncResponse,
   AttendanceRecordCreatePayload,
   AttendanceRecordUpdatePayload,
   AttendanceRule,
@@ -19,18 +21,21 @@ import {
   EmployeeDetail,
   EmployeeListFilters,
   EmployeeListPage,
+  EmployeeAvatarBatchResponse,
   EmployeeStatus,
   MonthlyAttendanceSummary,
   MonthlyPayrollResult,
   PayrollGenerateBatchResponse,
   PayrollNightlyRunResponse,
   PayrollResultDetail,
+  PayrollResultPage,
   RecalculateBatchItem,
   RecalculateBatchResponse,
   SalaryAdjustmentItem,
   SalaryAdjustmentPayload,
   SopDocument,
   WorkspaceBootstrapResponse,
+  WorkspaceBootstrapStatusResponse,
   EmployeeUpsertPayload
 } from "../types";
 
@@ -54,13 +59,73 @@ async function request<T>(input: string, init?: RequestInit): Promise<T> {
   return payload as T;
 }
 
+const employeePageRequestCache = new Map<string, Promise<EmployeeListPage>>();
+const employeeCountRequestCache = new Map<string, Promise<number>>();
+const attendanceCalculationPageRequestCache = new Map<string, Promise<AttendanceCalculationPage>>();
+const PAYROLL_RESULTS_CACHE_TTL_MS = 1000 * 15;
+const PAYROLL_RESULT_DETAIL_CACHE_TTL_MS = 1000 * 30;
+const payrollResultsCache = new Map<string, { data: PayrollResultPage; expiresAt: number }>();
+const payrollResultsRequestInFlight = new Map<string, Promise<PayrollResultPage>>();
+const payrollResultDetailCache = new Map<number, { data: PayrollResultDetail; expiresAt: number }>();
+const payrollResultDetailRequestInFlight = new Map<number, Promise<PayrollResultDetail>>();
+const ATTENDANCE_CONFIG_CACHE_TTL_MS = 1000 * 30;
+let attendanceConfigCache: { data: AppConfig; expiresAt: number } | null = null;
+let attendanceConfigRequestInFlight: Promise<AppConfig> | null = null;
+const DASHBOARD_CACHE_TTL_MS = 1000 * 15;
+const dashboardDataCache = new Map<string, { data: DashboardData; expiresAt: number }>();
+const dashboardRequestInFlight = new Map<string, Promise<DashboardData>>();
+
+function clearPayrollCaches() {
+  payrollResultsCache.clear();
+  payrollResultsRequestInFlight.clear();
+  payrollResultDetailCache.clear();
+  payrollResultDetailRequestInFlight.clear();
+}
+
 export async function fetchEmployees(): Promise<Employee[]> {
   return request<Employee[]>("/api/admin/employees");
 }
 
-export async function fetchDashboardData(): Promise<DashboardData> {
-  // v2 数据看板不再由前端日期筛选驱动；后端按当前账号最后一次考勤结果周期返回完整看板契约。
-  return request<DashboardData>("/api/admin/dashboard");
+export async function searchEmployees(keyword: string): Promise<Employee[]> {
+  const trimmedKeyword = keyword.trim();
+  if (!trimmedKeyword) {
+    return [];
+  }
+  const search = new URLSearchParams({ keyword: trimmedKeyword });
+  return request<Employee[]>(`/api/admin/employees?${search.toString()}`);
+}
+
+export async function fetchDashboardData(params: { force?: boolean; yearMonth?: string } = {}): Promise<DashboardData> {
+  const yearMonth = params.yearMonth?.trim() || new Date().toISOString().slice(0, 7);
+  const cacheKey = yearMonth;
+  const now = Date.now();
+  const cached = dashboardDataCache.get(cacheKey);
+  if (!params.force && cached && cached.expiresAt > now) {
+    return cached.data;
+  }
+  const inFlight = dashboardRequestInFlight.get(cacheKey);
+  if (!params.force && inFlight) {
+    return inFlight;
+  }
+
+  const search = new URLSearchParams({ yearMonth });
+  const requestPromise = request<DashboardData>(`/api/admin/dashboard?${search.toString()}`)
+    .then((data) => {
+      dashboardDataCache.set(cacheKey, {
+        data,
+        expiresAt: Date.now() + DASHBOARD_CACHE_TTL_MS
+      });
+      return data;
+    })
+    .finally(() => {
+      dashboardRequestInFlight.delete(cacheKey);
+    });
+
+  if (!params.force) {
+    dashboardRequestInFlight.set(cacheKey, requestPromise);
+  }
+
+  return requestPromise;
 }
 
 export async function fetchSops(params: { keyword?: string; employeeId?: number | null; publishedOnly?: boolean } = {}): Promise<SopDocument[]> {
@@ -132,12 +197,76 @@ export async function fetchEmployeesPage(params: EmployeeListFilters & {
   if (params.includeInactive) {
     search.set("includeInactive", "true");
   }
+  search.set("skipTotal", "true");
 
-  return request<EmployeeListPage>(`/api/admin/employees?${search.toString()}`);
+  const url = `/api/admin/employees?${search.toString()}`;
+  const cached = employeePageRequestCache.get(url);
+  if (cached) {
+    return cached;
+  }
+
+  const requestPromise = request<EmployeeListPage>(url).finally(() => {
+    employeePageRequestCache.delete(url);
+  });
+  employeePageRequestCache.set(url, requestPromise);
+  return requestPromise;
+}
+
+export async function fetchEmployeesCount(params: EmployeeListFilters = {}): Promise<number> {
+  const search = new URLSearchParams();
+
+  if (params.keyword?.trim()) {
+    search.set("keyword", params.keyword.trim());
+  }
+  if (params.status && params.status !== "all") {
+    search.set("status", params.status);
+  }
+  if (params.country && params.country !== "all") {
+    search.set("country", params.country);
+  }
+  if (params.salaryType && params.salaryType !== "all") {
+    search.set("salaryType", params.salaryType);
+  }
+  if (params.role && params.role !== "all") {
+    search.set("role", params.role);
+  }
+  if (params.includeInactive) {
+    search.set("includeInactive", "true");
+  }
+
+  const url = `/api/admin/employees/count${search.toString() ? `?${search.toString()}` : ""}`;
+  const cached = employeeCountRequestCache.get(url);
+  if (cached) {
+    return cached;
+  }
+
+  const requestPromise = request<{ total: number }>(url)
+    .then((response) => response.total)
+    .finally(() => {
+      employeeCountRequestCache.delete(url);
+    });
+
+  employeeCountRequestCache.set(url, requestPromise);
+  return requestPromise;
 }
 
 export async function fetchEmployeeDetail(employeeId: number): Promise<EmployeeDetail> {
   return request<EmployeeDetail>(`/api/admin/employees/${employeeId}`);
+}
+
+export async function fetchEmployeeAvatars(employeeIds: number[]): Promise<EmployeeAvatarBatchResponse> {
+  const ids = employeeIds
+    .map((id) => Number(id))
+    .filter((id, index, list) => Number.isFinite(id) && id > 0 && list.indexOf(id) === index)
+    .slice(0, 50);
+  if (ids.length === 0) {
+    return { items: [] };
+  }
+
+  const search = new URLSearchParams({
+    ids: ids.join(",")
+  });
+  return request<EmployeeAvatarBatchResponse>(`/api/admin/employees/avatars?${search.toString()}`);
 }
 
 export async function fetchEmployeeAppAccount(employeeId: number): Promise<EmployeeAppAccountResponse> {
@@ -201,15 +330,40 @@ export async function fetchAttendanceRuleRelatedEmployees(ruleId: number, curren
 }
 
 export async function fetchAttendanceConfig(): Promise<AppConfig> {
-  return request<AppConfig>("/api/admin/attendance-config");
+  const now = Date.now();
+  if (attendanceConfigCache && attendanceConfigCache.expiresAt > now) {
+    return attendanceConfigCache.data;
+  }
+  if (attendanceConfigRequestInFlight) {
+    return attendanceConfigRequestInFlight;
+  }
+
+  attendanceConfigRequestInFlight = request<AppConfig>("/api/admin/attendance-config")
+    .then((data) => {
+      attendanceConfigCache = {
+        data,
+        expiresAt: Date.now() + ATTENDANCE_CONFIG_CACHE_TTL_MS
+      };
+      return data;
+    })
+    .finally(() => {
+      attendanceConfigRequestInFlight = null;
+    });
+
+  return attendanceConfigRequestInFlight;
 }
 
 export async function updateAttendanceConfig(payload: AppConfig): Promise<AppConfig> {
   // v2 考勤页只维护账号级全局配置；保存后由后端重算接口统一消费，前端不再保存多规则关系。
-  return request<AppConfig>("/api/admin/attendance-config", {
+  const data = await request<AppConfig>("/api/admin/attendance-config", {
     method: "PUT",
     body: JSON.stringify(payload)
   });
+  attendanceConfigCache = {
+    data,
+    expiresAt: Date.now() + ATTENDANCE_CONFIG_CACHE_TTL_MS
+  };
+  return data;
 }
 
 export async function fetchAttendanceCalculations(params: {
@@ -219,9 +373,14 @@ export async function fetchAttendanceCalculations(params: {
   employeeId?: number | null;
   status?: string;
   hasException?: string;
-}): Promise<AttendanceCalculationResult[]> {
+  page: number;
+  pageSize: number;
+}): Promise<AttendanceCalculationPage> {
   // v2 原型有“全部时间/按天/按月”三种筛选；yearMonth 只在按月或按天辅助查询时传，全部时间不能被前端硬塞当前月份。
-  const search = new URLSearchParams();
+  const search = new URLSearchParams({
+    page: String(params.page),
+    pageSize: String(params.pageSize)
+  });
   if (params.yearMonth) {
     search.set("yearMonth", params.yearMonth);
   }
@@ -241,16 +400,26 @@ export async function fetchAttendanceCalculations(params: {
     search.set("hasException", params.hasException);
   }
 
-  return request<AttendanceCalculationResult[]>(`/api/admin/attendance-calculations?${search.toString()}`);
+  const url = `/api/admin/attendance-calculations?${search.toString()}`;
+  const cached = attendanceCalculationPageRequestCache.get(url);
+  if (cached) {
+    return cached;
+  }
+
+  const requestPromise = request<AttendanceCalculationPage>(url).finally(() => {
+    attendanceCalculationPageRequestCache.delete(url);
+  });
+  attendanceCalculationPageRequestCache.set(url, requestPromise);
+  return requestPromise;
 }
 
 export async function fetchAttendanceCalculationDetail(resultId: number): Promise<AttendanceCalculationDetail> {
   return request<AttendanceCalculationDetail>(`/api/admin/attendance-calculations/${resultId}`);
 }
 
-export async function createAttendanceRecord(payload: AttendanceRecordCreatePayload): Promise<AttendanceCalculationResult> {
-  // 新增考勤记录复用后端补卡接口；后端会 upsert 同员工同日期记录，并立即重算日/月考勤。
-  return request<AttendanceCalculationResult>("/api/admin/attendance-records", {
+export async function createAttendanceRecord(payload: AttendanceRecordCreatePayload): Promise<AttendanceRecordAsyncResponse> {
+  // 新增考勤记录改为快速写入 attendance_records，日/月重算在后台继续执行，避免管理员等待整月刷新。
+  return request<AttendanceRecordAsyncResponse>("/api/admin/attendance-records", {
     method: "POST",
     body: JSON.stringify(payload)
   });
@@ -283,8 +452,15 @@ export async function fetchPayrollResults(params: {
   salaryType?: string;
   calculationStatus?: string;
   reviewStatus?: string;
-}): Promise<MonthlyPayrollResult[]> {
-  const search = new URLSearchParams({ yearMonth: params.yearMonth });
+  page: number;
+  pageSize: number;
+  force?: boolean;
+}): Promise<PayrollResultPage> {
+  const search = new URLSearchParams({
+    yearMonth: params.yearMonth,
+    page: String(params.page),
+    pageSize: String(params.pageSize)
+  });
   if (params.keyword?.trim()) {
     search.set("keyword", params.keyword.trim());
   }
@@ -301,66 +477,132 @@ export async function fetchPayrollResults(params: {
     search.set("reviewStatus", params.reviewStatus);
   }
 
-  return request<MonthlyPayrollResult[]>(`/api/admin/payroll-results?${search.toString()}`);
+  const requestPath = `/api/admin/payroll-results?${search.toString()}`;
+  const now = Date.now();
+  const cached = payrollResultsCache.get(requestPath);
+  if (!params.force && cached && cached.expiresAt > now) {
+    return cached.data;
+  }
+  const inFlight = payrollResultsRequestInFlight.get(requestPath);
+  if (!params.force && inFlight) {
+    return inFlight;
+  }
+
+  const requestPromise = request<PayrollResultPage>(requestPath)
+    .then((data) => {
+      payrollResultsCache.set(requestPath, {
+        data,
+        expiresAt: Date.now() + PAYROLL_RESULTS_CACHE_TTL_MS
+      });
+      return data;
+    })
+    .finally(() => {
+      payrollResultsRequestInFlight.delete(requestPath);
+    });
+
+  if (!params.force) {
+    payrollResultsRequestInFlight.set(requestPath, requestPromise);
+  }
+
+  return requestPromise;
 }
 
 export async function fetchPayrollResultDetail(resultId: number): Promise<PayrollResultDetail> {
-  return request<PayrollResultDetail>(`/api/admin/payroll-results/${resultId}`);
+  const now = Date.now();
+  const cached = payrollResultDetailCache.get(resultId);
+  if (cached && cached.expiresAt > now) {
+    return cached.data;
+  }
+  const inFlight = payrollResultDetailRequestInFlight.get(resultId);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const requestPromise = request<PayrollResultDetail>(`/api/admin/payroll-results/${resultId}`)
+    .then((data) => {
+      payrollResultDetailCache.set(resultId, {
+        data,
+        expiresAt: Date.now() + PAYROLL_RESULT_DETAIL_CACHE_TTL_MS
+      });
+      return data;
+    })
+    .finally(() => {
+      payrollResultDetailRequestInFlight.delete(resultId);
+    });
+
+  payrollResultDetailRequestInFlight.set(resultId, requestPromise);
+  return requestPromise;
 }
 
 export async function generateMonthlyPayroll(yearMonth: string, employeeIds?: number[]): Promise<PayrollGenerateBatchResponse> {
-  return request<PayrollGenerateBatchResponse>("/api/admin/payroll-results/generate-monthly", {
+  const data = await request<PayrollGenerateBatchResponse>("/api/admin/payroll-results/generate-monthly", {
     method: "POST",
     body: JSON.stringify({ yearMonth, employeeIds: employeeIds?.length ? employeeIds : null })
   });
+  clearPayrollCaches();
+  return data;
 }
 
 export async function generateOnePayroll(employeeId: number, yearMonth: string): Promise<MonthlyPayrollResult> {
-  return request<MonthlyPayrollResult>("/api/admin/payroll-results/generate-one", {
+  const data = await request<MonthlyPayrollResult>("/api/admin/payroll-results/generate-one", {
     method: "POST",
     body: JSON.stringify({ employeeId, yearMonth })
   });
+  clearPayrollCaches();
+  return data;
 }
 
 export async function recalculateOnePayroll(employeeId: number, yearMonth: string): Promise<MonthlyPayrollResult> {
-  return request<MonthlyPayrollResult>("/api/admin/payroll-results/recalculate-one", {
+  const data = await request<MonthlyPayrollResult>("/api/admin/payroll-results/recalculate-one", {
     method: "POST",
     body: JSON.stringify({ employeeId, yearMonth })
   });
+  clearPayrollCaches();
+  return data;
 }
 
 export async function recalculateMonthlyPayroll(yearMonth: string, employeeIds?: number[]): Promise<PayrollGenerateBatchResponse> {
-  return request<PayrollGenerateBatchResponse>("/api/admin/payroll-results/recalculate-monthly", {
+  const data = await request<PayrollGenerateBatchResponse>("/api/admin/payroll-results/recalculate-monthly", {
     method: "POST",
     body: JSON.stringify({ yearMonth, employeeIds: employeeIds?.length ? employeeIds : null })
   });
+  clearPayrollCaches();
+  return data;
 }
 
 export async function runNightlyPayrollNow(yearMonth: string): Promise<PayrollNightlyRunResponse> {
-  return request<PayrollNightlyRunResponse>("/api/admin/payroll-results/run-nightly", {
+  const data = await request<PayrollNightlyRunResponse>("/api/admin/payroll-results/run-nightly", {
     method: "POST",
     // 手动按钮走已登录后台接口，服务端只核算当前账号；不要从浏览器调用 cron 专用入口或暴露 CRON_SECRET。
     body: JSON.stringify({ yearMonth })
   });
+  clearPayrollCaches();
+  return data;
 }
 
 export async function approvePayrollResult(resultId: number): Promise<MonthlyPayrollResult> {
-  return request<MonthlyPayrollResult>(`/api/admin/payroll-results/${resultId}/approve`, {
+  const data = await request<MonthlyPayrollResult>(`/api/admin/payroll-results/${resultId}/approve`, {
     method: "PATCH"
   });
+  clearPayrollCaches();
+  return data;
 }
 
 export async function rejectPayrollResult(resultId: number, reason?: string): Promise<MonthlyPayrollResult> {
-  return request<MonthlyPayrollResult>(`/api/admin/payroll-results/${resultId}/reject`, {
+  const data = await request<MonthlyPayrollResult>(`/api/admin/payroll-results/${resultId}/reject`, {
     method: "PATCH",
     body: JSON.stringify({ reason: reason || "" })
   });
+  clearPayrollCaches();
+  return data;
 }
 
 export async function confirmPayrollResult(resultId: number): Promise<MonthlyPayrollResult> {
-  return request<MonthlyPayrollResult>(`/api/admin/payroll-results/${resultId}/confirm`, {
+  const data = await request<MonthlyPayrollResult>(`/api/admin/payroll-results/${resultId}/confirm`, {
     method: "PATCH"
   });
+  clearPayrollCaches();
+  return data;
 }
 
 export async function fetchSalaryAdjustmentItems(params: {
@@ -380,29 +622,39 @@ export async function fetchSalaryAdjustmentItems(params: {
 }
 
 export async function createSalaryAdjustmentItem(payload: SalaryAdjustmentPayload): Promise<SalaryAdjustmentItem> {
-  return request<SalaryAdjustmentItem>("/api/admin/salary-adjustment-items", {
+  const data = await request<SalaryAdjustmentItem>("/api/admin/salary-adjustment-items", {
     method: "POST",
     body: JSON.stringify(payload)
   });
+  clearPayrollCaches();
+  return data;
 }
 
 export async function updateSalaryAdjustmentItem(itemId: number, payload: SalaryAdjustmentPayload): Promise<SalaryAdjustmentItem> {
-  return request<SalaryAdjustmentItem>(`/api/admin/salary-adjustment-items/${itemId}`, {
+  const data = await request<SalaryAdjustmentItem>(`/api/admin/salary-adjustment-items/${itemId}`, {
     method: "PUT",
     body: JSON.stringify(payload)
   });
+  clearPayrollCaches();
+  return data;
 }
 
 export async function deleteSalaryAdjustmentItem(itemId: number): Promise<{ success: true }> {
-  return request<{ success: true }>(`/api/admin/salary-adjustment-items/${itemId}`, {
+  const data = await request<{ success: true }>(`/api/admin/salary-adjustment-items/${itemId}`, {
     method: "DELETE"
   });
+  clearPayrollCaches();
+  return data;
 }
 
 export async function initializeWorkspace(): Promise<WorkspaceBootstrapResponse> {
   return request<WorkspaceBootstrapResponse>("/api/admin/workspace/bootstrap", {
     method: "POST"
   });
+}
+
+export async function fetchWorkspaceBootstrapStatus(): Promise<WorkspaceBootstrapStatusResponse> {
+  return request<WorkspaceBootstrapStatusResponse>("/api/admin/workspace/bootstrap-status");
 }
 
 export async function ensureWorkspaceBootstrap(): Promise<WorkspaceBootstrapResponse> {

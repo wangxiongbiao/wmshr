@@ -107,6 +107,59 @@ function FieldLabel({ children }: { children: ReactNode }) {
   return <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">{children}</label>;
 }
 
+const MAX_AVATAR_UPLOAD_BYTES = 5 * 1024 * 1024;
+const MAX_AVATAR_EDGE = 160;
+const AVATAR_EXPORT_QUALITY = 0.72;
+const MIN_AVATAR_EXPORT_QUALITY = 0.28;
+const AVATAR_TARGET_BYTES = 8 * 1024;
+
+async function loadImageFromFile(file: File) {
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    image.decoding = "async";
+    const loaded = new Promise<HTMLImageElement>((resolve, reject) => {
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error(tAdmin("头像图片读取失败，请重试")));
+    });
+    image.src = objectUrl;
+    return await loaded;
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+async function compressAvatarFile(file: File) {
+  const image = await loadImageFromFile(file);
+  const longestEdge = Math.max(image.width, image.height);
+  const scale = longestEdge > MAX_AVATAR_EDGE ? MAX_AVATAR_EDGE / longestEdge : 1;
+  const targetWidth = Math.max(1, Math.round(image.width * scale));
+  const targetHeight = Math.max(1, Math.round(image.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error(tAdmin("当前浏览器不支持头像压缩，请更换浏览器后重试"));
+  }
+
+  // JPEG 压缩体积最稳定；先铺白底，避免透明 PNG 转出后出现黑底。
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, targetWidth, targetHeight);
+  context.drawImage(image, 0, 0, targetWidth, targetHeight);
+
+  let quality = AVATAR_EXPORT_QUALITY;
+  let dataUrl = canvas.toDataURL("image/jpeg", quality);
+
+  while (quality > MIN_AVATAR_EXPORT_QUALITY && dataUrl.length * 0.75 > AVATAR_TARGET_BYTES) {
+    quality -= 0.06;
+    dataUrl = canvas.toDataURL("image/jpeg", quality);
+  }
+
+  return dataUrl;
+}
+
 interface EmployeeModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -157,25 +210,31 @@ export function EmployeeModal({
     setError("");
   };
 
-  const handlePhotoUpload = (e: ChangeEvent<HTMLInputElement>) => {
+  const handlePhotoUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file) {
+      return;
+    }
 
-    // v2 员工弹窗只把头像作为员工档案的一部分保存；限制类型和大小，避免非图片或过大 base64 写入员工表。
+    // 员工头像保存到 employees.photo 前先压缩，避免原图 base64 直接写库，把列表接口重新拖回 MB 级。
     if (!file.type.startsWith("image/")) {
       setError(tAdmin("请上传图片文件"));
       return;
     }
-    if (file.size > 1024 * 1024) {
-      setError(tAdmin("头像图片不能超过 1MB"));
+    if (file.size > MAX_AVATAR_UPLOAD_BYTES) {
+      setError(tAdmin("头像原图不能超过 5MB"));
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      setFormData((prev) => ({ ...prev, photo: ev.target?.result as string }));
-    };
-    reader.readAsDataURL(file);
+    try {
+      setError("");
+      const compressedPhoto = await compressAvatarFile(file);
+      setFormData((prev) => ({ ...prev, photo: compressedPhoto }));
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : tAdmin("头像处理失败，请重试"));
+    } finally {
+      e.target.value = "";
+    }
   };
 
   const validateAndSubmit = (e: FormEvent<HTMLFormElement>) => {
@@ -1041,4 +1100,3 @@ export function AttendanceAdjustmentModal({ isOpen, onClose, onSave, record, emp
     </Modal>
   );
 }
-

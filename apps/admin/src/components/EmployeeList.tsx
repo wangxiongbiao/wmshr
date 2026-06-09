@@ -3,16 +3,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { tAdmin } from "../lib/i18nText";
 import { Edit, KeyRound, Plus, Search, Trash2 } from "lucide-react";
 import { Employee } from "../types";
+import { fetchEmployeeAvatars, fetchEmployeesCount, fetchEmployeesPage } from "../lib/api";
 import { cn, COUNTRY_FLAGS, formatCurrency, getCountryName } from "../lib/utils";
 import { Pagination } from "./Pagination";
 
 interface EmployeeListProps {
-  employees: Employee[];
   loading?: boolean;
+  reloadKey?: number;
   onAddEmployee: () => void;
   onEditEmployee: (emp: Employee) => void;
   onManageAppAccount: (emp: Employee) => void;
@@ -39,34 +40,112 @@ function getV2HourlyRate(employee: Employee) {
   return monthlyWage !== null && monthlyWage > 0 ? (monthlyWage / 30) / 8 : null;
 }
 
-export function EmployeeList({ employees, loading = false, onAddEmployee, onEditEmployee, onManageAppAccount, onDeleteEmployee }: EmployeeListProps) {
+export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, onEditEmployee, onManageAppAccount, onDeleteEmployee }: EmployeeListProps) {
   const [query, setSearchQuery] = useState("");
   const [page, setPage] = useState(1);
   const pageSize = 12;
-
-  // 员工管理按 admin-v2 原型展示：本组件只做 v2 的姓名/职位/区域搜索和卡片渲染；分页只切分当前筛选结果，不重新引入旧后台的多筛选、停用/离职按钮。
-  const filteredEmployees = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery) return employees;
-
-    return employees.filter((emp) =>
-      emp.name.toLowerCase().includes(normalizedQuery) ||
-      emp.nickname.toLowerCase().includes(normalizedQuery) ||
-      emp.role.toLowerCase().includes(normalizedQuery) ||
-      emp.dept.toLowerCase().includes(normalizedQuery)
-    );
-  }, [employees, query]);
+  const loadRequestIdRef = useRef(0);
+  const [rows, setRows] = useState<Employee[]>([]);
+  const [total, setTotal] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [totalResolved, setTotalResolved] = useState(false);
+  const [pageLoading, setPageLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [avatarMap, setAvatarMap] = useState<Record<number, string | null>>({});
 
   useEffect(() => {
-    // 筛选条件或员工源数据变化后回到第一页，避免分页停留在旧页码导致用户误以为没有员工数据。
+    // 搜索条件变化后必须回到第一页；真实后端分页下，旧页码继续请求会直接跳到深页，和用户当前筛选意图不一致。
     setPage(1);
-  }, [employees, query]);
+  }, [query]);
 
-  const paginatedEmployees = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return filteredEmployees.slice(start, start + pageSize);
-  }, [filteredEmployees, page]);
-  const showRefreshing = loading && employees.length > 0;
+  useEffect(() => {
+    const requestId = ++loadRequestIdRef.current;
+    setPageLoading(true);
+    setError("");
+
+    void fetchEmployeesPage({
+      keyword: query,
+      page,
+      pageSize
+    }).then((result) => {
+      if (requestId !== loadRequestIdRef.current) {
+        return;
+      }
+      setRows(result.items);
+      setHasMore(result.hasMore);
+      if (typeof result.total === "number") {
+        setTotal(result.total);
+        setTotalResolved(true);
+      }
+    }).catch((nextError) => {
+      if (requestId !== loadRequestIdRef.current) {
+        return;
+      }
+      setError(nextError instanceof Error ? nextError.message : tAdmin("员工列表加载失败"));
+    }).finally(() => {
+      if (requestId === loadRequestIdRef.current) {
+        setPageLoading(false);
+      }
+    });
+  // 员工页只依赖自己的分页参数与显式刷新信号；避免父层全量 employees 变更把同一分页请求重复打一遍。
+  }, [page, pageSize, query, reloadKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setTotal(0);
+    setTotalResolved(false);
+
+    void fetchEmployeesCount({
+      keyword: query
+    }).then((nextTotal) => {
+      if (cancelled) {
+        return;
+      }
+      setTotal(nextTotal);
+      setTotalResolved(true);
+    }).catch(() => {
+      if (cancelled) {
+        return;
+      }
+      setTotalResolved(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [query, reloadKey]);
+
+  useEffect(() => {
+    const visibleIds = rows.map((row) => row.id).filter((id) => !(id in avatarMap));
+    if (visibleIds.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    void fetchEmployeeAvatars(visibleIds).then((result) => {
+      if (cancelled) {
+        return;
+      }
+      setAvatarMap((prev) => {
+        const next = { ...prev };
+        result.items.forEach((item) => {
+          next[item.id] = item.photo;
+        });
+        return next;
+      });
+    }).catch(() => {
+      // 头像补图失败不影响员工列表主内容；保持首字兜底即可。
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [avatarMap, rows]);
+
+  const showRefreshing = (pageLoading || loading) && rows.length > 0;
+  const displayTotal = totalResolved
+    ? total
+    : Math.max(total, (page - 1) * pageSize + rows.length + (hasMore ? 1 : 0));
 
   return (
     <div className="h-full min-h-0 flex flex-col">
@@ -97,15 +176,18 @@ export function EmployeeList({ employees, loading = false, onAddEmployee, onEdit
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-        {filteredEmployees.length === 0 ? (
+        {error ? (
+          <div className="glass-panel rounded-xl p-10 text-center text-sm text-red-500">{error}</div>
+        ) : displayTotal === 0 ? (
           <div className="glass-panel rounded-xl p-10 text-center text-sm text-slate-500">{tAdmin("当前筛选条件下没有员工数据")}</div>
         ) : (
           // v2 员工卡片包含头像、标签和薪资字段；常规大屏保持三列，避免一行四列时字段被挤压换行。
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5">
-            {paginatedEmployees.map((emp) => {
+            {rows.map((emp) => {
             const monthlyWage = getV2MonthlyWage(emp);
             const hourlyRate = getV2HourlyRate(emp);
             const statusLabel = getV2StatusLabel(emp);
+            const employeePhoto = avatarMap[emp.id] ?? null;
 
             return (
               <div key={emp.id} className="glass-panel rounded-xl p-5 hover:shadow-md transition-all duration-300 flex flex-col relative group">
@@ -134,8 +216,8 @@ export function EmployeeList({ employees, loading = false, onAddEmployee, onEdit
                 </div>
                 <div className="flex items-start gap-4 mb-4">
                   <div className="w-16 h-16 rounded-full bg-slate-100 border-2 border-slate-200 overflow-hidden flex-shrink-0 flex items-center justify-center">
-                    {emp.photo ? (
-                      <img src={emp.photo} className="w-full h-full object-cover" alt={emp.name} />
+                    {employeePhoto ? (
+                      <img src={employeePhoto} className="w-full h-full object-cover" alt={emp.name} />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-slate-400 bg-slate-50 text-lg font-bold">
                         {emp.name.charAt(0)}
@@ -217,13 +299,17 @@ export function EmployeeList({ employees, loading = false, onAddEmployee, onEdit
         <Pagination
           page={page}
           pageSize={pageSize}
-          total={filteredEmployees.length}
+          total={displayTotal}
           itemName={tAdmin("名员工")}
-          disabled={loading}
+          disabled={pageLoading || loading}
           className="mt-6"
           onPageChange={setPage}
         />
-        <div className="mt-6 text-center text-sm text-slate-400">{tAdmin("共 {{count}} 名员工", { count: employees.length })}</div>
+        <div className="mt-6 text-center text-sm text-slate-400">
+          {totalResolved
+            ? tAdmin("共 {{count}} 名员工", { count: total })
+            : tAdmin("员工总数统计中，当前先显示已加载列表")}
+        </div>
       </div>
     </div>
   );

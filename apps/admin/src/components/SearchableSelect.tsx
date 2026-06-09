@@ -18,9 +18,13 @@ interface SearchableSelectProps {
   value: string;
   options: SearchableSelectOption[];
   onChange: (value: string) => void;
+  onQueryChange?: (query: string) => void;
+  queryDebounceMs?: number;
+  minQueryLength?: number;
   placeholder?: string;
   searchPlaceholder?: string;
   emptyText?: string;
+  loading?: boolean;
   disabled?: boolean;
   className?: string;
 }
@@ -29,9 +33,13 @@ export function SearchableSelect({
   value,
   options,
   onChange,
+  onQueryChange,
+  queryDebounceMs = 300,
+  minQueryLength = 2,
   placeholder,
   searchPlaceholder,
   emptyText,
+  loading = false,
   disabled = false,
   className,
 }: SearchableSelectProps) {
@@ -39,6 +47,12 @@ export function SearchableSelect({
   const [query, setQuery] = useState("");
   const rootRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const lastDispatchedQueryRef = useRef<string | null>(null);
+  const onQueryChangeRef = useRef(onQueryChange);
+
+  useEffect(() => {
+    onQueryChangeRef.current = onQueryChange;
+  }, [onQueryChange]);
 
   const selectedOption = useMemo(() => {
     return options.find((option) => option.value === value) || null;
@@ -61,6 +75,8 @@ export function SearchableSelect({
   useEffect(() => {
     if (!isOpen) {
       setQuery("");
+      lastDispatchedQueryRef.current = "";
+      onQueryChangeRef.current?.("");
       return;
     }
 
@@ -69,6 +85,26 @@ export function SearchableSelect({
       inputRef.current?.select();
     });
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      const trimmedQuery = query.trim();
+      const nextQuery = trimmedQuery.length >= minQueryLength ? trimmedQuery : "";
+      if (lastDispatchedQueryRef.current === nextQuery) {
+        return;
+      }
+      lastDispatchedQueryRef.current = nextQuery;
+      onQueryChangeRef.current?.(nextQuery);
+    }, queryDebounceMs);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [isOpen, minQueryLength, query, queryDebounceMs]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -135,7 +171,9 @@ export function SearchableSelect({
           </div>
 
           <div className="max-h-64 overflow-y-auto p-1.5">
-            {filteredOptions.length === 0 ? (
+            {loading ? (
+              <div className="px-3 py-6 text-center text-sm text-slate-400">{searchPlaceholder || emptyText}</div>
+            ) : filteredOptions.length === 0 ? (
               <div className="px-3 py-6 text-center text-sm text-slate-400">{emptyText}</div>
             ) : (
               filteredOptions.map((option) => {

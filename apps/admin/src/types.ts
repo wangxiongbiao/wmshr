@@ -188,11 +188,17 @@ export interface EmployeeListFilters {
 
 export interface EmployeeListPage {
   items: Employee[];
-  total: number;
+  total: number | null;
   page: number;
   pageSize: number;
   hasMore: boolean;
-  roleOptions: string[];
+}
+
+export interface EmployeeAvatarBatchResponse {
+  items: Array<{
+    id: number;
+    photo: string | null;
+  }>;
 }
 
 export interface EmployeeUpsertPayload {
@@ -277,6 +283,21 @@ export interface AttendanceCalculationDetail {
   result: AttendanceCalculationResult;
   employee: Employee | null;
   record: AttendanceRecord | null;
+}
+
+export interface AttendanceRecordAsyncResponse {
+  accepted: true;
+  employeeId: number;
+  date: string;
+  message: string;
+}
+
+export interface AttendanceCalculationPage {
+  items: AttendanceCalculationResult[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
 }
 
 export interface AttendanceMaintenanceRunSummary {
@@ -413,7 +434,17 @@ export interface PayrollResultDetail {
   employee: Employee | null;
   salaryProfile: SalaryProfile | null;
   attendanceSummary: MonthlyAttendanceSummary | null;
+  dailyStandardHours: number;
   adjustmentItems: SalaryAdjustmentItem[];
+  exceptionDetails: PayrollExceptionDetail[];
+}
+
+export interface PayrollResultPage {
+  items: MonthlyPayrollResult[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
 }
 
 export interface PayrollGenerateBatchResponse {
@@ -445,6 +476,13 @@ export interface WorkspaceBootstrapResponse {
   employeesCreated: number;
   rulesCreated: number;
   message: string;
+}
+
+export interface WorkspaceBootstrapStatusResponse {
+  ready: boolean;
+  hasData: boolean;
+  hasBootstrapState: boolean;
+  createdDemoData: boolean;
 }
 
 export interface AttendanceRecordUpdatePayload {
@@ -518,6 +556,7 @@ export interface DashboardDepartmentStat {
 }
 
 export interface DashboardData {
+  yearMonth: string;
   dashboardDate: string;
   totalEmployeeCount: number;
   activeEmployeeCount: number;

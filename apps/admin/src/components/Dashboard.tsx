@@ -7,7 +7,7 @@ import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { tAdmin } from "../lib/i18nText";
 import { AlertCircle, BarChart2, Clock, Settings, Users, Zap } from "lucide-react";
 import type { DashboardData, DashboardEmployeeStat, TabId } from "../types";
-import { fetchDashboardData } from "../lib/api";
+import { fetchDashboardData, fetchEmployeeAvatars } from "../lib/api";
 import { cn, formatCurrency } from "../lib/utils";
 
 interface DashboardProps {
@@ -16,18 +16,28 @@ interface DashboardProps {
   onNav: (tabId: Extract<TabId, "attendance" | "payroll">) => void;
 }
 
+const DASHBOARD_REFRESH_TTL_MS = 1000 * 15;
+
+function getDefaultYearMonth() {
+  return new Date().toISOString().slice(0, 7);
+}
+
 export function Dashboard({ isActive, onOpenSettings, onNav }: DashboardProps) {
   const [data, setData] = useState<DashboardData | null>(null);
   // 看板改为始终先渲染空态指标；首次请求和后续刷新都不再用整页 loading 阻断界面。
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [lastLoadedAt, setLastLoadedAt] = useState(0);
+  const [yearMonth, setYearMonth] = useState(getDefaultYearMonth());
+  const [avatarMap, setAvatarMap] = useState<Record<number, string | null>>({});
 
-  const loadData = async () => {
+  const loadData = async (force = false) => {
     setLoading(true);
     setError("");
     try {
-      const nextData = await fetchDashboardData();
+      const nextData = await fetchDashboardData({ force, yearMonth });
       setData(nextData);
+      setLastLoadedAt(Date.now());
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : tAdmin("数据看板加载失败"));
     } finally {
@@ -40,11 +50,49 @@ export function Dashboard({ isActive, onOpenSettings, onNav }: DashboardProps) {
       return;
     }
 
-    // 仪表盘页面被 keep-alive 后不会再因切页卸载；重新激活时要主动后台刷新，但保留上一轮成功数据继续可见。
-    void loadData();
-  }, [isActive]);
+    if (data && Date.now() - lastLoadedAt < DASHBOARD_REFRESH_TTL_MS) {
+      return;
+    }
 
-  const employeeStats = data?.employeeStats || [];
+    // 仪表盘页面被 keep-alive 后不会再因切页卸载；重新激活时仅在本地缓存过期后再刷新，避免短时间切页反复打看板接口。
+    void loadData();
+  }, [data, isActive, lastLoadedAt, yearMonth]);
+
+  useEffect(() => {
+    const employeeIds = (data?.employeeStats || [])
+      .map((stat) => stat.employeeId)
+      .filter((id) => !(id in avatarMap));
+    if (employeeIds.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    void fetchEmployeeAvatars(employeeIds).then((result) => {
+      if (cancelled) {
+        return;
+      }
+      setAvatarMap((prev) => {
+        const next = { ...prev };
+        result.items.forEach((item) => {
+          next[item.id] = item.photo;
+        });
+        return next;
+      });
+    }).catch(() => {
+      // 首页头像补图失败不影响 KPI 和员工排行主体展示。
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [avatarMap, data?.employeeStats]);
+
+  const employeeStats = useMemo(() => {
+    return (data?.employeeStats || []).map((stat) => ({
+      ...stat,
+      employeePhoto: avatarMap[stat.employeeId] ?? stat.employeePhoto
+    }));
+  }, [avatarMap, data?.employeeStats]);
   const config = data?.config;
   const activeCount = data?.activeEmployeeCount || 0;
   const maxRegHour = useMemo(
@@ -64,14 +112,26 @@ export function Dashboard({ isActive, onOpenSettings, onNav }: DashboardProps) {
           <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
           <span>{tAdmin("当前看板时间：")}<span className="font-bold text-slate-800 font-mono text-sm">{data?.dashboardDate || "-"}</span></span>
         </div>
-        <button
-          type="button"
-          onClick={() => void loadData()}
-          disabled={loading}
-          className="whitespace-nowrap text-[10px] text-slate-400 font-medium hover:text-indigo-600 disabled:opacity-60"
-        >
-          {loading ? tAdmin("正在刷新...") : tAdmin("系统已实时关联数据集内最后一次考勤记录周期 · 点击刷新")}
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            type="month"
+            value={yearMonth}
+            onChange={(event) => {
+              setYearMonth(event.target.value || getDefaultYearMonth());
+              setLastLoadedAt(0);
+            }}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+          />
+          <button
+            type="button"
+            onClick={() => void loadData(true)}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:border-indigo-200 hover:text-indigo-600 disabled:opacity-60"
+          >
+            <Clock className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
+            <span>{loading ? tAdmin("正在刷新") : tAdmin("刷新")}</span>
+          </button>
+        </div>
       </div>
 
       {/* 菜单栏缩窄后看板横向空间增加但 KPI 卡仍保持四列；短说明和 nowrap 用来避免截图中的标签/表头断行。 */}
@@ -121,7 +181,6 @@ export function Dashboard({ isActive, onOpenSettings, onNav }: DashboardProps) {
                 </span>
                 <h3 className="text-base font-bold text-slate-800">{tAdmin("员工有效工时与多维能效透视")}</h3>
               </div>
-              <p className="text-xs text-slate-400 mt-1">{tAdmin("统计分析系统，通过工时饱和、日均平均及能动比等高阶指标，辅助管理决策。")}</p>
             </div>
 
           </div>
