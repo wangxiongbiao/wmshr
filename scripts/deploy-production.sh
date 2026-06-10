@@ -184,11 +184,9 @@ verify_home_production() {
   verify_http_status "$HOME_CUSTOM_ORIGIN" "200"
   verify_http_status "${HOME_CUSTOM_ORIGIN}/favicon.ico" "200"
   verify_http_status "${HOME_CUSTOM_ORIGIN}/dutylix-icon.svg" "200"
-  curl -L -s -D /tmp/wmshr_home_health_headers.txt -o /tmp/wmshr_home_health_body.txt "${HOME_CUSTOM_ORIGIN}/api/health"
-  if grep -qi 'content-type: application/json' /tmp/wmshr_home_health_headers.txt; then
-    echo "Portal /api/health looks like the admin JSON API; refusing to accept dutylix.com as portal." >&2
-    exit 1
-  fi
+  # 门户生产环境同样通过根目录 /api/[...path].js 暴露 JSON 健康接口；这里只校验该地址可用，
+  # 真正区分门户/后台仍依赖首页 HTML 和实际静态 bundle 内容，避免把当前部署结构误判为后台站点。
+  verify_http_status "${HOME_CUSTOM_ORIGIN}/api/health" "200"
 
   curl -L -s "$HOME_CUSTOM_ORIGIN" >"$html_file"
   # The portal is a SPA; visible CTA text lives in the emitted JS bundle rather than index.html.
