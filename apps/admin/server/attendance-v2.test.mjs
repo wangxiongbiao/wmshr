@@ -57,14 +57,14 @@ function normalRecord(overrides = {}) {
   assert.equal(row.total_pay, 702.5);
 }
 
-// v2 月薪员工按 fixedSalary / 30 生成上班费用，并叠加全局配置的加班费。
+// v2 月薪员工的基础工资在月薪模块整月核算；日考勤这里只保留加班等过程金额。
 {
   const row = calculateDailyAttendanceRow(baseEmployee({ fixed_salary: 9000, hourly_rate: 80 }), normalRecord({ out_time: "18:30" }), DEFAULT_ATTENDANCE_CONFIG, date, ownerUserId);
   assert.equal(row.valid_hours, 9);
   assert.equal(row.overtime_pay_hours, 1);
-  assert.equal(row.work_pay, 300);
+  assert.equal(row.work_pay, 0);
   assert.equal(row.overtime_pay, 50);
-  assert.equal(row.total_pay, 350);
+  assert.equal(row.total_pay, 50);
 }
 
 // 餐补按有效工时占标准工时比例折算：上一整天拿整额，半天只拿一半。

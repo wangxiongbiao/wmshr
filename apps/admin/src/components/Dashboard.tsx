@@ -99,6 +99,7 @@ export function Dashboard({ isActive, onOpenSettings, onNav }: DashboardProps) {
     () => Math.max(10, ...employeeStats.map((stat) => stat.totalValidHours)),
     [employeeStats]
   );
+  const currentYearMonth = useMemo(() => new Date().toISOString().slice(0, 7), []);
 
   return (
     <div className="space-y-6" aria-busy={loading}>
@@ -117,9 +118,11 @@ export function Dashboard({ isActive, onOpenSettings, onNav }: DashboardProps) {
             type="month"
             value={yearMonth}
             onChange={(event) => {
-              setYearMonth(event.target.value || getDefaultYearMonth());
+              const nextYearMonth = event.target.value || getDefaultYearMonth();
+              setYearMonth(nextYearMonth > currentYearMonth ? currentYearMonth : nextYearMonth);
               setLastLoadedAt(0);
             }}
+            max={currentYearMonth}
             className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
           />
           <button

@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>App 高级视觉预览</title>
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --bg: #f8fafc;
+      --surface: #ffffff;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --border: rgba(0,0,0,0.05);
+      
+      --radius-sm: 16px;
+      --radius-md: 24px;
+      --radius-lg: 36px;
+      --radius-pill: 9999px;
+      
+      --shadow-premium: 0 20px 52px rgba(0, 0, 0, 0.04);
+      --shadow-inner: inset 0 2px 4px rgba(255,255,255,0.8);
+      
+      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: #e2e8f0;
+      font-family: var(--font-sans);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      color: var(--text);
+    }
+
+    /* Mobile Device Frame */
+    .device-frame {
+      width: 390px;
+      height: 844px; /* iPhone 14 size */
+      background-color: var(--bg);
+      border-radius: 48px;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.1), inset 0 0 0 12px #0f172a;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .status-bar {
+      height: 44px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 24px;
+      font-size: 14px;
+      font-weight: 600;
+      z-index: 10;
+    }
+
+    .dynamic-island {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 120px;
+      height: 32px;
+      background: #000;
+      border-radius: 20px;
+      z-index: 10;
+    }
+
+    /* Views */
+    .view {
+      flex: 1;
+      display: none;
+      flex-direction: column;
+      padding: 24px;
+      animation: fadeIn 0.4s ease-out;
+      overflow-y: auto;
+      padding-top: 16px;
+    }
+    .view.active {
+      display: flex;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Typography */
+    .overline {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+    .title {
+      font-size: 32px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      margin-bottom: 8px;
+    }
+    .time-display {
+      font-size: 56px;
+      font-weight: 800;
+      letter-spacing: -1.5px;
+      margin: 16px 0;
+      background: linear-gradient(135deg, #0f172a, #334155);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      text-align: center;
+    }
+
+    /* Components */
+    .card {
+      background: var(--surface);
+      border-radius: var(--radius-lg);
+      padding: 28px;
+      box-shadow: var(--shadow-premium), var(--shadow-inner);
+      border: 1px solid var(--border);
+      margin-bottom: 20px;
+      position: relative;
+    }
+
+    .input-field {
+      width: 100%;
+      padding: 20px 24px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border);
+      background: #f8fafc;
+      font-size: 16px;
+      margin-bottom: 16px;
+      transition: all 0.2s ease;
+      outline: none;
+    }
+    .input-field:focus {
+      background: var(--surface);
+      border-color: var(--primary);
+      box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
+    }
+
+    .btn-primary {
+      width: 100%;
+      padding: 20px;
+      border-radius: var(--radius-pill);
+      background: var(--primary);
+      color: white;
+      font-size: 17px;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      box-shadow: 0 10px 24px rgba(37, 99, 235, 0.25);
+    }
+    .btn-primary:active {
+      transform: scale(0.97);
+      background: var(--primary-hover);
+    }
+
+    .check-in-circle {
+      width: 180px;
+      height: 180px;
+      border-radius: 50%;
+      background: linear-gradient(145deg, var(--primary), #3b82f6);
+      color: white;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      margin: 32px auto;
+      box-shadow: 0 24px 48px rgba(37, 99, 235, 0.3), inset 0 4px 12px rgba(255,255,255,0.3);
+      cursor: pointer;
+      transition: all 0.3s cubic-bezier(0.2, 0, 0, 1);
+      border: none;
+    }
+    .check-in-circle:active {
+      transform: scale(0.92);
+      box-shadow: 0 12px 24px rgba(37, 99, 235, 0.2), inset 0 4px 12px rgba(255,255,255,0.3);
+    }
+    .check-in-circle span {
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+    .check-in-circle small {
+      margin-top: 6px;
+      opacity: 0.8;
+      font-size: 13px;
+    }
+
+    /* Header Profile */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 32px;
+      padding-top: 12px;
+    }
+    .avatar {
+      width: 48px;
+      height: 48px;
+      border-radius: var(--radius-sm);
+      background: #e2e8f0;
+      overflow: hidden;
+    }
+    .greeting h2 {
+      font-size: 20px;
+      font-weight: 700;
+    }
+    .greeting p {
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    .task-item {
+      display: flex;
+      align-items: center;
+      padding: 16px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .task-item:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+    .task-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      background: #eff6ff;
+      color: var(--primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-right: 16px;
+      font-weight: bold;
+    }
+    .task-info h4 {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+    .task-info p {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+  </style>
+</head>
+<body>
+
+  <div class="device-frame">
+    <div class="status-bar">
+      <span id="os-time">9:41</span>
+      <div style="display: flex; gap: 6px; align-items: center;">
+        <!-- generic status icons -->
+        <svg width="16" height="12" viewBox="0 0 16 12" fill="currentColor"><path d="M1 9.5C0.447715 9.5 0 9.94772 0 10.5C0 11.0523 0.447715 11.5 1 11.5H3C3.55228 11.5 4 11.0523 4 10.5C4 9.94772 3.55228 9.5 3 9.5H1ZM6 6.5C5.44772 6.5 5 6.94772 5 7.5C5 8.05228 5.44772 8.5 6 8.5H8C8.55228 8.5 9 8.05228 9 7.5C9 6.94772 8.55228 6.5 8 6.5H6ZM11 2.5C10.4477 2.5 10 2.94772 10 3.5C10 4.05228 10.4477 4.5 11 4.5H13C13.5523 4.5 14 4.05228 14 3.5C14 2.94772 13.5523 2.5 13 2.5H11Z"/></svg>
+        <svg width="24" height="12" viewBox="0 0 24 12" fill="currentColor"><rect x="1" y="2" width="20" height="8" rx="2.5" stroke="currentColor" stroke-width="1" fill="none"/><rect x="3" y="4" width="16" height="4" rx="1"/><path d="M22 4.5C22.8284 4.5 23.5 5.17157 23.5 6C23.5 6.82843 22.8284 7.5 22 7.5V4.5Z"/></svg>
+      </div>
+    </div>
+    <div class="dynamic-island"></div>
+
+    <!-- Login View -->
+    <div class="view active" id="view-login" style="justify-content: center; padding-bottom: 120px;">
+      <div style="margin-bottom: 48px;">
+        <div class="overline">Welcome Back</div>
+        <h1 class="title">登录您的账号</h1>
+        <p style="color: var(--text-muted); font-size: 15px;">请输入您的员工凭证以继续使用</p>
+      </div>
+      
+      <div class="card" style="padding: 24px 20px;">
+        <input type="text" class="input-field" placeholder="工号 / 手机号" value="EMP88021" />
+        <input type="password" class="input-field" placeholder="密码" value="******" />
+        
+        <div style="display: flex; justify-content: flex-end; margin-bottom: 24px;">
+          <a href="#" style="color: var(--primary); font-size: 14px; text-decoration: none; font-weight: 600;">忘记密码?</a>
+        </div>
+        
+        <button class="btn-primary" onclick="switchView('view-home')">登录</button>
+      </div>
+    </div>
+
+    <!-- Home View -->
+    <div class="view" id="view-home">
+      <div class="header">
+        <div class="greeting">
+          <div class="overline">Dashboard</div>
+          <h2>早上好，张三</h2>
+          <p>产品设计部</p>
+        </div>
+        <div class="avatar">
+          <img src="https://api.dicebear.com/7.x/notionists/svg?seed=Felix&backgroundColor=e2e8f0" width="100%" height="100%" />
+        </div>
+      </div>
+
+      <div class="card" style="text-align: center;">
+        <div class="overline">System Time</div>
+        <div class="time-display" id="clock">08:42:15</div>
+        <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 16px;">
+          当前位置: 研发中心大楼A座 <span style="color:var(--primary); cursor:pointer;">刷新</span>
+        </p>
+        
+        <button class="check-in-circle" onclick="this.innerHTML='<span>已打卡</span><small>08:42</small>'; this.style.background='var(--primary)'">
+          <span>上班打卡</span>
+          <small>规定时间 09:00</small>
+        </button>
+      </div>
+
+      <div class="card" style="padding: 24px;">
+        <div class="overline" style="margin-bottom: 16px;">Today's Tasks</div>
+        
+        <div class="task-item">
+          <div class="task-icon">SOP</div>
+          <div class="task-info">
+            <h4>晨间设备巡检</h4>
+            <p>需在 10:00 前完成</p>
+          </div>
+          <div style="margin-left:auto; font-weight:600; color:var(--primary); font-size:14px;">去完成</div>
+        </div>
+        <div class="task-item">
+          <div class="task-icon">会</div>
+          <div class="task-info">
+            <h4>设计评审周会</h4>
+            <p>14:00 - 15:30</p>
+          </div>
+          <div style="margin-left:auto; font-weight:600; color:var(--text-muted); font-size:14px;">待开始</div>
+        </div>
+      </div>
+      
+      <div style="text-align: center; margin-top: 16px;">
+        <button style="background:none; border:none; color:var(--text-muted); font-weight:600; font-size:14px; padding: 12px;" onclick="switchView('view-login')">退出登录</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function switchView(id) {
+      document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
+      document.getElementById(id).classList.add('active');
+    }
+
+    function updateClock() {
+      const now = new Date();
+      const h = String(now.getHours()).padStart(2, '0');
+      const m = String(now.getMinutes()).padStart(2, '0');
+      const s = String(now.getSeconds()).padStart(2, '0');
+      document.getElementById('clock').textContent = `${h}:${m}:${s}`;
+      document.getElementById('os-time').textContent = `${h}:${m}`;
+    }
+    
+    setInterval(updateClock, 1000);
+    updateClock();
+  </script>
+</body>
+</html>

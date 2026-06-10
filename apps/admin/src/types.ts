@@ -20,7 +20,7 @@ export type AttendanceSource = 'manual' | 'device' | 'import' | 'system' | 'mobi
 
 export type AttendanceCalculationStatus = 'pending' | 'checked_in' | 'normal' | 'leave' | 'sick_leave' | 'absent' | 'manual_adjusted' | 'exception';
 
-export type EmployeeStatus = 'active' | 'on_leave' | 'probation' | 'disabled' | 'resigned';
+export type EmployeeStatus = 'active' | 'on_leave' | 'probation' | 'resigned';
 
 export type CurrencyCode = 'THB' | 'USD' | 'MYR' | 'IDR';
 
@@ -390,6 +390,7 @@ export interface MonthlyPayrollResult {
   employeeId: number;
   employeeNo?: string;
   employeeName: string;
+  employeeStatus?: EmployeeStatus | null;
   // 薪资 v2 表格的“员工详情”列必须由薪资结果接口一次返回展示字段，避免回退到旧员工列表或计薪方式造成列内容错乱。
   employeeDept: string;
   employeeRole: string;

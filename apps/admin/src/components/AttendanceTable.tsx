@@ -28,6 +28,7 @@ import { ModalShell } from "./ModalShell";
 import { cn, formatCurrency as formatPayrollCurrency, formatDuration } from "../lib/utils";
 import { Pagination } from "./Pagination";
 import { SearchableSelect, type SearchableSelectOption } from "./SearchableSelect";
+import { YearMonthPicker } from "./YearMonthPicker";
 
 interface AttendanceTableProps {
   isActive: boolean;
@@ -36,6 +37,11 @@ interface AttendanceTableProps {
 type CreateAttendanceForm = Omit<AttendanceRecordUpdatePayload, "type"> & {
   employeeId: string;
   // 新增考勤记录要求操作员主动选择类型；空值只存在于表单层，提交前必须校验并收窄为后端 AttendanceType。
+  type: AttendanceRecordUpdatePayload["type"] | "";
+};
+
+type AdjustAttendanceForm = Omit<AttendanceRecordUpdatePayload, "type"> & {
+  // 新增补卡记录要求操作员主动选择类型；编辑已有原始记录时仍会回填现有类型。
   type: AttendanceRecordUpdatePayload["type"] | "";
 };
 
@@ -142,9 +148,9 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
   const [avatarMap, setAvatarMap] = useState<Record<number, string | null>>({});
   const backgroundRefreshTimersRef = useRef<number[]>([]);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | "all">("all");
-  const [timeFilterType, setTimeFilterType] = useState<"all" | "day" | "month">("all");
+  const [includeInactive, setIncludeInactive] = useState(false);
   const [selectedDate, setSelectedDate] = useState("");
-  const [selectedMonth, setSelectedMonth] = useState("");
+  const [selectedMonth, setSelectedMonth] = useState(getDefaultMonth());
   const [page, setPage] = useState(1);
   const pageSize = 20;
   const [calculations, setCalculations] = useState<AttendanceCalculationResult[]>([]);
@@ -164,9 +170,9 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
     outTime: DEFAULT_CREATE_OUT_TIME,
     note: ""
   });
-  const [adjustForm, setAdjustForm] = useState<AttendanceRecordUpdatePayload>({
+  const [adjustForm, setAdjustForm] = useState<AdjustAttendanceForm>({
     date: "",
-    type: "normal",
+    type: "",
     inTime: null,
     outTime: null,
     note: ""
@@ -184,7 +190,11 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
   const [createEmployeeSearchResults, setCreateEmployeeSearchResults] = useState<Employee[]>([]);
   const [createEmployeeLoading, setCreateEmployeeLoading] = useState(false);
 
-  const isFiltered = selectedEmployeeId !== "all" || timeFilterType !== "all";
+  const isFiltered = includeInactive || selectedEmployeeId !== "all" || Boolean(selectedDate) || selectedMonth !== getDefaultMonth();
+  const getCreateDefaultTimes = () => ({
+    inTime: configForm?.startShift || DEFAULT_CREATE_IN_TIME,
+    outTime: configForm?.endShift || DEFAULT_CREATE_OUT_TIME
+  });
   const mergeUniqueEmployees = (rows: Array<Employee | null | undefined>) => {
     const deduped = new Map<number, Employee>();
     rows.forEach((employee) => {
@@ -279,7 +289,7 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
     }
 
     try {
-      const rows = await searchEmployees(trimmedQuery);
+      const rows = await searchEmployees(trimmedQuery, { includeInactive });
       if (requestId !== employeeSearchRequestIdRef.current) {
         return;
       }
@@ -314,8 +324,8 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
 
   const loadData = async () => {
     const requestId = ++loadRequestIdRef.current;
-    const effectiveDate = timeFilterType === "day" ? selectedDate : undefined;
-    const effectiveMonth = timeFilterType === "month" ? selectedMonth : effectiveDate?.slice(0, 7);
+    const effectiveDate = selectedDate || undefined;
+    const effectiveMonth = selectedMonth || effectiveDate?.slice(0, 7);
 
     setLoading(true);
     setError("");
@@ -325,7 +335,8 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
         date: effectiveDate,
         employeeId: selectedEmployeeId === "all" ? null : selectedEmployeeId,
         page,
-        pageSize
+        pageSize,
+        includeInactive
       });
       if (requestId !== loadRequestIdRef.current) {
         return;
@@ -357,7 +368,7 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
 
     // 考勤页被缓存后切回来时需要按当前筛选条件后台重拉数据，但不能先清空表格主体。
     void loadData();
-  }, [calculations.length, isActive, lastLoadedAt, page, selectedDate, selectedEmployeeId, selectedMonth, timeFilterType]);
+  }, [calculations.length, includeInactive, isActive, lastLoadedAt, page, selectedDate, selectedEmployeeId, selectedMonth]);
 
   useEffect(() => {
     void fetchAttendanceConfig()
@@ -370,7 +381,7 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
   useEffect(() => {
     // 只有筛选条件变化时才回到第一页；真实后端分页下，翻页本身会触发 loadData，不能再被返回结果反向重置。
     setPage(1);
-  }, [selectedDate, selectedEmployeeId, selectedMonth, timeFilterType]);
+  }, [includeInactive, selectedDate, selectedEmployeeId, selectedMonth]);
 
   useEffect(() => {
     return () => {
@@ -399,20 +410,10 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
 
   const resetFilters = () => {
     setSelectedEmployeeId("all");
-    setTimeFilterType("all");
     setSelectedDate("");
-    setSelectedMonth("");
+    setSelectedMonth(getDefaultMonth());
+    setIncludeInactive(false);
     setPage(1);
-  };
-
-  const handleTimeFilterChange = (nextType: "all" | "day" | "month") => {
-    setTimeFilterType(nextType);
-    if (nextType === "day" && !selectedDate) {
-      setSelectedDate(calculations[0]?.date || getDefaultDate());
-    }
-    if (nextType === "month" && !selectedMonth) {
-      setSelectedMonth(calculations[0]?.date.slice(0, 7) || getDefaultMonth());
-    }
   };
 
   const applyDefaultTimeWhenNormal = <T extends { type: AttendanceRecordUpdatePayload["type"] | ""; inTime: string | null; outTime: string | null }>(
@@ -467,6 +468,7 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
     const rows = calculations.map((item) => {
       const baseDailyWage = item.fixedSalary && item.fixedSalary > 0 ? item.fixedSalary / 30 : item.standardHours * (item.hourlyRate || 0);
       const displayHourlyRate = item.fixedSalary && item.fixedSalary > 0 ? baseDailyWage / Math.max(1, item.standardHours) : item.hourlyRate || 0;
+      const isFixedSalaryEmployee = item.salaryType === "fixed";
       return [
         item.date,
         item.employeeName,
@@ -480,11 +482,11 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
         item.rawOutTime || "-",
         `${item.validHours.toFixed(2)}h`,
         `${item.overtimePayHours.toFixed(2)}h`,
-        formatMoneyNumber(item.workPay),
+        isFixedSalaryEmployee ? "-" : formatMoneyNumber(item.workPay),
         formatMoneyNumber(item.mealAllowanceAmount),
         formatMoneyNumber(item.overtimePay),
-        formatMoneyNumber(item.serviceFeeAmount),
-        formatCurrency(getAttendanceTotalPayWithService(item), item.currency),
+        isFixedSalaryEmployee ? "-" : formatMoneyNumber(item.serviceFeeAmount),
+        isFixedSalaryEmployee ? "-" : formatCurrency(getAttendanceTotalPayWithService(item), item.currency),
         getStatusMeta(item).label,
         item.note || ""
       ];
@@ -533,7 +535,7 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
       setAdjustingResult(result);
       setAdjustForm({
         date: detail?.record?.date || result.date,
-        type: detail?.record?.type || "normal",
+        type: detail?.record?.type || "",
         inTime: detail?.record?.inTime || result.rawInTime || null,
         outTime: detail?.record?.outTime || result.rawOutTime || null,
         note: detail?.record?.note || result.note || ""
@@ -551,15 +553,23 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
     if (!adjustingResult) {
       return;
     }
+    if (!adjustForm.type) {
+      setError(tAdmin("请选择考勤类型"));
+      return;
+    }
 
     setSubmitting(true);
     setError("");
     try {
+      const adjustmentPayload: AttendanceRecordUpdatePayload = {
+        ...adjustForm,
+        type: adjustForm.type
+      };
       if (adjustingResult.attendanceRecordId) {
-        await updateAttendanceRecord(adjustingResult.attendanceRecordId, adjustForm);
+        await updateAttendanceRecord(adjustingResult.attendanceRecordId, adjustmentPayload);
         await loadData();
       } else {
-        const response = await createAttendanceRecord({ employeeId: adjustingResult.employeeId, ...adjustForm });
+        const response = await createAttendanceRecord({ employeeId: adjustingResult.employeeId, ...adjustmentPayload });
         setMaintenanceMessage(response.message || tAdmin("考勤记录已添加，后台正在继续计算"));
         scheduleBackgroundRefresh();
       }
@@ -576,11 +586,11 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
       ...prev,
       // 新增记录只沿用当前筛选员工和日期；上下班时间每次打开都回到业务默认值，避免上次补卡的临时时间污染下一条新增记录。
       employeeId: selectedEmployeeId === "all" ? prev.employeeId : String(selectedEmployeeId),
-      date: timeFilterType === "day" && selectedDate ? selectedDate : prev.date || getDefaultDate(),
+      date: selectedDate || prev.date || getDefaultDate(),
       // 每次打开新增弹窗都清空考勤类型，要求操作员主动确认本次记录类型，避免沿用上一条补卡选择。
       type: "",
-      inTime: DEFAULT_CREATE_IN_TIME,
-      outTime: DEFAULT_CREATE_OUT_TIME
+      inTime: "",
+      outTime: ""
     }));
     setIsCreateOpen(true);
   };
@@ -631,7 +641,7 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
       const nextConfig = await updateAttendanceConfig(configForm);
       setConfigForm(nextConfig);
       setIsSettingsOpen(false);
-      const monthToRecalculate = selectedMonth || selectedDate.slice(0, 7) || getDefaultMonth();
+      const monthToRecalculate = selectedDate ? selectedDate.slice(0, 7) : (selectedMonth || getDefaultMonth());
       await recalculateMonthlyAttendance(monthToRecalculate, selectedEmployeeId === "all" ? null : selectedEmployeeId);
       await loadData();
     } catch (nextError) {
@@ -646,7 +656,7 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
       <div className="shrink-0">
         {/* 考勤明细按固定 Header + 滚动 Content 组织：员工/时间筛选不随长表格滚走，表格区域独立滚动。 */}
         <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col md:flex-row gap-4 items-end md:items-center text-sm">
-        <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-4 w-full">
+        <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4 w-full">
           <div>
             <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">{tAdmin("筛选员工")}</label>
             {/* 员工筛选改为远程搜索：默认不预取员工列表，只有输入关键词后才请求无分页搜索接口，真正生效的仍是选中的 employeeId。 */}
@@ -674,45 +684,52 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">{tAdmin("时间筛选方式")}</label>
-            <select
-              value={timeFilterType}
-              onChange={(event) => handleTimeFilterChange(event.target.value as "all" | "day" | "month")}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none bg-white text-slate-700 h-[38px] text-sm cursor-pointer"
-            >
-              <option value="all">{tAdmin("📅 全部时间")}</option>
-              <option value="day">{tAdmin("📆 按天筛选")}</option>
-              <option value="month">{tAdmin("🗓️ 按月筛选")}</option>
-            </select>
-          </div>
-
-          {timeFilterType === "day" && (
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">{tAdmin("选择具体日期")}</label>
+            <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">{tAdmin("筛选年月")}</label>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <YearMonthPicker
+                value={selectedMonth}
+                onChange={(value) => {
+                  setSelectedMonth(value);
+                  if (selectedDate && !selectedDate.startsWith(value)) {
+                    setSelectedDate("");
+                  }
+                }}
+                availableMonths={[selectedMonth, getDefaultMonth()]}
+                className="w-full"
+              />
               <input
                 type="date"
                 value={selectedDate}
+                min={`${selectedMonth}-01`}
+                max={(() => {
+                  const monthLastDate = `${selectedMonth}-${new Date(Number(selectedMonth.slice(0, 4)), Number(selectedMonth.slice(5, 7)), 0).getDate().toString().padStart(2, "0")}`;
+                  return monthLastDate > getDefaultDate() ? getDefaultDate() : monthLastDate;
+                })()}
                 onChange={(event) => setSelectedDate(event.target.value)}
-                className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-slate-700 h-[38px] text-sm font-mono"
+                className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-slate-700 h-[38px] text-sm font-mono sm:max-w-[180px]"
               />
+              <button
+                type="button"
+                onClick={() => setSelectedDate("")}
+                disabled={!selectedDate}
+                className="inline-flex h-[38px] items-center justify-center whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 sm:self-stretch"
+              >
+                {tAdmin("清除")}
+              </button>
             </div>
-          )}
-
-          {timeFilterType === "month" && (
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">{tAdmin("选择目标月份")}</label>
-              <input
-                type="month"
-                value={selectedMonth}
-                onChange={(event) => setSelectedMonth(event.target.value)}
-                className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-slate-700 h-[38px] text-sm font-mono"
-              />
-            </div>
-          )}
-
-          {timeFilterType === "all" && <div className="hidden sm:block" />}
+          </div>
         </div>
 
+        <div className="flex flex-col items-start gap-2 md:items-end">
+          <label className="inline-flex items-center gap-2 text-xs text-slate-600 select-none">
+            <input
+              type="checkbox"
+              checked={includeInactive}
+              onChange={(event) => setIncludeInactive(event.target.checked)}
+              className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+            />
+            <span>{tAdmin("展示离职人员")}</span>
+          </label>
         <div className="flex gap-2 flex-shrink-0">
           {isFiltered && (
             <button
@@ -721,6 +738,7 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
               className="px-3.5 py-2 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition border border-red-200"
             >{tAdmin("清除筛选条件")}</button>
           )}
+        </div>
         </div>
         </div>
       </div>
@@ -807,6 +825,7 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
               ) : displayedCalculations.map((item) => {
                 const statusMeta = getStatusMeta(item);
                 const isNonWorkingStatus = ["pending", "absent", "leave", "sick_leave"].includes(item.status);
+                const isFixedSalaryEmployee = item.salaryType === "fixed";
                 return (
                   <tr
                     key={`${item.employeeId}-${item.date}`}
@@ -824,7 +843,12 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
                       />
                     </td>
                     <td className="px-3 py-3 text-sm text-slate-500 font-mono text-left">{item.date}</td>
-                    <td className="px-3 py-3">
+                    <td className="relative px-3 py-3">
+                      {item.employeeStatus === "resigned" ? (
+                        <span className="absolute right-3 top-2 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-600 ring-1 ring-rose-100">
+                          {tAdmin("离职")}
+                        </span>
+                      ) : null}
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold overflow-hidden border-2 border-white shadow-sm flex-shrink-0">
                           {item.employeePhoto ? (
@@ -833,7 +857,9 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
                             <span style={{ fontSize: "14.4px" }}>{item.employeeName.charAt(0)}</span>
                           )}
                         </div>
-                        <span className="font-medium text-slate-900 truncate max-w-[120px]">{item.employeeName}</span>
+                        <div className="min-w-0 max-w-[140px] pr-10">
+                          <span className="block font-medium text-slate-900 truncate">{item.employeeName}</span>
+                        </div>
                       </div>
                     </td>
                     <td className="px-3 py-3 text-center">
@@ -847,21 +873,31 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
                     <td className="px-3 py-3 text-sm text-center">
                       {isNonWorkingStatus ? <span className="text-slate-400 font-mono">0.00h</span> : <span className="font-mono font-bold text-blue-600">{formatDuration(item.overtimePayHours)}</span>}
                     </td>
-                    <td className={cn("px-3 py-3 text-xs font-mono text-right", isNonWorkingStatus ? "text-slate-400" : "text-slate-600")}>{formatCurrency(item.workPay, item.currency)}</td>
+                    <td className={cn("px-3 py-3 text-xs font-mono text-right", isNonWorkingStatus || isFixedSalaryEmployee ? "text-slate-400" : "text-slate-600")}>
+                      {isFixedSalaryEmployee ? "-" : formatCurrency(item.workPay, item.currency)}
+                    </td>
                     <td className={cn("px-3 py-3 text-xs font-mono text-right font-semibold", item.mealAllowanceAmount > 0 ? "text-amber-600" : "text-slate-400")}>{formatCurrency(item.mealAllowanceAmount, item.currency)}</td>
                     <td className={cn("px-3 py-3 text-xs font-mono text-right font-semibold", isNonWorkingStatus ? "text-slate-400" : "text-green-600")}>{formatCurrency(item.overtimePay, item.currency)}</td>
-                    <td className={cn("px-3 py-3 text-xs font-mono text-right font-semibold", item.serviceFeeAmount > 0 ? "text-amber-600" : "text-slate-400")}>{formatCurrency(item.serviceFeeAmount, item.currency)}</td>
-                    <td className="px-3 py-3 text-right"><span className={cn("text-sm font-bold font-mono", isNonWorkingStatus ? "text-slate-400" : "text-blue-800")}>{formatCurrency(getAttendanceTotalPayWithService(item), item.currency)}</span></td>
+                    <td className={cn("px-3 py-3 text-xs font-mono text-right font-semibold", isFixedSalaryEmployee || item.serviceFeeAmount <= 0 ? "text-slate-400" : "text-amber-600")}>
+                      {isFixedSalaryEmployee ? "-" : formatCurrency(item.serviceFeeAmount, item.currency)}
+                    </td>
+                    <td className="px-3 py-3 text-right">
+                      <span className={cn("text-sm font-bold font-mono", isNonWorkingStatus || isFixedSalaryEmployee ? "text-slate-400" : "text-blue-800")}>
+                        {isFixedSalaryEmployee ? "-" : formatCurrency(getAttendanceTotalPayWithService(item), item.currency)}
+                      </span>
+                    </td>
                     <td className="px-3 py-3 text-center whitespace-nowrap">
-                      <button
-                        type="button"
-                        onClick={() => void handleOpenAdjustment(item)}
-                        className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 hover:text-indigo-700 text-xs font-semibold rounded-lg transition inline-flex items-center gap-1 border border-indigo-100"
-                        title={tAdmin("手动补签/调整该员工当天的考勤记录")}
-                      >
-                        <Edit className="w-3 h-3" />
-                        <span>{tAdmin("调整")}</span>
-                      </button>
+                      {item.employeeStatus === "resigned" ? null : (
+                        <button
+                          type="button"
+                          onClick={() => void handleOpenAdjustment(item)}
+                          className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 hover:text-indigo-700 text-xs font-semibold rounded-lg transition inline-flex items-center gap-1 border border-indigo-100"
+                          title={tAdmin("手动补签/调整该员工当天的考勤记录")}
+                        >
+                          <Edit className="w-3 h-3" />
+                          <span>{tAdmin("调整")}</span>
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );
@@ -930,7 +966,7 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
       >
         <form id="attendance-create-form" onSubmit={handleSaveCreate} className="space-y-4">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <Field label={tAdmin("日期")}><input type="date" required value={createForm.date} onChange={(event) => setCreateForm((prev) => ({ ...prev, date: event.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500" /></Field>
+            <Field label={tAdmin("日期")}><input type="date" required max={getDefaultDate()} value={createForm.date} onChange={(event) => setCreateForm((prev) => ({ ...prev, date: event.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500" /></Field>
             <Field label={tAdmin("员工")}>
               <SearchableSelect
                 value={createForm.employeeId}
@@ -965,7 +1001,26 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
               </div>
             ) : null}
             <Field label={tAdmin("考勤类型")}>
-              <select required value={createForm.type} onChange={(event) => setCreateForm((prev) => applyDefaultTimeWhenNormal(prev, event.target.value as AttendanceRecordUpdatePayload["type"] | ""))} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500">
+              <select
+                required
+                value={createForm.type}
+                onChange={(event) => {
+                  const nextType = event.target.value as AttendanceRecordUpdatePayload["type"] | "";
+                  setCreateForm((prev) => {
+                    if (!nextType) {
+                      return { ...prev, type: "", inTime: "", outTime: "" };
+                    }
+                    const defaults = getCreateDefaultTimes();
+                    return {
+                      ...prev,
+                      type: nextType,
+                      inTime: defaults.inTime,
+                      outTime: defaults.outTime
+                    };
+                  });
+                }}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+              >
                 <option value="">{tAdmin("请选择考勤类型")}</option>
                 <option value="normal">{tAdmin("全勤")}</option>
                 <option value="late">{tAdmin("迟到")}</option>
@@ -1000,9 +1055,10 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
       >
         <form id="attendance-adjust-form" onSubmit={handleSaveAdjustment} className="space-y-4">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <Field label={tAdmin("日期")}><input type="date" value={adjustForm.date} onChange={(event) => setAdjustForm((prev) => ({ ...prev, date: event.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500" /></Field>
+            <Field label={tAdmin("日期")}><input type="date" max={getDefaultDate()} value={adjustForm.date} onChange={(event) => setAdjustForm((prev) => ({ ...prev, date: event.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500" /></Field>
             <Field label={tAdmin("考勤类型")}>
-              <select value={adjustForm.type} onChange={(event) => setAdjustForm((prev) => applyDefaultTimeWhenNormal(prev, event.target.value as AttendanceRecordUpdatePayload["type"]))} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500">
+              <select value={adjustForm.type} onChange={(event) => setAdjustForm((prev) => applyDefaultTimeWhenNormal(prev, event.target.value as AttendanceRecordUpdatePayload["type"] | ""))} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500">
+                <option value="">{tAdmin("请选择考勤类型")}</option>
                 <option value="normal">{tAdmin("全勤")}</option>
                 <option value="late">{tAdmin("迟到")}</option>
                 <option value="early">{tAdmin("早退")}</option>

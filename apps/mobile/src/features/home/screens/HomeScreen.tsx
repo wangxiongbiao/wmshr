@@ -41,6 +41,19 @@ function isAndroidLocationServicesInvalid(error: unknown) {
   return Platform.OS === 'android' && (message.includes('LocationServices.API') || message.includes('SERVICE_INVALID'));
 }
 
+function getHeaderText(status: TodayAttendanceStatus | null, t: (value: string) => string) {
+  if (!status) {
+    return {eyebrow: t('今日任务'), title: t('准备同步打卡状态')};
+  }
+  if (status.status === 'not_checked_in') {
+    return {eyebrow: t('今日任务'), title: t('先完成上班打卡')};
+  }
+  if (status.status === 'checked_in') {
+    return {eyebrow: t('当前进度'), title: t('今天已开始工作')};
+  }
+  return {eyebrow: t('当前进度'), title: t('今天的打卡已完成')};
+}
+
 export function HomeScreen() {
   const { t } = useTranslation('app');
   const {employee, session} = useAuth();
@@ -92,6 +105,23 @@ export function HomeScreen() {
   const isBusy = phase === 'requesting_permission' || phase === 'locating' || phase === 'reverse_geocoding' || phase === 'submitting';
   const statusHint = todayStatus ? getStatusHint(todayStatus, t) : t('打卡界面已准备好，今日状态同步后会自动刷新。');
   const displayHelperText = todayStatus ? helperText : (todayStatusError ?? t('正在同步今日打卡状态，请稍候。'));
+  const headerText = getHeaderText(todayStatus, t);
+  const summaryItems = [
+    {
+      label: t('说明'),
+      value: displayStatus.status === 'checked_out'
+        ? t('已结束')
+        : requiresDescription ? t('必填') : t('可选'),
+    },
+    {
+      label: t('定位'),
+      value: todayStatus ? t('已就绪') : t('同步中'),
+    },
+    {
+      label: t('状态'),
+      value: displayStatus.status === 'not_checked_in' ? t('待上班') : displayStatus.status === 'checked_in' ? t('待下班') : t('已完成'),
+    },
+  ];
 
   const handleCheckIn = async () => {
     if (!todayStatus || !session?.accessToken || isBusy) {
@@ -202,10 +232,20 @@ export function HomeScreen() {
     <ScreenContainer>
       <View style={sharedStyles.header}>
         <View>
-          <Text style={sharedStyles.overline}>{t('下午好')}</Text>
-          <Text style={sharedStyles.title}>{employee?.name ?? t('员工')}</Text>
+          <Text style={sharedStyles.overline}>{headerText.eyebrow}</Text>
+          <Text style={sharedStyles.title}>{headerText.title}</Text>
+          <Text style={sharedStyles.muted}>{employee?.name ?? t('员工')}</Text>
         </View>
         <View style={sharedStyles.avatarSmall}><Text style={sharedStyles.avatarText}>{employee?.name?.[0] ?? 'E'}</Text></View>
+      </View>
+
+      <View style={styles.summaryStrip}>
+        {summaryItems.map(item => (
+          <View key={item.label} style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>{item.label}</Text>
+            <Text style={styles.summaryValue}>{item.value}</Text>
+          </View>
+        ))}
       </View>
 
       <CheckInCard
@@ -221,8 +261,24 @@ export function HomeScreen() {
       />
       {displayStatus.status !== 'checked_out' ? (
         <View style={[styles.descriptionCard, requiresDescription && styles.descriptionRequiredCard]}>
-          <Text style={sharedStyles.cardTitle}>{requiresDescription ? t('打卡说明（必填）') : t('打卡说明')}</Text>
-          <Text style={[sharedStyles.muted, requiresDescription && styles.requiredText]}>{requiresDescription ? t('上班时间打卡必须填写打卡说明。') : t('非上班时间说明可选。')}</Text>
+          <View style={styles.descriptionHeader}>
+            <View>
+              <Text style={sharedStyles.cardTitle}>{requiresDescription ? t('打卡说明（必填）') : t('打卡说明')}</Text>
+              <Text style={[sharedStyles.muted, requiresDescription && styles.requiredText]}>{requiresDescription ? t('上班时间打卡必须填写打卡说明。') : t('非上班时间说明可选。')}</Text>
+            </View>
+            <View style={[styles.requirementBadge, requiresDescription ? styles.requirementBadgeWarn : styles.requirementBadgeNeutral]}>
+              <Text style={[styles.requirementBadgeText, requiresDescription ? styles.requirementBadgeTextWarn : styles.requirementBadgeTextNeutral]}>
+                {requiresDescription ? t('必填') : t('可选')}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.descriptionTips}>
+            <Text style={styles.tipText}>{t('例如：外出盘点后返回')}</Text>
+            <Text style={styles.tipDot}>·</Text>
+            <Text style={styles.tipText}>{t('临时会议')}</Text>
+            <Text style={styles.tipDot}>·</Text>
+            <Text style={styles.tipText}>{t('门店支援')}</Text>
+          </View>
           <TextInput
             value={description}
             onChangeText={value => {
@@ -243,9 +299,23 @@ export function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  descriptionCard: {marginTop: 14, padding: 16, borderRadius: 22, backgroundColor: colors.white, gap: 8},
-  descriptionRequiredCard: {borderWidth: 1, borderColor: colors.warning},
+  summaryStrip: {marginTop: 4, marginBottom: 16, flexDirection: 'row', gap: 12},
+  summaryItem: {flex: 1, minHeight: 82, padding: 16, borderRadius: 24, backgroundColor: colors.white, justifyContent: 'space-between', shadowColor: colors.text, shadowOpacity: 0.03, shadowRadius: 16, shadowOffset: {width: 0, height: 6}, elevation: 2, borderWidth: 1, borderColor: '#f8fafc'},
+  summaryLabel: {fontSize: 12, color: colors.textMuted, fontWeight: '800'},
+  summaryValue: {fontSize: 16, lineHeight: 22, color: colors.text, fontWeight: '900'},
+  descriptionCard: {marginTop: 16, padding: 20, borderRadius: 28, backgroundColor: colors.white, gap: 12, shadowColor: colors.text, shadowOpacity: 0.03, shadowRadius: 20, shadowOffset: {width: 0, height: 8}, elevation: 3, borderWidth: 1, borderColor: '#f1f5f9'},
+  descriptionRequiredCard: {borderColor: '#fed7aa', backgroundColor: '#fffcf5'},
+  descriptionHeader: {flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12},
+  requirementBadge: {minWidth: 56, height: 32, paddingHorizontal: 12, borderRadius: 999, alignItems: 'center', justifyContent: 'center'},
+  requirementBadgeWarn: {backgroundColor: '#ffedd5'},
+  requirementBadgeNeutral: {backgroundColor: '#eff6ff'},
+  requirementBadgeText: {fontSize: 12, fontWeight: '900'},
+  requirementBadgeTextWarn: {color: colors.warning},
+  requirementBadgeTextNeutral: {color: colors.primary},
+  descriptionTips: {flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 4},
+  tipText: {fontSize: 13, lineHeight: 20, color: colors.textSubtle, fontWeight: '700'},
+  tipDot: {fontSize: 13, color: colors.textMuted, fontWeight: '900'},
   requiredText: {color: colors.warning, fontWeight: '800'},
-  input: {minHeight: 76, padding: 12, borderRadius: 16, borderWidth: 1, borderColor: colors.border, color: colors.text, textAlignVertical: 'top'},
-  inputRequired: {borderColor: colors.warning},
+  input: {minHeight: 100, padding: 16, borderRadius: 20, borderWidth: 1, borderColor: colors.border, color: colors.text, textAlignVertical: 'top', backgroundColor: '#f8fafc', fontSize: 15, lineHeight: 22},
+  inputRequired: {borderColor: colors.warning, backgroundColor: colors.white},
 });

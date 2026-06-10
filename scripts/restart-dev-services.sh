@@ -52,43 +52,12 @@ start_service() {
   local command="$2"
   local log_file="$LOG_DIR/$name.log"
   echo "[start] $name -> $log_file"
-  (
-    cd "$ROOT_DIR"
-    exec bash -lc "$command"
-  ) >"$log_file" 2>&1 &
+  nohup bash -lc "
+    cd \"$ROOT_DIR\"
+    exec bash -lc \"$command\"
+  " >"$log_file" 2>&1 < /dev/null &
   echo $! >"$PID_DIR/$name.pid"
 }
-
-wait_url() {
-  local name="$1"
-  local url="$2"
-  local log_file="$LOG_DIR/$name.log"
-  for _ in {1..60}; do
-    if curl -fsS "$url" >/dev/null 2>&1; then
-      echo "[ready] $name $url"
-      return 0
-    fi
-    if [[ -f "$PID_DIR/$name.pid" ]] && ! kill -0 "$(cat "$PID_DIR/$name.pid")" 2>/dev/null; then
-      echo "[error] $name exited early; tail log:"
-      tail -n 60 "$log_file" || true
-      return 1
-    fi
-    sleep 1
-  done
-  echo "[error] $name not ready: $url; tail log:"
-  tail -n 60 "$log_file" || true
-  return 1
-}
-
-stop_pid_files
-stop_ports
-wait_stopped
-
-# Admin API、Admin Web、门户和员工移动端分别独立启动，便于单独看日志和定位端口冲突。
-start_service "admin-api" "npm run dev:admin:api"
-start_service "admin-web" "npm run dev:admin"
-start_service "home-web" "npm run dev:home"
-start_service "mobile-expo" "cd apps/mobile && EXPO_NO_TELEMETRY=1 npx expo start --host lan"
 
 wait_port() {
   local name="$1"
@@ -111,9 +80,68 @@ wait_port() {
   return 1
 }
 
-wait_url "admin-api" "http://127.0.0.1:8788/api/health"
-wait_url "admin-web" "http://127.0.0.1:3000/"
-wait_url "home-web" "http://127.0.0.1:3001/"
+wait_http_local() {
+  local name="$1"
+  local host="$2"
+  local port="$3"
+  local path="$4"
+  local log_file="$LOG_DIR/$name.log"
+
+  wait_port "$name" "$port"
+
+  for _ in {1..60}; do
+    if python3 - "$host" "$port" "$path" <<'PY' >/dev/null 2>&1
+import socket
+import sys
+
+host = sys.argv[1]
+port = int(sys.argv[2])
+path = sys.argv[3]
+
+with socket.create_connection((host, port), timeout=2) as sock:
+    request = (
+        f"GET {path} HTTP/1.1\r\n"
+        f"Host: {host}:{port}\r\n"
+        "Connection: close\r\n\r\n"
+    ).encode()
+    sock.sendall(request)
+    response = sock.recv(4096)
+
+if b" 200 " not in response.split(b"\r\n", 1)[0]:
+    raise SystemExit(1)
+PY
+    then
+      echo "[ready] $name http://$host:$port$path"
+      return 0
+    fi
+
+    if [[ -f "$PID_DIR/$name.pid" ]] && ! kill -0 "$(cat "$PID_DIR/$name.pid")" 2>/dev/null; then
+      echo "[error] $name exited before http check passed; tail log:"
+      tail -n 60 "$log_file" || true
+      return 1
+    fi
+
+    sleep 1
+  done
+
+  echo "[error] $name http://$host:$port$path not ready; tail log:"
+  tail -n 60 "$log_file" || true
+  return 1
+}
+
+stop_pid_files
+stop_ports
+wait_stopped
+
+# Admin API、Admin Web、门户和员工移动端分别独立启动，便于单独看日志和定位端口冲突。
+start_service "admin-api" "npm run dev:admin:api"
+start_service "admin-web" "npm run dev:admin"
+start_service "home-web" "npm run dev:home"
+start_service "mobile-expo" "cd apps/mobile && EXPO_NO_TELEMETRY=1 npx expo start --host lan"
+
+wait_http_local "admin-api" "127.0.0.1" "8788" "/api/health"
+wait_http_local "admin-web" "127.0.0.1" "3000" "/"
+wait_http_local "home-web" "127.0.0.1" "3001" "/"
 
 # Expo/Metro 没有稳定的 HTTP 健康端点；以 8081 监听作为本地员工端调试服务已启动的验收标准。
 wait_port "mobile-expo" 8081

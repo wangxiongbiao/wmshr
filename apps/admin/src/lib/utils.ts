@@ -43,7 +43,6 @@ const EMPLOYEE_STATUS_CLASS_NAMES: Record<EmployeeStatus, string> = {
   active: 'bg-green-100 text-green-700',
   on_leave: 'bg-sky-100 text-sky-700',
   probation: 'bg-blue-100 text-blue-700',
-  disabled: 'bg-slate-100 text-slate-700',
   resigned: 'bg-slate-200 text-slate-700'
 };
 
@@ -51,7 +50,6 @@ export function getEmployeeStatusMeta(status: EmployeeStatus) {
   // 状态样式可静态保存，状态文案必须动态翻译以响应语言切换。
   const label = status === "on_leave" ? tAdmin("休假")
     : status === "probation" ? tAdmin("试用")
-    : status === "disabled" ? tAdmin("停用")
     : status === "resigned" ? tAdmin("离职")
     : tAdmin("在职");
   return { label, className: EMPLOYEE_STATUS_CLASS_NAMES[status] };

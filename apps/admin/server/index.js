@@ -921,8 +921,16 @@ function validateAttendanceRulePayload(payload) {
     return "生效开始日期不能为空";
   }
 
+  if (isFutureDateKey(payload.effective_start_date)) {
+    return "生效开始日期不能晚于今天";
+  }
+
   if (payload.effective_end_date && payload.effective_end_date < payload.effective_start_date) {
     return "生效结束日期不能早于生效开始日期";
+  }
+
+  if (payload.effective_end_date && isFutureDateKey(payload.effective_end_date)) {
+    return "生效结束日期不能晚于今天";
   }
 
   if (!payload.start_shift || !payload.end_shift || !payload.break_start || !payload.break_end) {
@@ -1243,6 +1251,7 @@ function mapAttendanceSummaryRow(row, employeeMap = new Map()) {
     employeeId: Number(row.employee_id),
     employeeNo: employee?.employee_no || undefined,
     employeeName: employee?.name || `员工 #${row.employee_id}`,
+    employeeStatus: employee?.status || null,
     // 薪资 v2 员工详情列需要稳定显示“部门 · 职位”和头像；这里随薪资结果一起返回，前端不要再用旧员工列表 fallback。
     employeeDept: employee?.dept || "未分配",
     employeeRole: employee?.role || "未设置职位",
@@ -1383,6 +1392,7 @@ function mapPayrollResultRow(row, employeeMap = new Map()) {
     employeeId: Number(row.employee_id),
     employeeNo: employee?.employee_no || undefined,
     employeeName: employee?.name || `员工 #${row.employee_id}`,
+    employeeStatus: employee?.status || null,
     // 薪资 v2 员工详情列需要稳定显示“部门 · 职位”和头像；这里随薪资结果一起返回，前端不要再用旧员工列表 fallback。
     employeeDept: employee?.dept || "未分配",
     employeeRole: employee?.role || "未设置职位",
@@ -1577,6 +1587,10 @@ function getTodayDateKey() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function isFutureDateKey(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "")) && String(value) > getTodayDateKey();
+}
+
 function getBangkokDateKey(now = new Date()) {
   // 考勤自动任务按业务地（泰国/缅甸）日期运行；不要用服务器 UTC 日期，否则 Vercel 17:00 UTC 触发时会落错业务日。
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -1744,7 +1758,7 @@ async function assertEmployeeAvailableForAttendanceAndPayroll(employeeId, ownerU
     throw new Error("EMPLOYEE_NOT_FOUND");
   }
   if (!isEmployeeAvailableForAttendanceAndPayroll(data)) {
-    throw new Error("员工已离职或停用，不参与考勤与薪资计算");
+    throw new Error("员工已离职，不参与考勤与薪资计算");
   }
 }
 
@@ -2615,11 +2629,32 @@ function normalizeEmployeePayload(body, authUser) {
   };
 }
 
+function isSupportedEmployeeStatus(status) {
+  return ["active", "on_leave", "probation", "resigned"].includes(String(status));
+}
+
 function validateEmployeeAmountPayload(payload) {
   // v2 员工弹窗只要求金额不小于 0、不设最大值；后端同步校验，避免绕过前端时触发数据库约束错误。
   const amounts = [payload.hourlyRate, payload.fixedSalary, payload.attendanceBonus, payload.socialSecurity, payload.mealAllowance, payload.serviceFeeRate];
   if (amounts.some((amount) => amount !== null && (Number.isNaN(Number(amount)) || Number(amount) < 0))) {
     return "金额必须大于等于 0";
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(payload.joinDate || ""))) {
+    return "入职日期格式不正确";
+  }
+  if (isFutureDateKey(payload.joinDate)) {
+    return "入职日期不能晚于今天";
+  }
+  if (payload.salaryEffectiveStartDate) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(payload.salaryEffectiveStartDate || ""))) {
+      return "薪资生效日期格式不正确";
+    }
+    if (isFutureDateKey(payload.salaryEffectiveStartDate)) {
+      return "薪资生效日期不能晚于今天";
+    }
+  }
+  if (!isSupportedEmployeeStatus(payload.status)) {
+    return "员工状态不合法";
   }
   return null;
 }
@@ -3968,6 +4003,7 @@ app.get("/api/admin/attendance-calculations", async (req, res) => {
   try {
     const requestStartedAt = Date.now();
     const ownerUserId = req.authUser.id;
+    const includeInactive = req.query.includeInactive === "true";
     const usePagination = req.query.page !== undefined || req.query.pageSize !== undefined;
     const page = Math.max(1, Number.parseInt(String(req.query.page || "1"), 10) || 1);
     const pageSize = Math.min(100, Math.max(10, Number.parseInt(String(req.query.pageSize || "20"), 10) || 20));
@@ -4073,7 +4109,11 @@ app.get("/api/admin/attendance-calculations", async (req, res) => {
     }
 
     const employeeRows = employeesResult.data || [];
-    const availableEmployeeRows = employeeRows.filter((employee) => isEmployeeAvailableForAttendanceAndPayroll(employee));
+    const availableEmployeeRows = employeeRows.filter((employee) => (
+      includeInactive
+        ? Boolean(employee) && employee.is_deleted !== true
+        : isEmployeeAvailableForAttendanceAndPayroll(employee)
+    ));
     const employeeMap = new Map(availableEmployeeRows.map((row) => [Number(row.id), row]));
     const availableEmployeeIds = availableEmployeeRows
       .map((row) => Number(row.id))
@@ -4163,6 +4203,7 @@ app.get("/api/admin/attendance-calculations", async (req, res) => {
         keywordLength: keyword.length,
         status,
         hasException,
+        includeInactive,
         employeeCount: availableEmployeeRows.length,
         rawRowCount: (calculationsResult.data || []).length,
         filteredRowCount: rows.length,
@@ -4231,6 +4272,9 @@ app.post("/api/admin/attendance-records", async (req, res) => {
 
     if (!employeeId || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return res.status(400).json({ error: "employeeId 和 date 必填且格式正确" });
+    }
+    if (isFutureDateKey(date)) {
+      return res.status(400).json({ error: "考勤日期不能晚于今天" });
     }
 
     const { data: employee, error: employeeError } = await supabase
@@ -4358,6 +4402,9 @@ app.put("/api/admin/attendance-records/:id", async (req, res) => {
     };
 
     const nextDate = toDateKey(payload.date || previousDate);
+    if (isFutureDateKey(nextDate)) {
+      return res.status(400).json({ error: "考勤日期不能晚于今天" });
+    }
     const joinDateError = getAttendanceDateBeforeJoinError(employee, nextDate);
     if (joinDateError) {
       return res.status(400).json({ error: joinDateError });
@@ -4576,6 +4623,7 @@ app.get("/api/admin/payroll-results", async (req, res) => {
   try {
     const requestStartedAt = Date.now();
     const ownerUserId = req.authUser.id;
+    const includeInactive = req.query.includeInactive === "true";
     const usePagination = req.query.page !== undefined || req.query.pageSize !== undefined;
     const page = Math.max(1, Number.parseInt(String(req.query.page || "1"), 10) || 1);
     const pageSize = Math.min(100, Math.max(10, Number.parseInt(String(req.query.pageSize || "20"), 10) || 20));
@@ -4599,7 +4647,8 @@ app.get("/api/admin/payroll-results", async (req, res) => {
       keyword,
       salaryType,
       calculationStatus,
-      reviewStatus
+      reviewStatus,
+      includeInactive
     })}`;
 
     const cachedPayload = readCache(payrollResultsCache, cacheKey);
@@ -4655,7 +4704,7 @@ app.get("/api/admin/payroll-results", async (req, res) => {
 
     const targetEmployees = employeesResult.data.filter((employee) => {
       // 薪资核算主列表必须以当前可参与考勤/薪资的员工为准；历史停用/离职员工的工资结果只保留在库里，不进入当期工作流。
-      if (!isEmployeeAvailableForAttendanceAndPayroll(employee)) {
+      if (!includeInactive && !isEmployeeAvailableForAttendanceAndPayroll(employee)) {
         return false;
       }
       if (employeeId && Number(employee.id) !== employeeId) {
@@ -4742,6 +4791,7 @@ app.get("/api/admin/payroll-results", async (req, res) => {
         salaryType,
         calculationStatus,
         reviewStatus,
+        includeInactive,
         page,
         pageSize,
         targetEmployeeCount: targetEmployees.length,
@@ -6067,6 +6117,9 @@ app.put("/api/admin/employees/:id", async (req, res) => {
 app.patch("/api/admin/employees/:id/status", async (req, res) => {
   try {
     const { targetStatus } = req.body;
+    if (targetStatus !== "resigned") {
+      return res.status(400).json({ error: "员工状态不合法" });
+    }
     const employeeRow = await setEmployeeStatusRecord(Number(req.params.id), targetStatus, req.authUser.id);
     res.json({
       employee: mapEmployeeRow(employeeRow),

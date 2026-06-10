@@ -285,8 +285,9 @@ export function calculateDailyAttendanceRow(employee, record, config, date, owne
     normalizedConfig.currency,
     employee.currency || "THB"
   );
+  // 固定薪资员工的基础工资不在“考勤计算”按日摊开展示；日考勤只保留工时、餐补、加班等过程数据，月薪在薪资核算模块统一处理。
   const workPay = hasFixedSalary
-    ? Number(employee.fixed_salary) / 30
+    ? 0
     : Math.max(0, validHours - overtimePayHours) * hourlyRate;
   const overtimePay = overtimePayHours * overtimeFeeInEmployeeCurrency;
   // 餐补按“当日有效工时 / 当日标准工时”折算；满勤一天拿整额，半天拿一半，最多不超过一天额度。

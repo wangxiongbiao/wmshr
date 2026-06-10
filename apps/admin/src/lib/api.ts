@@ -86,12 +86,15 @@ export async function fetchEmployees(): Promise<Employee[]> {
   return request<Employee[]>("/api/admin/employees");
 }
 
-export async function searchEmployees(keyword: string): Promise<Employee[]> {
+export async function searchEmployees(keyword: string, options: { includeInactive?: boolean } = {}): Promise<Employee[]> {
   const trimmedKeyword = keyword.trim();
   if (!trimmedKeyword) {
     return [];
   }
   const search = new URLSearchParams({ keyword: trimmedKeyword });
+  if (options.includeInactive) {
+    search.set("includeInactive", "true");
+  }
   return request<Employee[]>(`/api/admin/employees?${search.toString()}`);
 }
 
@@ -373,6 +376,7 @@ export async function fetchAttendanceCalculations(params: {
   employeeId?: number | null;
   status?: string;
   hasException?: string;
+  includeInactive?: boolean;
   page: number;
   pageSize: number;
 }): Promise<AttendanceCalculationPage> {
@@ -398,6 +402,9 @@ export async function fetchAttendanceCalculations(params: {
   }
   if (params.hasException && params.hasException !== "all") {
     search.set("hasException", params.hasException);
+  }
+  if (params.includeInactive) {
+    search.set("includeInactive", "true");
   }
 
   const url = `/api/admin/attendance-calculations?${search.toString()}`;
@@ -452,6 +459,7 @@ export async function fetchPayrollResults(params: {
   salaryType?: string;
   calculationStatus?: string;
   reviewStatus?: string;
+  includeInactive?: boolean;
   page: number;
   pageSize: number;
   force?: boolean;
@@ -475,6 +483,9 @@ export async function fetchPayrollResults(params: {
   }
   if (params.reviewStatus && params.reviewStatus !== "all") {
     search.set("reviewStatus", params.reviewStatus);
+  }
+  if (params.includeInactive) {
+    search.set("includeInactive", "true");
   }
 
   const requestPath = `/api/admin/payroll-results?${search.toString()}`;
@@ -728,7 +739,7 @@ export async function updateEmployee(employeeId: number, payload: EmployeeUpsert
   });
 }
 
-export async function updateEmployeeStatus(employeeId: number, targetStatus: Extract<EmployeeStatus, "disabled" | "resigned">, reason?: string): Promise<EmployeeDetail> {
+export async function updateEmployeeStatus(employeeId: number, targetStatus: Extract<EmployeeStatus, "resigned">, reason?: string): Promise<EmployeeDetail> {
   return request<EmployeeDetail>(`/api/admin/employees/${employeeId}/status`, {
     method: "PATCH",
     body: JSON.stringify({ targetStatus, reason: reason || null })

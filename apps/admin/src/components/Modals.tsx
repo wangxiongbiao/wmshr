@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Copy, RefreshCw, ToggleLeft, ToggleRight, Upload, Trash2, UserX, UserRoundMinus } from "lucide-react";
+import { Copy, RefreshCw, ToggleLeft, ToggleRight, Upload, Trash2, UserRoundMinus } from "lucide-react";
 import { tAdmin } from "../lib/i18nText";
 import {
   AppConfig,
@@ -52,6 +52,7 @@ interface EmployeeFormState {
   nickname: string;
   gender: Employee["gender"];
   country: Employee["country"];
+  status: EmployeeStatus;
   role: string;
   dept: string;
   hourlyRate?: number;
@@ -65,11 +66,14 @@ interface EmployeeFormState {
   photo: string | null;
 }
 
+const TODAY_DATE_KEY = new Date().toISOString().split("T")[0];
+
 const DEFAULT_EMPLOYEE_FORM: EmployeeFormState = {
   name: "",
   nickname: "",
   gender: "female",
   country: "MM",
+  status: "active",
   role: tAdmin("拣货员"),
   dept: "",
   hourlyRate: undefined,
@@ -79,7 +83,7 @@ const DEFAULT_EMPLOYEE_FORM: EmployeeFormState = {
   mealAllowance: 0,
   serviceFeeRate: 0,
   currency: "THB",
-  joinDate: new Date().toISOString().split("T")[0],
+  joinDate: TODAY_DATE_KEY,
   photo: null
 };
 
@@ -89,6 +93,7 @@ function normalizeEmployeeToForm(employee: Employee): EmployeeFormState {
     nickname: employee.nickname || "",
     gender: employee.gender,
     country: employee.country,
+    status: employee.status,
     role: employee.role,
     dept: employee.dept,
     hourlyRate: employee.salaryType === "hourly" ? employee.hourlyRate ?? undefined : undefined,
@@ -177,6 +182,7 @@ export function EmployeeModal({
 }: EmployeeModalProps) {
   const [formData, setFormData] = useState<EmployeeFormState>(DEFAULT_EMPLOYEE_FORM);
   const [error, setError] = useState("");
+  const isMyanmarEmployee = formData.country === "MM";
 
   useEffect(() => {
     if (!isOpen) {
@@ -191,7 +197,7 @@ export function EmployeeModal({
 
     setFormData({
       ...DEFAULT_EMPLOYEE_FORM,
-      joinDate: new Date().toISOString().split("T")[0]
+      joinDate: TODAY_DATE_KEY
     });
     setError("");
   }, [employee, isOpen]);
@@ -201,6 +207,13 @@ export function EmployeeModal({
 
     setFormData((prev) => {
       const next = { ...prev };
+      if (name === "country") {
+        return {
+          ...next,
+          country: value as Employee["country"],
+          socialSecurity: value === "MM" ? 0 : next.socialSecurity
+        };
+      }
       if (name === "hourlyRate" || name === "baseMonthlyWage" || name === "attendanceBonus" || name === "socialSecurity" || name === "mealAllowance" || name === "serviceFeeRate") {
         next[name] = value === "" ? undefined : Number(value);
         return next;
@@ -265,13 +278,13 @@ export function EmployeeModal({
       role: formData.role.trim(),
       dept: formData.dept.trim(),
       joinDate: formData.joinDate,
-      status: employee?.status || "active",
+      status: formData.status,
       salaryType,
       hourlyRate: salaryType === "hourly" ? formData.hourlyRate ?? null : null,
       fixedSalary: salaryType === "fixed" ? formData.baseMonthlyWage ?? null : null,
       // 全勤奖、社保金、餐补和服务费比例都是员工固定档案字段：前端允许空输入，但保存时统一归零，避免后端考勤/薪资计算拿到 undefined。
       attendanceBonus: formData.attendanceBonus ?? 0,
-      socialSecurity: formData.socialSecurity ?? 0,
+      socialSecurity: isMyanmarEmployee ? 0 : (formData.socialSecurity ?? 0),
       mealAllowance: formData.mealAllowance ?? 0,
       serviceFeeRate: formData.serviceFeeRate ?? 0,
       salaryEffectiveStartDate: formData.joinDate,
@@ -348,6 +361,15 @@ export function EmployeeModal({
                 <option value="KH">{tAdmin("柬埔寨")}</option>
               </select>
             </div>
+            <div>
+              <FieldLabel>{tAdmin("员工状态")}</FieldLabel>
+              <select name="status" value={formData.status} onChange={handleChange} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm bg-white">
+                <option value="active">{tAdmin("在职")}</option>
+                <option value="probation">{tAdmin("试用")}</option>
+                <option value="on_leave">{tAdmin("休假")}</option>
+                <option value="resigned">{tAdmin("离职")}</option>
+              </select>
+            </div>
           </div>
         </div>
         <div className="grid grid-cols-2 gap-4 border-t border-slate-100 pt-4">
@@ -375,7 +397,25 @@ export function EmployeeModal({
           </div>
           <div>
             <FieldLabel>{tAdmin("社保金")}</FieldLabel>
-            <input type="number" name="socialSecurity" step="100" min="0" value={formData.socialSecurity ?? ""} onChange={handleChange} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" placeholder={tAdmin("如: 800")} />
+            <input
+              type="number"
+              name="socialSecurity"
+              step="100"
+              min="0"
+              value={formData.socialSecurity ?? ""}
+              onChange={handleChange}
+              disabled={isMyanmarEmployee}
+              className={cn(
+                "w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm",
+                isMyanmarEmployee && "cursor-not-allowed bg-slate-100 text-slate-400"
+              )}
+              placeholder={isMyanmarEmployee ? tAdmin("缅甸员工不在这里设置社保金") : tAdmin("如: 800")}
+            />
+            {isMyanmarEmployee ? (
+              <p className="mt-1 text-xs leading-5 text-amber-600">
+                {tAdmin("缅甸员工社保按有效出勤天数自动计算，这里不可手动输入。")}
+              </p>
+            ) : null}
           </div>
           <div>
             <FieldLabel>{tAdmin("餐补费用")}</FieldLabel>
@@ -396,7 +436,7 @@ export function EmployeeModal({
           </div>
           <div>
             <FieldLabel>{tAdmin("入职日期")}</FieldLabel>
-            <input type="date" name="joinDate" value={formData.joinDate} onChange={handleChange} required className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
+            <input type="date" name="joinDate" max={TODAY_DATE_KEY} value={formData.joinDate} onChange={handleChange} required className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
           </div>
         </div>
       </form>
@@ -501,40 +541,28 @@ export function StatusActionModal({
   onClose,
   onConfirm,
   employee,
-  targetStatus,
   loading = false
 }: {
   isOpen: boolean;
   onClose: () => void;
   onConfirm: () => void;
   employee: Employee | null;
-  targetStatus: "disabled" | "resigned";
   loading?: boolean;
 }) {
-  const isDisable = targetStatus === "disabled";
-
   return (
     <div className={cn("fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4", !isOpen && "hidden")}>
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm fade-in p-6 text-center">
-        <div className={cn(
-          "w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4",
-          isDisable ? "bg-amber-100 text-amber-600" : "bg-rose-100 text-rose-600"
-        )}>
-          {isDisable ? <UserX className="w-8 h-8" /> : <UserRoundMinus className="w-8 h-8" />}
+        <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 bg-rose-100 text-rose-600">
+          <UserRoundMinus className="w-8 h-8" />
         </div>
-        <h3 className="text-lg font-bold text-slate-800 mb-2">{isDisable ? tAdmin("确认停用该员工？") : tAdmin("确认将该员工标记为离职？")}</h3>
+        <h3 className="text-lg font-bold text-slate-800 mb-2">{tAdmin("确认将该员工标记为离职？")}</h3>
         <p className="text-sm text-slate-500 mb-6">
-          {isDisable
-            ? tAdmin("停用后，{{name}} 不会参与新的考勤和薪资核算，历史考勤和薪资记录仍可查询。", { name: employee?.name || tAdmin("该员工") })
-            : tAdmin("离职后，{{name}} 不会参与新的考勤和薪资核算，历史考勤和薪资记录仍可查询。", { name: employee?.name || tAdmin("该员工") })}
+          {tAdmin("离职后，{{name}} 不会参与新的考勤和薪资核算，历史考勤和薪资记录仍可查询。", { name: employee?.name || tAdmin("该员工") })}
         </p>
         <div className="flex gap-3 justify-center">
           <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition">{tAdmin("取消")}</button>
-          <button onClick={onConfirm} disabled={loading} className={cn(
-            "px-4 py-2 text-sm font-medium text-white rounded-lg shadow-md transition disabled:opacity-60",
-            isDisable ? "bg-amber-600 hover:bg-amber-700" : "bg-rose-600 hover:bg-rose-700"
-          )}>
-            {loading ? tAdmin("处理中...") : isDisable ? tAdmin("确认停用") : tAdmin("确认离职")}
+          <button onClick={onConfirm} disabled={loading} className="px-4 py-2 text-sm font-medium text-white rounded-lg shadow-md transition disabled:opacity-60 bg-rose-600 hover:bg-rose-700">
+            {loading ? tAdmin("处理中...") : tAdmin("确认离职")}
           </button>
         </div>
       </div>
@@ -545,7 +573,7 @@ export function StatusActionModal({
 const DEFAULT_ATTENDANCE_RULE_FORM: AttendanceRuleFormData = {
   name: "",
   isActive: true,
-  effectiveStartDate: new Date().toISOString().split("T")[0],
+  effectiveStartDate: TODAY_DATE_KEY,
   effectiveEndDate: null,
   startShift: "08:30",
   endShift: "17:30",
@@ -610,7 +638,7 @@ export function AttendanceRuleModal({
     } else {
       setFormData({
         ...DEFAULT_ATTENDANCE_RULE_FORM,
-        effectiveStartDate: new Date().toISOString().split("T")[0],
+        effectiveStartDate: TODAY_DATE_KEY,
         standardHours: calculateShiftStandardHours(DEFAULT_ATTENDANCE_RULE_FORM)
       });
     }
@@ -737,6 +765,7 @@ export function AttendanceRuleModal({
                     <input
                       type="date"
                       name="effectiveStartDate"
+                      max={TODAY_DATE_KEY}
                       value={formData.effectiveStartDate}
                       onChange={handleChange}
                       className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
@@ -747,6 +776,7 @@ export function AttendanceRuleModal({
                     <input
                       type="date"
                       name="effectiveEndDate"
+                      max={TODAY_DATE_KEY}
                       value={formData.effectiveEndDate || ""}
                       onChange={handleChange}
                       className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
@@ -1064,7 +1094,7 @@ export function AttendanceAdjustmentModal({ isOpen, onClose, onSave, record, emp
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">{tAdmin("日期")}</label>
-            <input type="date" name="date" value={formData.date} onChange={handleChange} required className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
+            <input type="date" name="date" max={TODAY_DATE_KEY} value={formData.date} onChange={handleChange} required className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">{tAdmin("考勤类型")}</label>

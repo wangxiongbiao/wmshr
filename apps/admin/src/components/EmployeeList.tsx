@@ -22,7 +22,7 @@ interface EmployeeListProps {
 
 function getV2StatusLabel(employee: Employee) {
   if (employee.status === "on_leave") return tAdmin("休假");
-  if (employee.status === "disabled") return tAdmin("停用");
+  if (employee.status === "probation") return tAdmin("试用");
   if (employee.status === "resigned") return tAdmin("离职");
   return tAdmin("在职");
 }
@@ -42,6 +42,7 @@ function getV2HourlyRate(employee: Employee) {
 
 export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, onEditEmployee, onManageAppAccount, onDeleteEmployee }: EmployeeListProps) {
   const [query, setSearchQuery] = useState("");
+  const [includeInactive, setIncludeInactive] = useState(false);
   const [page, setPage] = useState(1);
   const pageSize = 12;
   const loadRequestIdRef = useRef(0);
@@ -56,7 +57,7 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
   useEffect(() => {
     // 搜索条件变化后必须回到第一页；真实后端分页下，旧页码继续请求会直接跳到深页，和用户当前筛选意图不一致。
     setPage(1);
-  }, [query]);
+  }, [includeInactive, query]);
 
   useEffect(() => {
     const requestId = ++loadRequestIdRef.current;
@@ -65,6 +66,7 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
 
     void fetchEmployeesPage({
       keyword: query,
+      includeInactive,
       page,
       pageSize
     }).then((result) => {
@@ -88,7 +90,7 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
       }
     });
   // 员工页只依赖自己的分页参数与显式刷新信号；避免父层全量 employees 变更把同一分页请求重复打一遍。
-  }, [page, pageSize, query, reloadKey]);
+  }, [includeInactive, page, pageSize, query, reloadKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -96,7 +98,8 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
     setTotalResolved(false);
 
     void fetchEmployeesCount({
-      keyword: query
+      keyword: query,
+      includeInactive
     }).then((nextTotal) => {
       if (cancelled) {
         return;
@@ -113,7 +116,7 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
     return () => {
       cancelled = true;
     };
-  }, [query, reloadKey]);
+  }, [includeInactive, query, reloadKey]);
 
   useEffect(() => {
     const visibleIds = rows.map((row) => row.id).filter((id) => !(id in avatarMap));
@@ -143,24 +146,38 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
   }, [avatarMap, rows]);
 
   const showRefreshing = (pageLoading || loading) && rows.length > 0;
-  const displayTotal = totalResolved
-    ? total
-    : Math.max(total, (page - 1) * pageSize + rows.length + (hasMore ? 1 : 0));
+  const exactTotalFromPage = hasMore ? null : (page - 1) * pageSize + rows.length;
+  const displayTotal = exactTotalFromPage ?? (
+    totalResolved
+      ? total
+      : Math.max(total, (page - 1) * pageSize + rows.length + 1)
+  );
 
   return (
     <div className="h-full min-h-0 flex flex-col">
       <div className="shrink-0 pb-4 space-y-3">
         {/* 员工列表按 Header / Content 分层：筛选和新增按钮固定在顶部，只有下面的卡片区域滚动，避免长列表把操作入口顶出视口。 */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div className="relative w-full sm:w-72">
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={tAdmin("搜索姓名、昵称、职位或区域...")}
-            className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none text-sm bg-white"
-          />
-          <Search className="w-5 h-5 absolute left-3 top-2.5 text-slate-400" />
+        <div className="w-full sm:w-auto flex flex-col sm:flex-row sm:items-center gap-3">
+          <div className="relative w-full sm:w-72">
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={tAdmin("搜索姓名、昵称、职位或区域...")}
+              className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none text-sm bg-white"
+            />
+            <Search className="w-5 h-5 absolute left-3 top-2.5 text-slate-400" />
+          </div>
+          <label className="inline-flex h-[38px] items-center gap-2 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-600 select-none">
+            <input
+              type="checkbox"
+              checked={includeInactive}
+              onChange={(event) => setIncludeInactive(event.target.checked)}
+              className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+            />
+            <span>{tAdmin("展示离职人员")}</span>
+          </label>
         </div>
         <button
           onClick={onAddEmployee}
@@ -224,8 +241,13 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
                       </div>
                     )}
                   </div>
-                  <div className="flex-1 min-w-0 pr-8">
-                    <h3 className="text-base font-bold text-slate-800 truncate">{emp.name}</h3>
+                  <div className="relative flex-1 min-w-0 pr-8">
+                    {emp.status === "resigned" ? (
+                      <span className="absolute right-0 top-0 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-600 ring-1 ring-rose-100">
+                        {tAdmin("离职")}
+                      </span>
+                    ) : null}
+                    <h3 className="text-base font-bold text-slate-800 truncate pr-10">{emp.name}</h3>
                     {emp.nickname ? (
                       <p className="text-xs text-slate-400 truncate mt-0.5">{emp.nickname}</p>
                     ) : null}
@@ -306,8 +328,8 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
           onPageChange={setPage}
         />
         <div className="mt-6 text-center text-sm text-slate-400">
-          {totalResolved
-            ? tAdmin("共 {{count}} 名员工", { count: total })
+          {(exactTotalFromPage !== null || totalResolved)
+            ? tAdmin("共 {{count}} 名员工", { count: displayTotal })
             : tAdmin("员工总数统计中，当前先显示已加载列表")}
         </div>
       </div>
