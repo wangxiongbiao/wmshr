@@ -289,7 +289,9 @@ export function EmployeeModal({
       serviceFeeRate: formData.serviceFeeRate ?? 0,
       salaryEffectiveStartDate: formData.joinDate,
       currency: formData.currency,
-      photo: formData.photo
+      photo: employee
+        ? (formData.photo === employee.photo ? undefined : formData.photo)
+        : formData.photo
     });
   };
 

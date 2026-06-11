@@ -89,6 +89,53 @@ function normalRecord(overrides = {}) {
   assert.equal(row.total_pay, 712);
 }
 
+// 启用新倍率规则后，时薪员工的加班单价应直接取员工正常时薪并按工作日倍率放大。
+{
+  const config = { ...DEFAULT_ATTENDANCE_CONFIG, overtime_rule_enabled: true, ot_hourly_fee: 50 };
+  const row = calculateDailyAttendanceRow(baseEmployee({ hourly_rate: 80, currency: "THB" }), normalRecord({ out_time: "18:30" }), config, date, ownerUserId);
+  assert.equal(row.overtime_pay_hours, 1);
+  assert.equal(row.overtime_pay, 120);
+  assert.equal(row.total_pay, 760);
+}
+
+// 启用新倍率规则后，固定薪资员工仍按配置里的加班费基数套用工作日/周末/节假日倍率。
+{
+  const weekdayConfig = { ...DEFAULT_ATTENDANCE_CONFIG, overtime_rule_enabled: true, ot_hourly_fee: 50 };
+  const weekdayRow = calculateDailyAttendanceRow(baseEmployee({ fixed_salary: 9000, hourly_rate: 80, currency: "THB" }), normalRecord({ out_time: "18:30" }), weekdayConfig, date, ownerUserId);
+  assert.equal(weekdayRow.overtime_pay, 75);
+
+  const weekendRow = calculateDailyAttendanceRow(baseEmployee({ fixed_salary: 9000, currency: "THB" }), normalRecord({ out_time: "18:30" }), weekdayConfig, "2026-06-06", ownerUserId);
+  assert.equal(weekendRow.overtime_pay, 100);
+
+  const holidayConfig = { ...weekdayConfig, holiday_dates: ["2026-06-03"] };
+  const holidayRow = calculateDailyAttendanceRow(baseEmployee({ fixed_salary: 9000, currency: "THB" }), normalRecord({ out_time: "18:30" }), holidayConfig, date, ownerUserId);
+  assert.equal(holidayRow.overtime_pay, 150);
+}
+
+// 员工级加班费配置可以覆盖系统默认；关闭倍率时直接按员工自己的加班费结算。
+{
+  const row = calculateDailyAttendanceRow(
+    baseEmployee({ hourly_rate: 80, currency: "THB", overtime_hourly_fee: 88, overtime_rule_enabled: false }),
+    normalRecord({ out_time: "18:30" }),
+    { ...DEFAULT_ATTENDANCE_CONFIG, overtime_rule_enabled: true, ot_hourly_fee: 50 },
+    date,
+    ownerUserId
+  );
+  assert.equal(row.overtime_pay, 88);
+}
+
+// 员工级“是否走倍率规则”可以覆盖系统全局开关；开启后按员工自己的加班费乘对应倍率。
+{
+  const row = calculateDailyAttendanceRow(
+    baseEmployee({ fixed_salary: 9000, currency: "THB", overtime_hourly_fee: 60, overtime_rule_enabled: true }),
+    normalRecord({ out_time: "18:30" }),
+    { ...DEFAULT_ATTENDANCE_CONFIG, overtime_rule_enabled: false, ot_hourly_fee: 50 },
+    date,
+    ownerUserId
+  );
+  assert.equal(row.overtime_pay, 90);
+}
+
 // 当天底稿没有打卡时必须保留 pending 过程态，避免零点刚生成就把员工误判为缺勤。
 {
   const row = calculateDailyAttendanceRow(baseEmployee(), null, DEFAULT_ATTENDANCE_CONFIG, date, ownerUserId, { pendingIfNoRecord: true });

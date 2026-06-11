@@ -5,6 +5,8 @@ export const DEFAULT_ATTENDANCE_CONFIG = {
   break_end: "13:00",
   standard_hours: 8,
   ot_hourly_fee: 50,
+  overtime_rule_enabled: false,
+  holiday_dates: [],
   currency: "THB"
 };
 
@@ -72,7 +74,50 @@ function normalizeConfig(config = {}) {
     ...config,
     standard_hours: Number(config.standard_hours ?? DEFAULT_ATTENDANCE_CONFIG.standard_hours),
     ot_hourly_fee: Number(config.ot_hourly_fee ?? DEFAULT_ATTENDANCE_CONFIG.ot_hourly_fee),
+    overtime_rule_enabled: Boolean(config.overtime_rule_enabled ?? DEFAULT_ATTENDANCE_CONFIG.overtime_rule_enabled),
+    holiday_dates: Array.isArray(config.holiday_dates)
+      ? config.holiday_dates
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+      : DEFAULT_ATTENDANCE_CONFIG.holiday_dates,
     currency: config.currency || DEFAULT_ATTENDANCE_CONFIG.currency
+  };
+}
+
+function isWeekendDate(date) {
+  const day = new Date(`${date}T00:00:00Z`).getUTCDay();
+  return day === 0 || day === 6;
+}
+
+function isHolidayDate(date, config) {
+  return new Set(config.holiday_dates || []).has(date);
+}
+
+function resolveOvertimeMultiplierWithConfig(date, config, useRule) {
+  if (!useRule) {
+    return 1;
+  }
+  if (isHolidayDate(date, config)) {
+    return 3;
+  }
+  if (isWeekendDate(date)) {
+    return 2;
+  }
+  return 1.5;
+}
+
+function resolveEmployeeOvertimeConfig(employee, config, defaultOtHourlyFeeInEmployeeCurrency) {
+  const hasEmployeeHourlyFee = employee?.overtime_hourly_fee !== null
+    && employee?.overtime_hourly_fee !== undefined
+    && Number.isFinite(Number(employee.overtime_hourly_fee));
+  const employeeHourlyFee = hasEmployeeHourlyFee ? Number(employee.overtime_hourly_fee) : defaultOtHourlyFeeInEmployeeCurrency;
+  const useRule = employee?.overtime_rule_enabled === null || employee?.overtime_rule_enabled === undefined
+    ? Boolean(config.overtime_rule_enabled)
+    : Boolean(employee.overtime_rule_enabled);
+
+  return {
+    employeeHourlyFee,
+    useRule
   };
 }
 
@@ -280,16 +325,24 @@ export function calculateDailyAttendanceRow(employee, record, config, date, owne
   const overtimePayHours = overtimeRawHours;
   const hasFixedSalary = Number(employee.fixed_salary || 0) > 0;
   const hourlyRate = Number(employee.hourly_rate || 0);
-  const overtimeFeeInEmployeeCurrency = convertAttendanceRuleAmount(
+  const baseOtHourlyFeeInEmployeeCurrency = convertAttendanceRuleAmount(
     normalizedConfig.ot_hourly_fee,
     normalizedConfig.currency,
     employee.currency || "THB"
   );
+  const employeeOvertimeConfig = resolveEmployeeOvertimeConfig(employee, normalizedConfig, baseOtHourlyFeeInEmployeeCurrency);
+  const overtimeMultiplier = resolveOvertimeMultiplierWithConfig(date, normalizedConfig, employeeOvertimeConfig.useRule);
+  const overtimeBaseRate = employeeOvertimeConfig.useRule
+    ? (hasFixedSalary ? employeeOvertimeConfig.employeeHourlyFee : hourlyRate)
+    : employeeOvertimeConfig.employeeHourlyFee;
+  const overtimeHourlyRate = employeeOvertimeConfig.useRule
+    ? overtimeBaseRate * overtimeMultiplier
+    : overtimeBaseRate;
   // 固定薪资员工的基础工资不在“考勤计算”按日摊开展示；日考勤只保留工时、餐补、加班等过程数据，月薪在薪资核算模块统一处理。
   const workPay = hasFixedSalary
     ? 0
     : Math.max(0, validHours - overtimePayHours) * hourlyRate;
-  const overtimePay = overtimePayHours * overtimeFeeInEmployeeCurrency;
+  const overtimePay = overtimePayHours * Math.max(0, overtimeHourlyRate);
   // 餐补按“当日有效工时 / 当日标准工时”折算；满勤一天拿整额，半天拿一半，最多不超过一天额度。
   // 非正常考勤（请假/病假/缺勤/异常）在前面的早退分支已直接返回 0，这里只处理真实出勤行的折算金额。
   const mealAllowanceRatio = standardHours > 0 ? Math.min(validHours / standardHours, 1) : 0;

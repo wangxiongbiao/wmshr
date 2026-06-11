@@ -18,6 +18,7 @@ import {
   fetchAttendanceCalculations,
   fetchAttendanceConfig,
   fetchEmployeeAvatars,
+  generateMonthlyPayroll,
   recalculateMonthlyAttendance,
   runAttendanceDailyMaintenance,
   searchEmployees,
@@ -40,9 +41,11 @@ type CreateAttendanceForm = Omit<AttendanceRecordUpdatePayload, "type"> & {
   type: AttendanceRecordUpdatePayload["type"] | "";
 };
 
-type AdjustAttendanceForm = Omit<AttendanceRecordUpdatePayload, "type"> & {
+type AdjustAttendanceForm = Omit<AttendanceRecordUpdatePayload, "type" | "employeeOvertimeHourlyFee"> & {
   // 新增补卡记录要求操作员主动选择类型；编辑已有原始记录时仍会回填现有类型。
   type: AttendanceRecordUpdatePayload["type"] | "";
+  employeeOvertimeHourlyFee?: number | "";
+  employeeOvertimeRuleEnabled?: boolean | null;
 };
 
 const DEFAULT_CREATE_IN_TIME = "08:30";
@@ -83,6 +86,19 @@ function formatMoneyNumber(value: number) {
 
 function formatEmployeeDisplayName(employee: Pick<Employee, "name" | "nickname">) {
   return employee.nickname ? `${employee.name}(${employee.nickname})` : employee.name;
+}
+
+function parseHolidayDatesInput(value: string) {
+  return Array.from(new Set(
+    value
+      .split(/[\n,，\s]+/)
+      .map((item) => item.trim())
+      .filter((item) => /^\d{4}-\d{2}-\d{2}$/.test(item))
+  )).sort();
+}
+
+function formatHolidayDatesInput(dates: string[] | undefined) {
+  return Array.isArray(dates) ? dates.join("\n") : "";
 }
 
 function getAttendanceTotalPayWithService(item: AttendanceCalculationResult) {
@@ -157,8 +173,10 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
   const [total, setTotal] = useState(0);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [configForm, setConfigForm] = useState<AppConfig | null>(null);
+  const [holidayDatesText, setHolidayDatesText] = useState("");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isHolidaySettingsOpen, setIsHolidaySettingsOpen] = useState(false);
   const [isAdjustmentOpen, setIsAdjustmentOpen] = useState(false);
   const [isMaintenanceConfirmOpen, setIsMaintenanceConfirmOpen] = useState(false);
   const [adjustingResult, setAdjustingResult] = useState<AttendanceCalculationResult | null>(null);
@@ -175,17 +193,22 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
     type: "",
     inTime: null,
     outTime: null,
-    note: ""
+    note: "",
+    employeeOvertimeHourlyFee: "",
+    employeeOvertimeRuleEnabled: null
   });
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [maintenanceMessage, setMaintenanceMessage] = useState("");
   const [error, setError] = useState("");
   const [lastLoadedAt, setLastLoadedAt] = useState(0);
+  const [reloadNonce, setReloadNonce] = useState(0);
   const loadRequestIdRef = useRef(0);
+  const lastLoadedFilterKeyRef = useRef("");
   const [selectedFilterEmployee, setSelectedFilterEmployee] = useState<Employee | null>(null);
   const [employeeFilterSearchResults, setEmployeeFilterSearchResults] = useState<Employee[]>([]);
   const [employeeFilterLoading, setEmployeeFilterLoading] = useState(false);
+  const [filterSelectResetKey, setFilterSelectResetKey] = useState(0);
   const [selectedCreateEmployee, setSelectedCreateEmployee] = useState<Employee | null>(null);
   const [createEmployeeSearchResults, setCreateEmployeeSearchResults] = useState<Employee[]>([]);
   const [createEmployeeLoading, setCreateEmployeeLoading] = useState(false);
@@ -268,6 +291,33 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
     [avatarMap, calculations]
   );
 
+  useEffect(() => {
+    const employeeId = selectedCreateEmployee?.id;
+    if (!employeeId || employeeId in avatarMap) {
+      return;
+    }
+
+    let cancelled = false;
+    void fetchEmployeeAvatars([employeeId]).then((result) => {
+      if (cancelled) {
+        return;
+      }
+      setAvatarMap((prev) => {
+        const next = { ...prev };
+        result.items.forEach((item) => {
+          next[item.id] = item.photo;
+        });
+        return next;
+      });
+    }).catch(() => {
+      // 新增考勤记录里的员工头像补图失败不影响选人和保存。
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [avatarMap, selectedCreateEmployee]);
+
   const runEmployeeSearch = async (query: string, mode: "filter" | "create") => {
     const requestId = ++employeeSearchRequestIdRef.current;
     const trimmedQuery = query.trim();
@@ -322,10 +372,19 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
     ];
   };
 
+  const buildLoadFilterKey = () => JSON.stringify({
+    employeeId: selectedEmployeeId,
+    includeInactive,
+    selectedDate,
+    selectedMonth,
+    page
+  });
+
   const loadData = async () => {
     const requestId = ++loadRequestIdRef.current;
     const effectiveDate = selectedDate || undefined;
     const effectiveMonth = selectedMonth || effectiveDate?.slice(0, 7);
+    const filterKey = buildLoadFilterKey();
 
     setLoading(true);
     setError("");
@@ -345,6 +404,7 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
       setTotal(nextPage.total);
       setSelectedIds(new Set());
       setLastLoadedAt(Date.now());
+      lastLoadedFilterKeyRef.current = filterKey;
     } catch (nextError) {
       if (requestId !== loadRequestIdRef.current) {
         return;
@@ -362,18 +422,24 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
       return;
     }
 
-    if (calculations.length > 0 && Date.now() - lastLoadedAt < ATTENDANCE_REFRESH_TTL_MS) {
+    const currentFilterKey = buildLoadFilterKey();
+    if (
+      calculations.length > 0
+      && Date.now() - lastLoadedAt < ATTENDANCE_REFRESH_TTL_MS
+      && lastLoadedFilterKeyRef.current === currentFilterKey
+    ) {
       return;
     }
 
     // 考勤页被缓存后切回来时需要按当前筛选条件后台重拉数据，但不能先清空表格主体。
     void loadData();
-  }, [calculations.length, includeInactive, isActive, lastLoadedAt, page, selectedDate, selectedEmployeeId, selectedMonth]);
+  }, [calculations.length, includeInactive, isActive, lastLoadedAt, page, reloadNonce, selectedDate, selectedEmployeeId, selectedMonth]);
 
   useEffect(() => {
     void fetchAttendanceConfig()
       .then((nextConfig) => {
         setConfigForm(nextConfig);
+        setHolidayDatesText(formatHolidayDatesInput(nextConfig.holidayDates));
       })
       .catch((nextError) => setError(nextError instanceof Error ? nextError.message : tAdmin("考勤规则配置加载失败")));
   }, []);
@@ -410,9 +476,15 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
 
   const resetFilters = () => {
     setSelectedEmployeeId("all");
+    setSelectedFilterEmployee(null);
+    setEmployeeFilterSearchResults([]);
+    setEmployeeFilterLoading(false);
     setSelectedDate("");
     setSelectedMonth(getDefaultMonth());
     setIncludeInactive(false);
+    setFilterSelectResetKey((prev) => prev + 1);
+    setLastLoadedAt(0);
+    setReloadNonce((prev) => prev + 1);
     setPage(1);
   };
 
@@ -538,7 +610,9 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
         type: detail?.record?.type || "",
         inTime: detail?.record?.inTime || result.rawInTime || null,
         outTime: detail?.record?.outTime || result.rawOutTime || null,
-        note: detail?.record?.note || result.note || ""
+        note: detail?.record?.note || result.note || "",
+        employeeOvertimeHourlyFee: detail?.employee?.overtimeHourlyFee ?? "",
+        employeeOvertimeRuleEnabled: detail?.employee?.overtimeRuleEnabled ?? configForm?.overtimeRuleEnabled ?? null
       });
       setIsAdjustmentOpen(true);
     } catch (nextError) {
@@ -561,9 +635,15 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
     setSubmitting(true);
     setError("");
     try {
+      const isHourlyEmployeeWithRule = adjustingResult.salaryType === "hourly"
+        && Boolean(adjustForm.employeeOvertimeRuleEnabled ?? configForm?.overtimeRuleEnabled);
       const adjustmentPayload: AttendanceRecordUpdatePayload = {
         ...adjustForm,
-        type: adjustForm.type
+        type: adjustForm.type,
+        employeeOvertimeHourlyFee: isHourlyEmployeeWithRule
+          ? null
+          : (adjustForm.employeeOvertimeHourlyFee === "" ? null : Number(adjustForm.employeeOvertimeHourlyFee)),
+        employeeOvertimeRuleEnabled: adjustForm.employeeOvertimeRuleEnabled ?? configForm?.overtimeRuleEnabled ?? null
       };
       if (adjustingResult.attendanceRecordId) {
         await updateAttendanceRecord(adjustingResult.attendanceRecordId, adjustmentPayload);
@@ -651,6 +731,42 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
     }
   };
 
+  const handleSaveHolidaySettings = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!configForm) {
+      return;
+    }
+
+    const holidayDates = parseHolidayDatesInput(holidayDatesText);
+    const invalidHolidayDateInput = holidayDatesText.trim().length > 0 && holidayDates.length === 0;
+    if (invalidHolidayDateInput) {
+      setError(tAdmin("节假日日期请按 YYYY-MM-DD 格式填写"));
+      return;
+    }
+
+    setSubmitting(true);
+    setError("");
+    try {
+      const nextConfig = await updateAttendanceConfig({
+        ...configForm,
+        holidayDates
+      });
+      setConfigForm(nextConfig);
+      setHolidayDatesText(formatHolidayDatesInput(nextConfig.holidayDates));
+      setIsHolidaySettingsOpen(false);
+      const monthToRecalculate = selectedDate ? selectedDate.slice(0, 7) : (selectedMonth || getDefaultMonth());
+      const scopedEmployeeId = selectedEmployeeId === "all" ? null : selectedEmployeeId;
+      await recalculateMonthlyAttendance(monthToRecalculate, scopedEmployeeId);
+      await generateMonthlyPayroll(monthToRecalculate, scopedEmployeeId ? [scopedEmployeeId] : undefined);
+      await loadData();
+      setMaintenanceMessage(tAdmin("节假日配置已保存，并已重算当月考勤与薪资"));
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : tAdmin("节假日配置保存失败"));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <div className="h-full min-h-0 flex flex-col gap-4 animate-fade-in">
       <div className="shrink-0">
@@ -661,6 +777,7 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
             <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">{tAdmin("筛选员工")}</label>
             {/* 员工筛选改为远程搜索：默认不预取员工列表，只有输入关键词后才请求无分页搜索接口，真正生效的仍是选中的 employeeId。 */}
             <SearchableSelect
+              key={filterSelectResetKey}
               value={String(selectedEmployeeId)}
               options={employeeFilterOptions}
               onChange={(nextValue) => {
@@ -781,6 +898,19 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
               title={tAdmin("导出当前表格显示的数据为 CSV 文件")}
             >
               <Download className="w-4 h-4" />{tAdmin("导出当前数据")}</button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!configForm) {
+                  return;
+                }
+                setHolidayDatesText(formatHolidayDatesInput(configForm.holidayDates));
+                setIsHolidaySettingsOpen(true);
+              }}
+              disabled={!configForm}
+              className="bg-white border border-slate-300 text-slate-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-slate-50 transition flex items-center gap-1.5 disabled:opacity-60"
+            >
+              <Settings className="w-4 h-4" />{tAdmin("节假日")}</button>
             <button
               type="button"
               onClick={() => setIsSettingsOpen(true)}
@@ -987,8 +1117,8 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
             {selectedCreateEmployee ? (
               <div className="md:col-span-2 flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
                 <div className="h-10 w-10 shrink-0 overflow-hidden rounded-full border-2 border-white bg-slate-200 shadow-sm flex items-center justify-center text-sm font-bold text-slate-600">
-                  {selectedCreateEmployee.photo ? (
-                    <img src={selectedCreateEmployee.photo} alt="" className="h-full w-full object-cover" />
+                  {(avatarMap[selectedCreateEmployee.id] ?? selectedCreateEmployee.photo) ? (
+                    <img src={avatarMap[selectedCreateEmployee.id] ?? selectedCreateEmployee.photo ?? ""} alt="" className="h-full w-full object-cover" />
                   ) : (
                     <span>{selectedCreateEmployee.name.charAt(0)}</span>
                   )}
@@ -1054,6 +1184,12 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
         )}
       >
         <form id="attendance-adjust-form" onSubmit={handleSaveAdjustment} className="space-y-4">
+          {(() => {
+            const isHourlyEmployee = adjustingResult?.salaryType === "hourly";
+            const useEmployeeRule = Boolean(adjustForm.employeeOvertimeRuleEnabled ?? configForm?.overtimeRuleEnabled);
+            const disableEmployeeOtFeeInput = isHourlyEmployee && useEmployeeRule;
+            return (
+              <>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <Field label={tAdmin("日期")}><input type="date" max={getDefaultDate()} value={adjustForm.date} onChange={(event) => setAdjustForm((prev) => ({ ...prev, date: event.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500" /></Field>
             <Field label={tAdmin("考勤类型")}>
@@ -1070,8 +1206,47 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
             </Field>
             <Field label={tAdmin("上班时间")}><input type="time" value={adjustForm.inTime || ""} onChange={(event) => setAdjustForm((prev) => ({ ...prev, inTime: event.target.value || null }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500" /></Field>
             <Field label={tAdmin("下班时间")}><input type="time" value={adjustForm.outTime || ""} onChange={(event) => setAdjustForm((prev) => ({ ...prev, outTime: event.target.value || null }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500" /></Field>
+            <Field label={tAdmin("员工加班费（{{currency}}/小时）", { currency: adjustingResult?.currency || "THB" })}>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={adjustForm.employeeOvertimeHourlyFee ?? ""}
+                onChange={(event) => setAdjustForm((prev) => ({ ...prev, employeeOvertimeHourlyFee: event.target.value === "" ? "" : Number(event.target.value) }))}
+                placeholder={disableEmployeeOtFeeInput ? tAdmin("启用倍率后按时薪自动计算") : tAdmin("留空则使用系统默认")}
+                disabled={disableEmployeeOtFeeInput}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+              />
+            </Field>
+            <Field label={tAdmin("员工是否启用倍率规则")}>
+              <label className="flex items-center gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={Boolean(adjustForm.employeeOvertimeRuleEnabled ?? configForm?.overtimeRuleEnabled)}
+                  onChange={(event) => setAdjustForm((prev) => ({
+                    ...prev,
+                    employeeOvertimeRuleEnabled: event.target.checked,
+                    employeeOvertimeHourlyFee: adjustingResult?.salaryType === "hourly" && event.target.checked
+                      ? ""
+                      : prev.employeeOvertimeHourlyFee
+                  }))}
+                  className="h-4 w-4 accent-brand-600"
+                />
+                {Boolean(adjustForm.employeeOvertimeRuleEnabled ?? configForm?.overtimeRuleEnabled)
+                  ? tAdmin("这个员工启用倍率规则")
+                  : tAdmin("这个员工不启用倍率规则")}
+              </label>
+            </Field>
           </div>
           <Field label={tAdmin("调整备注")}><textarea value={adjustForm.note} onChange={(event) => setAdjustForm((prev) => ({ ...prev, note: event.target.value }))} rows={3} className="w-full resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500" /></Field>
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            {disableEmployeeOtFeeInput
+              ? tAdmin("当前员工是时薪制，并且已启用倍率规则，所以加班费会直接按员工时薪计算，不能单独输入。保存后会更新该员工配置，并重算受影响的考勤与薪资。")
+              : tAdmin("这里编辑的是这个员工自己的加班配置，不是当前单条考勤的临时值。保存后会更新该员工的加班费和倍率规则，并重算受影响的考勤与薪资。")}
+          </div>
+              </>
+            );
+          })()}
         </form>
       </Modal>
 
@@ -1097,6 +1272,22 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
               <Field label={tAdmin("休息结束")}><input type="time" value={configForm.breakEnd} onChange={(event) => setConfigForm((prev) => prev ? { ...prev, breakEnd: event.target.value } : prev)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500" /></Field>
               <Field label={tAdmin("标准工时")}><input type="number" min="0" step="0.25" value={configForm.standardHours} onChange={(event) => setConfigForm((prev) => prev ? { ...prev, standardHours: Number(event.target.value) } : prev)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500" /></Field>
               <Field label={tAdmin("加班费标准（{{currency}}/小时）", { currency: configForm.currency || "THB" })}><input type="number" min="0" step="0.01" value={configForm.otHourlyFee} onChange={(event) => setConfigForm((prev) => prev ? { ...prev, otHourlyFee: Number(event.target.value) } : prev)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500" /></Field>
+              <Field label={tAdmin("是否启用加班规则计算")}>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={configForm.overtimeRuleEnabled}
+                      onChange={(event) => setConfigForm((prev) => prev ? { ...prev, overtimeRuleEnabled: event.target.checked } : prev)}
+                      className="h-4 w-4 accent-brand-600"
+                    />
+                    {configForm.overtimeRuleEnabled ? tAdmin("已启用倍率规则") : tAdmin("未启用倍率规则")}
+                  </label>
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+                    {tAdmin("提醒：开启后，时薪员工按正常时薪套工作日 1.5 倍、周末 2 倍、节假日 3 倍；固定薪资员工按加班费基数套同样倍率。")}
+                  </div>
+                </div>
+              </Field>
               <Field label={tAdmin("加班费币种")}>
                 <select value={configForm.currency || "THB"} onChange={(event) => setConfigForm((prev) => prev ? { ...prev, currency: event.target.value as AppConfig["currency"] } : prev)} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500">
                   <option value="THB">{tAdmin("THB - 泰铢")}</option>
@@ -1106,11 +1297,43 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
                 </select>
               </Field>
             </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">{tAdmin("保存后将自动刷新当前月份的考勤结果。加班费默认使用 THB；个人考勤行会按员工薪资币种展示，服务端会把全局规则币种转换到员工币种后再计算。")}</div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+              {tAdmin("保存后将自动刷新当前月份的考勤结果。关闭规则时，加班时间统一按你填写的加班费计算；开启规则后，时薪员工按正常时薪的工作日 1.5 倍、周末 2 倍、节假日 3 倍计算，固定薪资员工按上方加班费基数套用同样倍率。")}
+            </div>
           </form>
         ) : (
           <div className="py-8 text-center text-sm text-slate-500">{tAdmin("正在加载考勤规则配置...")}</div>
         )}
+      </Modal>
+
+      <Modal
+        isOpen={isHolidaySettingsOpen}
+        title={tAdmin("节假日管理")}
+        onClose={() => setIsHolidaySettingsOpen(false)}
+        className="max-w-xl"
+        footer={(
+          <div className="flex justify-end gap-3">
+            <button type="button" onClick={() => setIsHolidaySettingsOpen(false)} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100">{tAdmin("取消")}</button>
+            <button type="submit" form="attendance-holiday-form" disabled={submitting} className="rounded-lg bg-brand-600 px-6 py-2 text-sm text-white transition hover:bg-brand-700 disabled:opacity-60">
+              {submitting ? tAdmin("保存中...") : tAdmin("保存并重算薪资")}
+            </button>
+          </div>
+        )}
+      >
+        <form id="attendance-holiday-form" onSubmit={handleSaveHolidaySettings} className="space-y-4">
+          <Field label={tAdmin("节假日日期")}>
+            <textarea
+              value={holidayDatesText}
+              onChange={(event) => setHolidayDatesText(event.target.value)}
+              rows={8}
+              placeholder={"2026-01-01\n2026-04-13"}
+              className="w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+            />
+          </Field>
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            {tAdmin("请按每行一个 YYYY-MM-DD 填写。保存后会按当前筛选月份重算考勤，并同步重算薪资结果。")}
+          </div>
+        </form>
       </Modal>
     </div>
   );

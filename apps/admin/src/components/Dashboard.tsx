@@ -201,7 +201,11 @@ export function Dashboard({ isActive, onOpenSettings, onNav }: DashboardProps) {
               <RuleRow label={tAdmin("午餐休息折抵")} value={`${config?.dailyBreakMinutes ?? 0} min`} />
               <div className="flex justify-between items-center p-3 bg-indigo-50/50 border border-indigo-100 transition rounded-xl text-xs">
                 <span className="text-indigo-600 font-bold">{tAdmin("加班计算倍率")}</span>
-                <span className="font-extrabold text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded-lg">{config?.overtimeMultiplier ?? 1}x</span>
+                <span className="font-extrabold text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded-lg">
+                  {config?.overtimeRuleEnabled
+                    ? tAdmin("工作日 1.5x / 周末 2x / 节假日 3x")
+                    : tAdmin("统一加班费")}
+                </span>
               </div>
             </div>
           </div>

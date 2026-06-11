@@ -312,6 +312,8 @@ function mapEmployeeRow(row, ruleMap = new Map()) {
     salaryType: row.salary_type,
     hourlyRate: row.hourly_rate === null ? null : Number(row.hourly_rate),
     fixedSalary: row.fixed_salary === null ? null : Number(row.fixed_salary),
+    overtimeHourlyFee: row.overtime_hourly_fee === null || row.overtime_hourly_fee === undefined ? null : Number(row.overtime_hourly_fee),
+    overtimeRuleEnabled: row.overtime_rule_enabled === null || row.overtime_rule_enabled === undefined ? null : Boolean(row.overtime_rule_enabled),
     attendanceBonus: row.attendance_bonus === null || row.attendance_bonus === undefined ? 0 : Number(row.attendance_bonus),
     socialSecurity: row.social_security === null || row.social_security === undefined ? 0 : Number(row.social_security),
     mealAllowance: row.meal_allowance === null || row.meal_allowance === undefined ? 0 : Number(row.meal_allowance),
@@ -320,6 +322,17 @@ function mapEmployeeRow(row, ruleMap = new Map()) {
     photo: row.photo,
     isDeleted: row.is_deleted
   };
+}
+
+function didEmployeePayrollFieldsChange(existingEmployee, payload) {
+  return (
+    String(existingEmployee.join_date || "") !== String(payload.joinDate || "") ||
+    String(existingEmployee.salary_type || "") !== String(payload.salaryType || "") ||
+    normalizeSalaryAmount(existingEmployee.hourly_rate) !== normalizeSalaryAmount(payload.hourlyRate) ||
+    normalizeSalaryAmount(existingEmployee.fixed_salary) !== normalizeSalaryAmount(payload.fixedSalary) ||
+    getNonNegativePayrollAmount(existingEmployee.service_fee_rate) !== getNonNegativePayrollAmount(payload.serviceFeeRate) ||
+    String(existingEmployee.currency || "") !== String(payload.currency || "")
+  );
 }
 
 function mapEmployeeAppAccountRow(row) {
@@ -1150,7 +1163,9 @@ function mapAttendanceRecordRow(row) {
     outTime: row.out_time ? row.out_time.slice(0, 5) : null,
     type: row.type,
     note: row.note || "",
-    source: row.source
+    source: row.source,
+    manualOvertimeHourlyFee: row.manual_overtime_hourly_fee === null || row.manual_overtime_hourly_fee === undefined ? null : Number(row.manual_overtime_hourly_fee),
+    manualOvertimeUseRule: row.manual_overtime_use_rule === null || row.manual_overtime_use_rule === undefined ? null : Boolean(row.manual_overtime_use_rule)
   };
 }
 
@@ -1162,6 +1177,10 @@ function mapAttendanceConfigRow(row) {
     breakEnd: row.break_end ? row.break_end.slice(0, 5) : DEFAULT_ATTENDANCE_CONFIG.break_end,
     standardHours: Number(row.standard_hours ?? DEFAULT_ATTENDANCE_CONFIG.standard_hours),
     otHourlyFee: Number(row.ot_hourly_fee ?? DEFAULT_ATTENDANCE_CONFIG.ot_hourly_fee),
+    overtimeRuleEnabled: Boolean(row.overtime_rule_enabled ?? DEFAULT_ATTENDANCE_CONFIG.overtime_rule_enabled),
+    holidayDates: Array.isArray(row.holiday_dates)
+      ? row.holiday_dates.map((value) => String(value).slice(0, 10))
+      : DEFAULT_ATTENDANCE_CONFIG.holiday_dates,
     currency: row.currency || DEFAULT_ATTENDANCE_CONFIG.currency
   };
 }
@@ -1175,6 +1194,12 @@ function normalizeAttendanceConfigPayload(body = {}) {
     break_end: String(body.breakEnd || DEFAULT_ATTENDANCE_CONFIG.break_end).slice(0, 5),
     standard_hours: Number(body.standardHours ?? DEFAULT_ATTENDANCE_CONFIG.standard_hours),
     ot_hourly_fee: Number(body.otHourlyFee ?? DEFAULT_ATTENDANCE_CONFIG.ot_hourly_fee),
+    overtime_rule_enabled: Boolean(body.overtimeRuleEnabled ?? DEFAULT_ATTENDANCE_CONFIG.overtime_rule_enabled),
+    holiday_dates: Array.isArray(body.holidayDates)
+      ? body.holidayDates
+        .map((value) => String(value || "").trim().slice(0, 10))
+        .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value))
+      : DEFAULT_ATTENDANCE_CONFIG.holiday_dates,
     currency: ["THB", "USD", "MYR", "IDR"].includes(body.currency) ? body.currency : DEFAULT_ATTENDANCE_CONFIG.currency,
     updated_at: new Date().toISOString()
   };
@@ -1785,6 +1810,55 @@ function getAttendanceDateBeforeJoinError(employee, date) {
     return `考勤日期 ${date} 早于员工入职日期 ${joinDate}，不能新增或修改该记录`;
   }
   return null;
+}
+
+function normalizeManualOvertimePayload(body = {}, type = "normal") {
+  if (type !== "overtime") {
+    return {
+      manual_overtime_hourly_fee: null,
+      manual_overtime_use_rule: null
+    };
+  }
+
+  const rawFee = body.manualOvertimeHourlyFee;
+  const manualFee = rawFee === "" || rawFee === null || rawFee === undefined ? null : Number(rawFee);
+  const manualUseRule = body.manualOvertimeUseRule === null || body.manualOvertimeUseRule === undefined
+    ? null
+    : Boolean(body.manualOvertimeUseRule);
+
+  if (manualFee !== null && (!Number.isFinite(manualFee) || manualFee < 0)) {
+    throw new Error("MANUAL_OVERTIME_HOURLY_FEE_INVALID");
+  }
+
+  return {
+    manual_overtime_hourly_fee: manualFee,
+    manual_overtime_use_rule: manualUseRule
+  };
+}
+
+function normalizeEmployeeOvertimeSettingsPayload(body = {}) {
+  const rawFee = body.employeeOvertimeHourlyFee;
+  const overtimeHourlyFee = rawFee === "" || rawFee === null || rawFee === undefined ? null : Number(rawFee);
+  const overtimeRuleEnabled = body.employeeOvertimeRuleEnabled === null || body.employeeOvertimeRuleEnabled === undefined
+    ? null
+    : Boolean(body.employeeOvertimeRuleEnabled);
+
+  if (overtimeHourlyFee !== null && (!Number.isFinite(overtimeHourlyFee) || overtimeHourlyFee < 0)) {
+    throw new Error("EMPLOYEE_OVERTIME_HOURLY_FEE_INVALID");
+  }
+
+  return {
+    overtime_hourly_fee: overtimeHourlyFee,
+    overtime_rule_enabled: overtimeRuleEnabled
+  };
+}
+
+function isMissingEmployeeOvertimeSettingsSchemaError(error) {
+  const message = String(error?.message || error || "");
+  return (
+    message.includes("overtime_hourly_fee")
+    || message.includes("overtime_rule_enabled")
+  );
 }
 
 async function fetchCalculationContext(yearMonth, ownerUserId) {
@@ -2624,7 +2698,7 @@ function normalizeEmployeePayload(body, authUser) {
     serviceFeeRate: body.serviceFeeRate === null || body.serviceFeeRate === "" || body.serviceFeeRate === undefined ? 0 : Number(body.serviceFeeRate),
     salaryEffectiveStartDate: body.salaryEffectiveStartDate || body.joinDate,
     currency: body.currency,
-    photo: body.photo || null,
+    photo: Object.prototype.hasOwnProperty.call(body || {}, "photo") ? (body.photo || null) : undefined,
     createdBy: authUser?.email || null
   };
 }
@@ -2711,9 +2785,10 @@ async function createEmployeeRecord(payload, authUser) {
 
 async function updateEmployeeRecord(employeeId, payload, authUser) {
   const ownerUserId = authUser.id;
+  const requestStartedAt = Date.now();
   const { data: existingEmployee, error: existingError } = await supabase
     .from("employees")
-    .select("*")
+    .select("id, owner_user_id, attendance_rule_id, join_date, salary_type, hourly_rate, fixed_salary, service_fee_rate, currency")
     .eq("owner_user_id", ownerUserId)
     .eq("id", employeeId)
     .single();
@@ -2724,6 +2799,7 @@ async function updateEmployeeRecord(employeeId, payload, authUser) {
 
   // 员工 v2 不再编辑考勤规则；编辑保存时沿用已有兼容规则，避免重新暴露旧规则模型，同时修复保存 payload 引用未定义规则 ID 的问题。
   const compatibilityRuleId = existingEmployee.attendance_rule_id || await getEmployeeCompatibilityAttendanceRuleId(ownerUserId);
+  const shouldRefreshSalaryProfile = didEmployeePayrollFieldsChange(existingEmployee, payload);
 
   const updatePayload = {
     name: payload.name,
@@ -2743,16 +2819,18 @@ async function updateEmployeeRecord(employeeId, payload, authUser) {
     social_security: payload.socialSecurity,
     meal_allowance: payload.mealAllowance,
     service_fee_rate: payload.serviceFeeRate,
-    currency: payload.currency,
-    photo: payload.photo
+    currency: payload.currency
   };
+  if (payload.photo !== undefined) {
+    updatePayload.photo = payload.photo;
+  }
 
   const { data: employeeRow, error: updateError } = await supabase
     .from("employees")
     .update(updatePayload)
     .eq("owner_user_id", ownerUserId)
     .eq("id", employeeId)
-    .select("*")
+    .select("id, employee_no, name, nickname, gender, country, phone, role, dept, join_date, status, attendance_rule_id, salary_type, hourly_rate, fixed_salary, attendance_bonus, social_security, meal_allowance, service_fee_rate, currency, photo, is_deleted")
     .single();
 
   if (updateError) {
@@ -2760,11 +2838,22 @@ async function updateEmployeeRecord(employeeId, payload, authUser) {
   }
 
   // 员工 v2 保存不再改变考勤规则关系；旧 attendance_rule_id 仅由创建时的后端兼容值维护。
-
-  await ensureSalaryProfileForEmployee(employeeRow, ownerUserId, payload.salaryEffectiveStartDate || payload.joinDate);
+  if (shouldRefreshSalaryProfile) {
+    await ensureSalaryProfileForEmployee(employeeRow, ownerUserId, payload.salaryEffectiveStartDate || payload.joinDate);
+  }
   clearEmployeeCaches();
   clearDashboardCache(ownerUserId);
   clearPayrollResultsCache(ownerUserId);
+  const totalDurationMs = Date.now() - requestStartedAt;
+  if (totalDurationMs >= 300) {
+    console.info("[admin/employees/update] slow request", {
+      ownerUserId,
+      employeeId: Number(employeeId),
+      shouldRefreshSalaryProfile,
+      hasPhoto: Boolean(payload.photo),
+      totalDurationMs
+    });
+  }
   return employeeRow;
 }
 
@@ -3686,8 +3775,10 @@ app.get("/api/admin/dashboard", async (req, res) => {
       config: {
         standardHours: Number(config.standardHours || DEFAULT_ATTENDANCE_CONFIG.standard_hours),
         dailyBreakMinutes,
-        overtimeMultiplier: 1,
+        overtimeMultiplier: config.overtimeRuleEnabled ? 1.5 : 1,
         otHourlyFee: Number(config.otHourlyFee || 0),
+        overtimeRuleEnabled: Boolean(config.overtimeRuleEnabled),
+        holidayDates: Array.isArray(config.holidayDates) ? config.holidayDates : [],
         currency: employees[0]?.currency || "THB"
       },
       employeeStats,
@@ -4296,6 +4387,8 @@ app.post("/api/admin/attendance-records", async (req, res) => {
       return res.status(400).json({ error: joinDateError });
     }
 
+    const manualOvertimePayload = normalizeManualOvertimePayload(req.body, req.body.type || "normal");
+    const employeeOvertimeSettingsPayload = normalizeEmployeeOvertimeSettingsPayload(req.body);
     const payload = {
       owner_user_id: ownerUserId,
       employee_id: employeeId,
@@ -4305,8 +4398,22 @@ app.post("/api/admin/attendance-records", async (req, res) => {
       out_time: req.body.outTime || null,
       note: req.body.note || "",
       source: "manual",
+      ...manualOvertimePayload,
       updated_at: new Date().toISOString()
     };
+
+    const { error: employeeSettingsError } = await supabase
+      .from("employees")
+      .update({
+        ...employeeOvertimeSettingsPayload,
+        updated_at: new Date().toISOString()
+      })
+      .eq("owner_user_id", ownerUserId)
+      .eq("id", employeeId);
+
+    if (employeeSettingsError) {
+      throw employeeSettingsError;
+    }
 
     const { data: existingRecord, error: existingError } = await supabase
       .from("attendance_records")
@@ -4354,6 +4461,17 @@ app.post("/api/admin/attendance-records", async (req, res) => {
       message: "考勤记录已添加，后台正在继续计算"
     });
   } catch (error) {
+    if (isMissingEmployeeOvertimeSettingsSchemaError(error)) {
+      return res.status(500).json({
+        error: "员工级加班配置字段还未同步到数据库，请先执行迁移 20260610133000_add_employee_overtime_settings.sql"
+      });
+    }
+    if (error?.message === "EMPLOYEE_OVERTIME_HOURLY_FEE_INVALID") {
+      return res.status(400).json({ error: "员工加班费必须大于等于 0" });
+    }
+    if (error?.message === "MANUAL_OVERTIME_HOURLY_FEE_INVALID") {
+      return res.status(400).json({ error: "人工加班费必须大于等于 0" });
+    }
     res.status(500).json({ error: error.message || "补卡记录保存失败" });
   }
 });
@@ -4390,6 +4508,8 @@ app.put("/api/admin/attendance-records/:id", async (req, res) => {
       return res.status(404).json({ error: "员工不存在" });
     }
 
+    const manualOvertimePayload = normalizeManualOvertimePayload(req.body, req.body.type);
+    const employeeOvertimeSettingsPayload = normalizeEmployeeOvertimeSettingsPayload(req.body);
     const previousDate = toDateKey(existingRecord.date);
     const payload = {
       date: req.body.date,
@@ -4398,8 +4518,22 @@ app.put("/api/admin/attendance-records/:id", async (req, res) => {
       out_time: req.body.outTime || null,
       note: req.body.note || "",
       source: "manual",
+      ...manualOvertimePayload,
       updated_at: new Date().toISOString()
     };
+
+    const { error: employeeSettingsError } = await supabase
+      .from("employees")
+      .update({
+        ...employeeOvertimeSettingsPayload,
+        updated_at: new Date().toISOString()
+      })
+      .eq("owner_user_id", ownerUserId)
+      .eq("id", Number(existingRecord.employee_id));
+
+    if (employeeSettingsError) {
+      throw employeeSettingsError;
+    }
 
     const nextDate = toDateKey(payload.date || previousDate);
     if (isFutureDateKey(nextDate)) {
@@ -4438,6 +4572,17 @@ app.put("/api/admin/attendance-records/:id", async (req, res) => {
     clearPayrollResultsCache(ownerUserId);
     res.json(result);
   } catch (error) {
+    if (isMissingEmployeeOvertimeSettingsSchemaError(error)) {
+      return res.status(500).json({
+        error: "员工级加班配置字段还未同步到数据库，请先执行迁移 20260610133000_add_employee_overtime_settings.sql"
+      });
+    }
+    if (error?.message === "EMPLOYEE_OVERTIME_HOURLY_FEE_INVALID") {
+      return res.status(400).json({ error: "员工加班费必须大于等于 0" });
+    }
+    if (error?.message === "MANUAL_OVERTIME_HOURLY_FEE_INVALID") {
+      return res.status(400).json({ error: "人工加班费必须大于等于 0" });
+    }
     res.status(500).json({ error: error.message || "考勤记录调整失败" });
   }
 });

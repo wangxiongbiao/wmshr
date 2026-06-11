@@ -31,6 +31,8 @@ export interface AppConfig {
   breakEnd: string;
   standardHours: number;
   otHourlyFee: number;
+  overtimeRuleEnabled: boolean;
+  holidayDates: string[];
   overtimeMultiplier: number;
   taxRate: number;
   dailyBreakMinutes: number;
@@ -52,6 +54,8 @@ export interface Employee {
   salaryType: SalaryType;
   hourlyRate: number | null;
   fixedSalary: number | null;
+  overtimeHourlyFee?: number | null;
+  overtimeRuleEnabled?: boolean | null;
   attendanceBonus: number;
   socialSecurity: number;
   mealAllowance: number;
@@ -220,7 +224,7 @@ export interface EmployeeUpsertPayload {
   serviceFeeRate: number;
   salaryEffectiveStartDate: string;
   currency: CurrencyCode;
-  photo: string | null;
+  photo?: string | null;
 }
 
 export interface AttendanceRecord {
@@ -232,6 +236,8 @@ export interface AttendanceRecord {
   type: AttendanceType;
   note: string;
   source: AttendanceSource;
+  manualOvertimeHourlyFee?: number | null;
+  manualOvertimeUseRule?: boolean | null;
 }
 
 export interface AttendanceCalculationResult {
@@ -492,6 +498,8 @@ export interface AttendanceRecordUpdatePayload {
   inTime: string | null;
   outTime: string | null;
   note: string;
+  employeeOvertimeHourlyFee?: number | null;
+  employeeOvertimeRuleEnabled?: boolean | null;
 }
 
 export interface AttendanceRecordCreatePayload extends AttendanceRecordUpdatePayload {
@@ -525,6 +533,8 @@ export interface DashboardConfig {
   dailyBreakMinutes: number;
   overtimeMultiplier: number;
   otHourlyFee: number;
+  overtimeRuleEnabled?: boolean;
+  holidayDates?: string[];
   currency: CurrencyCode;
 }
 

@@ -12,6 +12,8 @@ export const INITIAL_CONFIG: AppConfig = {
   breakEnd: "13:00",
   standardHours: 8,
   otHourlyFee: 50,
+  overtimeRuleEnabled: false,
+  holidayDates: [],
   overtimeMultiplier: 1.5,
   taxRate: 0.05,
   dailyBreakMinutes: 60,
