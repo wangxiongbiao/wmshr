@@ -886,6 +886,18 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
               <RefreshCw className="w-4 h-4" />{submitting ? tAdmin("更新考勤中...") : tAdmin("更新考勤")}</button>
             <button
               type="button"
+              onClick={() => {
+                setLastLoadedAt(0);
+                void loadData();
+              }}
+              disabled={loading}
+              className="bg-white border border-slate-300 text-slate-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-slate-50 transition disabled:opacity-60 flex items-center gap-1.5"
+              title={tAdmin("按当前筛选条件刷新列表")}
+            >
+              <RefreshCw className="w-4 h-4" />{loading ? tAdmin("刷新中...") : tAdmin("刷新")}
+            </button>
+            <button
+              type="button"
               onClick={handleOpenCreate}
               className="bg-brand-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-brand-700 transition flex items-center gap-1.5"
               title={tAdmin("选择日期、员工、上下班时间新增一条考勤记录")}

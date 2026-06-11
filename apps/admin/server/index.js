@@ -314,6 +314,7 @@ function mapEmployeeRow(row, ruleMap = new Map()) {
     fixedSalary: row.fixed_salary === null ? null : Number(row.fixed_salary),
     overtimeHourlyFee: row.overtime_hourly_fee === null || row.overtime_hourly_fee === undefined ? null : Number(row.overtime_hourly_fee),
     overtimeRuleEnabled: row.overtime_rule_enabled === null || row.overtime_rule_enabled === undefined ? null : Boolean(row.overtime_rule_enabled),
+    isDispatchPersonnel: Boolean(row.is_dispatch_personnel),
     attendanceBonus: row.attendance_bonus === null || row.attendance_bonus === undefined ? 0 : Number(row.attendance_bonus),
     socialSecurity: row.social_security === null || row.social_security === undefined ? 0 : Number(row.social_security),
     mealAllowance: row.meal_allowance === null || row.meal_allowance === undefined ? 0 : Number(row.meal_allowance),
@@ -1372,6 +1373,7 @@ const PAYROLL_LIST_EMPLOYEE_COLUMNS = [
   "salary_type",
   "hourly_rate",
   "fixed_salary",
+  "is_dispatch_personnel",
   "currency",
   "join_date",
   "attendance_bonus",
@@ -2382,17 +2384,15 @@ function getNonNegativePayrollAmount(value) {
   return Number.isFinite(amount) && amount > 0 ? amount : 0;
 }
 
-const MYANMAR_WORKER_DAILY_SOCIAL_SECURITY_THB = 20;
-
 function calculateEmployeeSocialSecurity(employee, dailyCalculations) {
-  if (employee.country === "MM") {
-    // 缅甸外劳社保按当月有效出勤天数扣除：薪资生成前已刷新 dailyCalculations，所以这里用 valid_hours > 0 作为计天口径。
-    // 如果以后要调整每日金额，只改 MYANMAR_WORKER_DAILY_SOCIAL_SECURITY_THB，不要在薪资公式里散落硬编码。
+  if (employee.is_dispatch_personnel) {
+    // 派遣人员社保按“员工档案里输入的每日社保金额 × 当月有效出勤天数”扣除。
+    // 薪资生成前已刷新 dailyCalculations，所以这里用 valid_hours > 0 作为计天口径。
     const workedDays = dailyCalculations.filter((row) => Number(row.valid_hours || 0) > 0).length;
-    return roundToTwo(workedDays * MYANMAR_WORKER_DAILY_SOCIAL_SECURITY_THB);
+    return roundToTwo(workedDays * getNonNegativePayrollAmount(employee.social_security));
   }
 
-  // 泰国本地员工社保按员工档案的月固定金额扣除；其他国家暂沿用固定金额，避免误套缅甸外劳规则。
+  // 非派遣人员按员工档案的月固定社保金额扣除。
   return getNonNegativePayrollAmount(employee.social_security);
 }
 
@@ -2692,6 +2692,7 @@ function normalizeEmployeePayload(body, authUser) {
     salaryType: body.salaryType,
     hourlyRate: body.hourlyRate === null || body.hourlyRate === "" ? null : Number(body.hourlyRate),
     fixedSalary: body.fixedSalary === null || body.fixedSalary === "" ? null : Number(body.fixedSalary),
+    isDispatchPersonnel: Boolean(body.isDispatchPersonnel),
     attendanceBonus: body.attendanceBonus === null || body.attendanceBonus === "" || body.attendanceBonus === undefined ? 0 : Number(body.attendanceBonus),
     socialSecurity: body.socialSecurity === null || body.socialSecurity === "" || body.socialSecurity === undefined ? 0 : Number(body.socialSecurity),
     mealAllowance: body.mealAllowance === null || body.mealAllowance === "" || body.mealAllowance === undefined ? 0 : Number(body.mealAllowance),
@@ -2754,6 +2755,7 @@ async function createEmployeeRecord(payload, authUser) {
     salary_type: payload.salaryType,
     hourly_rate: payload.hourlyRate,
     fixed_salary: payload.fixedSalary,
+    is_dispatch_personnel: payload.isDispatchPersonnel,
     attendance_bonus: payload.attendanceBonus,
     social_security: payload.socialSecurity,
     meal_allowance: payload.mealAllowance,
@@ -2788,7 +2790,7 @@ async function updateEmployeeRecord(employeeId, payload, authUser) {
   const requestStartedAt = Date.now();
   const { data: existingEmployee, error: existingError } = await supabase
     .from("employees")
-    .select("id, owner_user_id, attendance_rule_id, join_date, salary_type, hourly_rate, fixed_salary, service_fee_rate, currency")
+    .select("id, owner_user_id, attendance_rule_id, join_date, salary_type, hourly_rate, fixed_salary, service_fee_rate, currency, is_dispatch_personnel")
     .eq("owner_user_id", ownerUserId)
     .eq("id", employeeId)
     .single();
@@ -2815,6 +2817,7 @@ async function updateEmployeeRecord(employeeId, payload, authUser) {
     salary_type: payload.salaryType,
     hourly_rate: payload.hourlyRate,
     fixed_salary: payload.fixedSalary,
+    is_dispatch_personnel: payload.isDispatchPersonnel,
     attendance_bonus: payload.attendanceBonus,
     social_security: payload.socialSecurity,
     meal_allowance: payload.mealAllowance,
@@ -2830,7 +2833,7 @@ async function updateEmployeeRecord(employeeId, payload, authUser) {
     .update(updatePayload)
     .eq("owner_user_id", ownerUserId)
     .eq("id", employeeId)
-    .select("id, employee_no, name, nickname, gender, country, phone, role, dept, join_date, status, attendance_rule_id, salary_type, hourly_rate, fixed_salary, attendance_bonus, social_security, meal_allowance, service_fee_rate, currency, photo, is_deleted")
+    .select("id, employee_no, name, nickname, gender, country, phone, role, dept, join_date, status, attendance_rule_id, salary_type, hourly_rate, fixed_salary, is_dispatch_personnel, attendance_bonus, social_security, meal_allowance, service_fee_rate, currency, photo, is_deleted")
     .single();
 
   if (updateError) {
@@ -5900,6 +5903,7 @@ app.get("/api/admin/employees", async (req, res) => {
       "salary_type",
       "hourly_rate",
       "fixed_salary",
+      "is_dispatch_personnel",
       "attendance_bonus",
       "social_security",
       "meal_allowance",

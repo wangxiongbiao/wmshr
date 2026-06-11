@@ -654,7 +654,7 @@ export function PayrollTable({ isActive }: PayrollTableProps) {
   const payslipResult = payslipDetail?.result || null;
   const isPreviewPayslip = Boolean(payslipResult && payslipResult.id <= 0);
   const payslipEmployee = payslipDetail?.employee || null;
-  const isMyanmarPayslipEmployee = payslipEmployee?.country === "MM";
+  const isDispatchPayslipEmployee = Boolean(payslipEmployee?.isDispatchPersonnel);
   const payslipEffectiveAttendanceDays = payslipResult?.effectiveAttendanceDays || 0;
   const payslipMealAllowanceDayUnits = payslipResult?.mealAllowanceDayUnits || 0;
   const payslipTaxOrDeduction = payslipResult ? Math.max(0, payslipResult.totalDeduction - payslipResult.socialSecurityAmount) : 0;
@@ -1197,9 +1197,9 @@ export function PayrollTable({ isActive }: PayrollTableProps) {
                   <span className="min-w-0 text-slate-500">{tAdmin("社保扣款")}</span>
                   <span className="shrink-0 text-red-500 text-right">- {formatCurrency(payslipResult.socialSecurityAmount, payslipResult.currency)}</span>
                 </div>
-                {isMyanmarPayslipEmployee ? (
+                {isDispatchPayslipEmployee ? (
                   <div className="rounded-md border border-amber-100 bg-amber-50 px-2 py-1.5 text-[11px] leading-5 text-amber-700">
-                    {tAdmin("缅甸员工社保按本月有效出勤天数计算，不读取员工档案中的固定社保金。")}
+                    {tAdmin("派遣人员社保按本月有效出勤天数计算，员工档案中的社保金按每日金额使用。")}
                   </div>
                 ) : null}
                 {payslipDeductionItems.map((item) => (

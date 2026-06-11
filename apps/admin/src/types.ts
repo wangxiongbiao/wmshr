@@ -56,6 +56,7 @@ export interface Employee {
   fixedSalary: number | null;
   overtimeHourlyFee?: number | null;
   overtimeRuleEnabled?: boolean | null;
+  isDispatchPersonnel?: boolean;
   attendanceBonus: number;
   socialSecurity: number;
   mealAllowance: number;
@@ -218,6 +219,7 @@ export interface EmployeeUpsertPayload {
   salaryType: SalaryType;
   hourlyRate: number | null;
   fixedSalary: number | null;
+  isDispatchPersonnel: boolean;
   attendanceBonus: number;
   socialSecurity: number;
   mealAllowance: number;

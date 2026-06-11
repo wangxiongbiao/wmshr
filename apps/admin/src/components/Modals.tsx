@@ -55,6 +55,7 @@ interface EmployeeFormState {
   status: EmployeeStatus;
   role: string;
   dept: string;
+  isDispatchPersonnel: boolean;
   hourlyRate?: number;
   baseMonthlyWage?: number;
   attendanceBonus?: number;
@@ -76,6 +77,7 @@ const DEFAULT_EMPLOYEE_FORM: EmployeeFormState = {
   status: "active",
   role: tAdmin("拣货员"),
   dept: "",
+  isDispatchPersonnel: false,
   hourlyRate: undefined,
   baseMonthlyWage: undefined,
   attendanceBonus: 0,
@@ -96,6 +98,7 @@ function normalizeEmployeeToForm(employee: Employee): EmployeeFormState {
     status: employee.status,
     role: employee.role,
     dept: employee.dept,
+    isDispatchPersonnel: employee.isDispatchPersonnel ?? false,
     hourlyRate: employee.salaryType === "hourly" ? employee.hourlyRate ?? undefined : undefined,
     baseMonthlyWage: employee.salaryType === "fixed" ? employee.fixedSalary ?? undefined : undefined,
     attendanceBonus: employee.attendanceBonus,
@@ -182,8 +185,6 @@ export function EmployeeModal({
 }: EmployeeModalProps) {
   const [formData, setFormData] = useState<EmployeeFormState>(DEFAULT_EMPLOYEE_FORM);
   const [error, setError] = useState("");
-  const isMyanmarEmployee = formData.country === "MM";
-
   useEffect(() => {
     if (!isOpen) {
       return;
@@ -210,8 +211,7 @@ export function EmployeeModal({
       if (name === "country") {
         return {
           ...next,
-          country: value as Employee["country"],
-          socialSecurity: value === "MM" ? 0 : next.socialSecurity
+          country: value as Employee["country"]
         };
       }
       if (name === "hourlyRate" || name === "baseMonthlyWage" || name === "attendanceBonus" || name === "socialSecurity" || name === "mealAllowance" || name === "serviceFeeRate") {
@@ -279,12 +279,13 @@ export function EmployeeModal({
       dept: formData.dept.trim(),
       joinDate: formData.joinDate,
       status: formData.status,
+      isDispatchPersonnel: formData.isDispatchPersonnel,
       salaryType,
       hourlyRate: salaryType === "hourly" ? formData.hourlyRate ?? null : null,
       fixedSalary: salaryType === "fixed" ? formData.baseMonthlyWage ?? null : null,
       // 全勤奖、社保金、餐补和服务费比例都是员工固定档案字段：前端允许空输入，但保存时统一归零，避免后端考勤/薪资计算拿到 undefined。
       attendanceBonus: formData.attendanceBonus ?? 0,
-      socialSecurity: isMyanmarEmployee ? 0 : (formData.socialSecurity ?? 0),
+      socialSecurity: formData.socialSecurity ?? 0,
       mealAllowance: formData.mealAllowance ?? 0,
       serviceFeeRate: formData.serviceFeeRate ?? 0,
       salaryEffectiveStartDate: formData.joinDate,
@@ -375,6 +376,9 @@ export function EmployeeModal({
           </div>
         </div>
         <div className="grid grid-cols-2 gap-4 border-t border-slate-100 pt-4">
+          <div className="col-span-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
+            {tAdmin("提醒：是否派遣人员、时薪、基础工资、全勤奖、社保金、餐补、服务费比例这些字段都会影响薪资核算。保存后不会马上生效，需要重新执行薪资核算，系统处理也需要一点时间。")}
+          </div>
           <div>
             <FieldLabel>{tAdmin("职位")}</FieldLabel>
             <select name="role" value={formData.role} onChange={handleChange} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm bg-white">
@@ -384,6 +388,19 @@ export function EmployeeModal({
           <div>
             <FieldLabel>{tAdmin("所属区域")}</FieldLabel>
             <input type="text" name="dept" value={formData.dept} onChange={handleChange} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" placeholder={tAdmin("如：A区-入库")} />
+          </div>
+          <div>
+            <FieldLabel>{tAdmin("是否派遣人员")}</FieldLabel>
+            <label className="flex items-center gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                name="isDispatchPersonnel"
+                checked={formData.isDispatchPersonnel}
+                onChange={(event) => setFormData((prev) => ({ ...prev, isDispatchPersonnel: event.target.checked }))}
+                className="h-4 w-4 accent-brand-600"
+              />
+              {formData.isDispatchPersonnel ? tAdmin("是派遣人员") : tAdmin("不是派遣人员")}
+            </label>
           </div>
           <div>
             <FieldLabel>{tAdmin("时薪 (不输则根据基础薪资折算)")}</FieldLabel>
@@ -406,18 +423,12 @@ export function EmployeeModal({
               min="0"
               value={formData.socialSecurity ?? ""}
               onChange={handleChange}
-              disabled={isMyanmarEmployee}
-              className={cn(
-                "w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm",
-                isMyanmarEmployee && "cursor-not-allowed bg-slate-100 text-slate-400"
-              )}
-              placeholder={isMyanmarEmployee ? tAdmin("缅甸员工不在这里设置社保金") : tAdmin("如: 800")}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm"
+              placeholder={tAdmin("如: 800")}
             />
-            {isMyanmarEmployee ? (
-              <p className="mt-1 text-xs leading-5 text-amber-600">
-                {tAdmin("缅甸员工社保按有效出勤天数自动计算，这里不可手动输入。")}
-              </p>
-            ) : null}
+            <p className="mt-1 text-xs leading-5 text-amber-600">
+              {tAdmin("派遣人员会按考勤天数计算社保，且这里输入的是每日社保金额；非派遣人员按这里输入的月固定社保金计算。")}
+            </p>
           </div>
           <div>
             <FieldLabel>{tAdmin("餐补费用")}</FieldLabel>
