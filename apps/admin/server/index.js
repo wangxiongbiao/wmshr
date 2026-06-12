@@ -3343,19 +3343,8 @@ function normalizeMobileTime(value, fallbackTime = getBangkokTimeKey()) {
 }
 
 function buildMobileAttendanceNote({ action, locationName, latitude, longitude, accuracy, description, clientTime, clientTimeZone, clientTimezoneOffsetMinutes, serverTime }) {
-  const parts = [
-    `员工端${action === "check_in" ? "上班" : "下班"}打卡`,
-    locationName ? `位置：${locationName}` : null,
-    Number.isFinite(latitude) && Number.isFinite(longitude) ? `坐标：${latitude},${longitude}` : null,
-    Number.isFinite(accuracy) ? `精度：${accuracy}m` : null,
-    description ? `说明：${description}` : null,
-    clientTime ? `客户端时间：${clientTime}` : null,
-    clientTimeZone ? `客户端时区：${clientTimeZone}` : null,
-    Number.isFinite(clientTimezoneOffsetMinutes) ? `客户端时区偏移：${clientTimezoneOffsetMinutes}` : null,
-    serverTime ? `服务端入账时间：${serverTime}` : null
-  ].filter(Boolean);
-  // 当前 attendance_records 表没有独立定位/时区列；移动端定位、客户端时区和服务端入账时间先写入 note，保持 Admin 现有考勤计算和展示链路不被破坏。
-  return parts.join("；");
+  // 移动端打卡时间已经由 in_time/out_time 单独保存；note 只保留打卡位置，避免继续混入坐标、精度、客户端时间等无关展示字段。
+  return locationName ? `位置：${locationName}` : "";
 }
 
 function extractMobileAttendanceLocationName(note) {
@@ -3366,7 +3355,7 @@ function extractMobileAttendanceLocationName(note) {
 
   const matchedLocation = rawNote.match(/(?:^|；)位置：([^；]+)/);
   if (matchedLocation?.[1]) {
-    return matchedLocation[1].trim();
+    return `位置：${matchedLocation[1].trim()}`;
   }
 
   return rawNote;

@@ -100,8 +100,6 @@ export function CheckInCard({currentTime, currentDate, status, onCheckIn, phase 
           locationName={gpsText}
           onPress={() => toggleExpanded('check_in')}
           showDetails={expandedKey === 'check_in'}
-          timeValue={status.checkInTime ?? '--:--'}
-          title={t('上班打卡')}
         />
         <View style={styles.flowItemStatic}>
           <View style={[styles.flowIcon, isCheckedIn && !isCheckedOut && styles.flowIconDone]}>
@@ -116,14 +114,12 @@ export function CheckInCard({currentTime, currentDate, status, onCheckIn, phase 
           locationName={gpsText}
           onPress={() => toggleExpanded('check_out')}
           showDetails={expandedKey === 'check_out'}
-          timeValue={status.checkOutTime ?? '--:--'}
-          title={t('下班打卡')}
         />
       </View>
 
       <View style={styles.locationRow}>
         <Ionicons name="location-outline" size={18} color={colors.primary} />
-        <Text style={styles.locationText}>{t('位置：{{location}}', {location: gpsText})}</Text>
+        <Text style={styles.locationText}>{gpsText}</Text>
       </View>
 
       <Pressable disabled={isDisabled} style={({pressed}) => [styles.primaryButton, isDisabled && styles.buttonDisabled, pressed && styles.buttonPressed]} onPress={onCheckIn}>
@@ -150,8 +146,6 @@ function FlowStepRow({
   locationName,
   onPress,
   showDetails,
-  timeValue,
-  title,
 }: {
   complete: boolean;
   expanded: boolean;
@@ -159,8 +153,6 @@ function FlowStepRow({
   locationName: string;
   onPress: () => void;
   showDetails: boolean;
-  timeValue: string;
-  title: string;
 }) {
   return (
     <Pressable style={({pressed}) => [styles.flowRowPressable, pressed && styles.flowRowPressed]} onPress={onPress}>
@@ -175,7 +167,7 @@ function FlowStepRow({
       </View>
       {showDetails ? (
         <View style={styles.flowDetails}>
-          <Text style={styles.flowDetailText}>打卡位置：{locationName}</Text>
+          <Text style={styles.flowDetailText}>{locationName}</Text>
         </View>
       ) : null}
     </Pressable>
