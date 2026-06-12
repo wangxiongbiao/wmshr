@@ -3358,6 +3358,20 @@ function buildMobileAttendanceNote({ action, locationName, latitude, longitude, 
   return parts.join("；");
 }
 
+function extractMobileAttendanceLocationName(note) {
+  const rawNote = String(note || "").trim();
+  if (!rawNote) {
+    return null;
+  }
+
+  const matchedLocation = rawNote.match(/(?:^|；)位置：([^；]+)/);
+  if (matchedLocation?.[1]) {
+    return matchedLocation[1].trim();
+  }
+
+  return rawNote;
+}
+
 function mapMobileAttendanceStatus(record, config, date) {
   const checkInTime = record?.in_time ? String(record.in_time).slice(0, 5) : null;
   const checkOutTime = record?.out_time ? String(record.out_time).slice(0, 5) : null;
@@ -3367,7 +3381,7 @@ function mapMobileAttendanceStatus(record, config, date) {
     status,
     checkInTime,
     checkOutTime,
-    locationName: record?.note || null,
+    locationName: extractMobileAttendanceLocationName(record?.note),
     locationAccuracy: null,
     canCheckIn: status === "not_checked_in",
     canCheckOut: status === "checked_in",

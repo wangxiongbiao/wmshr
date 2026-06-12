@@ -1,10 +1,9 @@
-import React from 'react';
+import React, {useState} from 'react';
 import {Ionicons} from '@expo/vector-icons';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {useTranslation} from 'react-i18next';
 import {TodayAttendanceStatus} from '../../attendance/types';
 import {colors} from '../../../shared/constants/colors';
-import {sharedStyles} from '../../../shared/constants/styles';
 
 export type CheckInPhase = 'idle' | 'requesting_permission' | 'locating' | 'reverse_geocoding' | 'submitting' | 'success' | 'failed';
 
@@ -29,16 +28,6 @@ function getButtonText(status: TodayAttendanceStatus, phase: CheckInPhase, t: (v
   if (status.status === 'not_checked_in') return t('上班打卡');
   if (status.status === 'checked_in') return t('下班打卡');
   return t('今日已完成');
-}
-
-function getFlowSteps(status: TodayAttendanceStatus, t: (value: string) => string) {
-  const isCheckedIn = status.status === 'checked_in' || status.status === 'checked_out';
-  const isCheckedOut = status.status === 'checked_out';
-  return [
-    {label: t('上班打卡'), complete: isCheckedIn},
-    {label: t('工作中'), complete: isCheckedIn && !isCheckedOut},
-    {label: t('下班打卡'), complete: isCheckedOut},
-  ];
 }
 
 function getActionMeta(status: TodayAttendanceStatus, phase: CheckInPhase, t: (value: string) => string) {
@@ -67,9 +56,16 @@ export function CheckInCard({currentTime, currentDate, status, onCheckIn, phase 
   const { t } = useTranslation('app');
   const buttonText = getButtonText(status, phase, t);
   const actionMeta = getActionMeta(status, phase, t);
-  const flowSteps = getFlowSteps(status, t);
   const gpsText = status.locationName ?? t('未知地点');
   const isDisabled = disabled || status.status === 'checked_out';
+  const [expandedKey, setExpandedKey] = useState<'check_in' | 'check_out' | null>(null);
+  const isCheckedIn = status.status === 'checked_in' || status.status === 'checked_out';
+  const isCheckedOut = status.status === 'checked_out';
+  const checkInLabel = status.checkInTime ? `${t('上班打卡')} ${status.checkInTime}` : t('上班打卡');
+  const checkOutLabel = status.checkOutTime ? `${t('下班打卡')} ${status.checkOutTime}` : t('下班打卡');
+  const toggleExpanded = (key: 'check_in' | 'check_out') => {
+    setExpandedKey(current => current === key ? null : key);
+  };
 
   return (
     <View style={styles.clockCard}>
@@ -97,19 +93,37 @@ export function CheckInCard({currentTime, currentDate, status, onCheckIn, phase 
       </View>
 
       <View style={styles.flowCard}>
-        {flowSteps.map(step => (
-          <View key={step.label} style={styles.flowItem}>
-            <View style={[styles.flowIcon, step.complete && styles.flowIconDone]}>
-              <Ionicons name={step.complete ? 'checkmark' : 'ellipse-outline'} size={14} color={step.complete ? colors.white : colors.primary} />
-            </View>
-            <Text style={[styles.flowLabel, step.complete && styles.flowLabelDone]}>{step.label}</Text>
+        <FlowStepRow
+          complete={isCheckedIn}
+          expanded={expandedKey === 'check_in'}
+          label={checkInLabel}
+          locationName={gpsText}
+          onPress={() => toggleExpanded('check_in')}
+          showDetails={expandedKey === 'check_in'}
+          timeValue={status.checkInTime ?? '--:--'}
+          title={t('上班打卡')}
+        />
+        <View style={styles.flowItemStatic}>
+          <View style={[styles.flowIcon, isCheckedIn && !isCheckedOut && styles.flowIconDone]}>
+            <Ionicons name={isCheckedIn && !isCheckedOut ? 'checkmark' : 'ellipse-outline'} size={14} color={isCheckedIn && !isCheckedOut ? colors.white : colors.primary} />
           </View>
-        ))}
+          <Text style={[styles.flowLabel, isCheckedIn && !isCheckedOut && styles.flowLabelDone]}>{t('工作中')}</Text>
+        </View>
+        <FlowStepRow
+          complete={isCheckedOut}
+          expanded={expandedKey === 'check_out'}
+          label={checkOutLabel}
+          locationName={gpsText}
+          onPress={() => toggleExpanded('check_out')}
+          showDetails={expandedKey === 'check_out'}
+          timeValue={status.checkOutTime ?? '--:--'}
+          title={t('下班打卡')}
+        />
       </View>
 
       <View style={styles.locationRow}>
         <Ionicons name="location-outline" size={18} color={colors.primary} />
-        <Text style={styles.locationText}>{gpsText}</Text>
+        <Text style={styles.locationText}>{t('位置：{{location}}', {location: gpsText})}</Text>
       </View>
 
       <Pressable disabled={isDisabled} style={({pressed}) => [styles.primaryButton, isDisabled && styles.buttonDisabled, pressed && styles.buttonPressed]} onPress={onCheckIn}>
@@ -126,6 +140,45 @@ function TimeBox({label, value, active}: {label: string; value: string; active: 
       <Text style={styles.timeLabel}>{label}</Text>
       <Text style={[styles.timeValue, !active && styles.inactiveText]}>{value}</Text>
     </View>
+  );
+}
+
+function FlowStepRow({
+  complete,
+  expanded,
+  label,
+  locationName,
+  onPress,
+  showDetails,
+  timeValue,
+  title,
+}: {
+  complete: boolean;
+  expanded: boolean;
+  label: string;
+  locationName: string;
+  onPress: () => void;
+  showDetails: boolean;
+  timeValue: string;
+  title: string;
+}) {
+  return (
+    <Pressable style={({pressed}) => [styles.flowRowPressable, pressed && styles.flowRowPressed]} onPress={onPress}>
+      <View style={styles.flowRowHeader}>
+        <View style={styles.flowItemMain}>
+          <View style={[styles.flowIcon, complete && styles.flowIconDone]}>
+            <Ionicons name={complete ? 'checkmark' : 'ellipse-outline'} size={14} color={complete ? colors.white : colors.primary} />
+          </View>
+          <Text style={[styles.flowLabel, complete && styles.flowLabelDone]}>{label}</Text>
+        </View>
+        <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
+      </View>
+      {showDetails ? (
+        <View style={styles.flowDetails}>
+          <Text style={styles.flowDetailText}>打卡位置：{locationName}</Text>
+        </View>
+      ) : null}
+    </Pressable>
   );
 }
 
@@ -147,11 +200,17 @@ const styles = StyleSheet.create({
   timeValue: {fontSize: 26, color: colors.text, fontWeight: '900', marginTop: 8, letterSpacing: -0.5},
   inactiveText: {color: '#cbd5e1'},
   flowCard: {marginTop: 20, padding: 16, borderRadius: 24, backgroundColor: '#fbfdff', gap: 12, borderWidth: 1, borderColor: '#eff6ff'},
-  flowItem: {flexDirection: 'row', alignItems: 'center', gap: 12},
+  flowRowPressable: {borderRadius: 18, paddingHorizontal: 4, paddingVertical: 2},
+  flowRowPressed: {opacity: 0.82},
+  flowRowHeader: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12},
+  flowItemMain: {flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12},
+  flowItemStatic: {flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 4},
   flowIcon: {width: 24, height: 24, borderRadius: 999, borderWidth: 1, borderColor: '#bfdbfe', alignItems: 'center', justifyContent: 'center', backgroundColor: colors.white},
   flowIconDone: {borderColor: colors.primary, backgroundColor: colors.primary},
   flowLabel: {fontSize: 14, lineHeight: 20, color: colors.textSubtle, fontWeight: '700'},
   flowLabelDone: {color: colors.text},
+  flowDetails: {marginLeft: 36, marginTop: 10, gap: 6, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#e2e8f0'},
+  flowDetailText: {fontSize: 12, lineHeight: 18, color: colors.textSubtle, fontWeight: '700'},
   locationRow: {flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 20, padding: 14, backgroundColor: '#eff6ff', borderRadius: 20},
   locationText: {color: '#1d4ed8', fontWeight: '700', flex: 1, fontSize: 13},
   primaryButton: {marginTop: 22, height: 60, borderRadius: 24, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 12, shadowColor: colors.primary, shadowOpacity: 0.25, shadowRadius: 16, shadowOffset: {width: 0, height: 8}, elevation: 4},
