@@ -25,7 +25,7 @@ import {
 } from "../lib/api";
 import { useDialog } from "./DialogProvider";
 import { ModalShell } from "./ModalShell";
-import { cn, formatCurrency, formatDuration, getSalaryTypeLabel } from "../lib/utils";
+import { cn, formatCurrency, formatDuration, formatLocalDatePart, getSalaryTypeLabel } from "../lib/utils";
 import { Pagination } from "./Pagination";
 import { SearchableSelect } from "./SearchableSelect";
 import { YearMonthPicker } from "./YearMonthPicker";
@@ -51,7 +51,7 @@ function getReviewStatusLabel(status: string) {
 }
 
 function getDefaultYearMonth() {
-  return new Date().toISOString().slice(0, 7);
+  return formatLocalDatePart().yearMonth;
 }
 
 function formatEmployeeDisplayName(employee: Pick<Employee, "name" | "nickname">) {

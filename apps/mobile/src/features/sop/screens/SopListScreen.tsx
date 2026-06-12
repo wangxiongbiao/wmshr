@@ -1,10 +1,8 @@
 import React, {useCallback, useMemo, useRef, useState} from 'react';
 import {NativeScrollEvent, NativeSyntheticEvent, Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
-import {useFocusEffect} from '@react-navigation/native';
 import {Ionicons} from '@expo/vector-icons';
-import {NativeStackScreenProps} from '@react-navigation/native-stack';
+import {Link, useFocusEffect} from 'expo-router';
 import {useTranslation} from 'react-i18next';
-import {SopStackParamList} from '../../../application/navigationTypes';
 import {useAuth} from '../../../application/providers/AuthProvider';
 import {useToast} from '../../../application/providers/ToastProvider';
 import {fetchSopDocuments} from '../services/sopApi';
@@ -16,9 +14,7 @@ import {sharedStyles} from '../../../shared/constants/styles';
 const PAGE_SIZE = 10;
 const END_REACHED_THRESHOLD = 120;
 
-type Props = NativeStackScreenProps<SopStackParamList, 'SopList'>;
-
-export function SopListScreen({navigation}: Props) {
+export function SopListScreen() {
   const { t } = useTranslation('app');
   const {session} = useAuth();
   const {showToast} = useToast();
@@ -108,15 +104,17 @@ export function SopListScreen({navigation}: Props) {
       />
 
       {documents.map(item => (
-        <Pressable key={item.id} style={sharedStyles.listCard} onPress={() => navigation.navigate('SopDetail', {sopId: item.id})}>
-          <Ionicons name={item.readStatus === 'read' ? 'checkmark-circle' : 'ellipse-outline'} size={24} color={item.readStatus === 'read' ? colors.success : colors.textMuted} />
-          <View style={sharedStyles.flexOne}>
-            <Text style={sharedStyles.cardTitle}>{item.title}</Text>
-            <Text style={sharedStyles.muted}>{item.version} · {t('更新')} {item.updatedAt}</Text>
-            <Text style={[sharedStyles.muted, item.readStatus === 'read' && styles.readHint]}>{item.readStatus === 'read' ? t('已完成阅读确认') : t('待阅读确认')}</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
-        </Pressable>
+        <Link key={item.id} href={{pathname: '/sop/[sopId]', params: {sopId: item.id}}} push asChild>
+          <Pressable style={sharedStyles.listCard}>
+            <Ionicons name={item.readStatus === 'read' ? 'checkmark-circle' : 'ellipse-outline'} size={24} color={item.readStatus === 'read' ? colors.success : colors.textMuted} />
+            <View style={sharedStyles.flexOne}>
+              <Text style={sharedStyles.cardTitle}>{item.title}</Text>
+              <Text style={sharedStyles.muted}>{item.version} · {t('更新')} {item.updatedAt}</Text>
+              <Text style={[sharedStyles.muted, item.readStatus === 'read' && styles.readHint]}>{item.readStatus === 'read' ? t('已完成阅读确认') : t('待阅读确认')}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+          </Pressable>
+        </Link>
       ))}
 
       {hasFetchedOnce && documents.length === 0 ? (

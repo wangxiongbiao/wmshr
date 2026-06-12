@@ -169,21 +169,23 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
             />
             <Search className="w-5 h-5 absolute left-3 top-2.5 text-slate-400" />
           </div>
-          <label className="inline-flex h-[38px] items-center gap-2 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-600 select-none">
+          <label className="inline-flex min-h-[38px] items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 select-none leading-tight">
             <input
               type="checkbox"
               checked={includeInactive}
               onChange={(event) => setIncludeInactive(event.target.checked)}
               className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
             />
-            <span>{tAdmin("展示离职人员")}</span>
+            <span className="whitespace-normal break-words">{tAdmin("展示离职人员")}</span>
           </label>
         </div>
         <button
           onClick={onAddEmployee}
-          className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-md transition flex items-center gap-2"
+          className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-md transition flex items-center gap-2 text-left leading-tight"
         >
-          <Plus className="w-4 h-4" />{tAdmin("新增员工")}</button>
+          <Plus className="w-4 h-4 flex-shrink-0" />
+          <span className="whitespace-normal">{tAdmin("新增员工")}</span>
+        </button>
         </div>
         {showRefreshing ? (
           <div className="rounded-xl border border-brand-100 bg-brand-50/80 px-4 py-2 text-xs text-brand-700">
@@ -208,7 +210,7 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
 
             return (
               <div key={emp.id} className="glass-panel rounded-xl p-5 hover:shadow-md transition-all duration-300 flex flex-col relative group">
-                <div className="absolute top-4 right-4 flex gap-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="absolute top-4 right-4 flex gap-2 z-10 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                   <button
                     onClick={() => onManageAppAccount(emp)}
                     className="p-1.5 bg-white rounded-lg shadow-sm border border-brand-200 hover:bg-brand-50 text-brand-600"
@@ -243,25 +245,25 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
                   </div>
                   <div className="relative flex-1 min-w-0 pr-8">
                     {emp.status === "resigned" ? (
-                      <span className="absolute right-0 top-0 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-600 ring-1 ring-rose-100">
+                      <span className="absolute right-0 top-0 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-600 ring-1 ring-rose-100 text-center leading-tight break-words max-w-20">
                         {tAdmin("离职")}
                       </span>
                     ) : null}
-                    <h3 className="text-base font-bold text-slate-800 truncate pr-10">{emp.name}</h3>
+                    <h3 className="pr-10 text-base font-bold leading-tight text-slate-800 break-words">{emp.name}</h3>
                     {emp.nickname ? (
-                      <p className="text-xs text-slate-400 truncate mt-0.5">{emp.nickname}</p>
+                      <p className="mt-0.5 text-xs leading-tight text-slate-400 break-words">{emp.nickname}</p>
                     ) : null}
                     <div className="flex items-center gap-2 mt-1 flex-wrap">
                       <span className="text-lg" title={getCountryName(emp.country)}>{COUNTRY_FLAGS[emp.country]}</span>
-                      <span className="text-[10px] text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">{getCountryName(emp.country)}</span>
+                      <span className="text-[10px] text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full text-center leading-tight break-words">{getCountryName(emp.country)}</span>
                       <span className={cn(
-                        "text-[10px] px-2 py-0.5 rounded-full",
+                        "text-[10px] px-2 py-0.5 rounded-full text-center leading-tight break-words",
                         emp.gender === "female" ? "text-pink-600 bg-pink-50" : "text-blue-600 bg-blue-50"
                       )}>
                         {emp.gender === "female" ? tAdmin("女") : tAdmin("男")}
                       </span>
                       <span className={cn(
-                        "text-[10px] px-2 py-0.5 rounded-full",
+                        "text-[10px] px-2 py-0.5 rounded-full text-center leading-tight break-words",
                         statusLabel === tAdmin("在职") ? "bg-green-100 text-green-700" : "bg-blue-100 text-blue-700"
                       )}>
                         {statusLabel}
@@ -272,45 +274,45 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
                 <div className="grid grid-cols-2 gap-3 mb-2 text-sm border-t border-slate-100 pt-3">
                   <div>
                     <p className="text-[10px] text-slate-400 uppercase tracking-wide">{tAdmin("职位")}</p>
-                    <p className="font-medium text-slate-700 truncate">{emp.role}</p>
+                    <p className="font-medium leading-tight text-slate-700 break-words">{emp.role}</p>
                   </div>
                   <div>
                     <p className="text-[10px] text-slate-400 uppercase tracking-wide">{tAdmin("区域")}</p>
-                    <p className="font-medium text-slate-700 truncate">{emp.dept || "-"}</p>
+                    <p className="font-medium leading-tight text-slate-700 break-words">{emp.dept || "-"}</p>
                   </div>
                   <div>
                     <p className="text-[10px] text-slate-400 uppercase tracking-wide">{tAdmin("时薪")}</p>
-                    <p className="font-semibold text-slate-700">
+                    <p className="font-semibold leading-tight text-slate-700 break-words">
                       {hourlyRate !== null && hourlyRate > 0 ? (
                         <span title={emp.salaryType === "fixed" ? tAdmin("由基础月工资换算：(月薪/30)/8 小时") : undefined}>
-                          {formatCurrency(hourlyRate, emp.currency)} {emp.salaryType === "fixed" ? <span className="text-[9px] text-slate-400 font-normal">{tAdmin("(折算)")}</span> : null}
+                          {formatCurrency(hourlyRate, emp.currency)} {emp.salaryType === "fixed" ? <span className="text-[9px] text-slate-400 font-normal whitespace-normal">{tAdmin("(折算)")}</span> : null}
                         </span>
                       ) : "-"}
                     </p>
                   </div>
                   <div>
                     <p className="text-[10px] text-slate-400 uppercase tracking-wide">{tAdmin("基础工资 (月薪)")}</p>
-                    <p className="font-semibold text-brand-600 font-mono">
+                    <p className="font-semibold text-brand-600 font-mono leading-tight break-words">
                       {monthlyWage !== null && monthlyWage > 0
                         ? formatCurrency(monthlyWage, emp.currency)
-                        : <span className="text-xs text-slate-400 font-normal">{tAdmin("无 (按时薪计算)")}</span>}
+                        : <span className="text-xs text-slate-400 font-normal whitespace-normal">{tAdmin("无 (按时薪计算)")}</span>}
                     </p>
                   </div>
                   <div>
                     <p className="text-[10px] text-slate-400 uppercase tracking-wide">{tAdmin("餐补费用")}</p>
-                    <p className="font-semibold text-slate-700 font-mono">{formatCurrency(emp.mealAllowance, emp.currency)}</p>
+                    <p className="font-semibold text-slate-700 font-mono leading-tight break-words">{formatCurrency(emp.mealAllowance, emp.currency)}</p>
                   </div>
                   <div>
                     <p className="text-[10px] text-slate-400 uppercase tracking-wide">{tAdmin("服务费比例")}</p>
-                    <p className="font-semibold text-slate-700 font-mono">{emp.serviceFeeRate.toFixed(2)}%</p>
+                    <p className="font-semibold text-slate-700 font-mono leading-tight break-words">{emp.serviceFeeRate.toFixed(2)}%</p>
                   </div>
                   <div>
                     <p className="text-[10px] text-slate-400 uppercase tracking-wide">{tAdmin("币种")}</p>
-                    <p className="font-medium text-slate-700">{emp.currency}</p>
+                    <p className="font-medium leading-tight text-slate-700 break-words">{emp.currency}</p>
                   </div>
                   <div>
                     <p className="text-[10px] text-slate-400 uppercase tracking-wide">{tAdmin("入职")}</p>
-                    <p className="font-medium text-slate-700">{emp.joinDate}</p>
+                    <p className="font-medium leading-tight text-slate-700 break-words">{emp.joinDate}</p>
                   </div>
                 </div>
               </div>

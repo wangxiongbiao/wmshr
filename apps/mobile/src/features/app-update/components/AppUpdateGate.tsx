@@ -9,7 +9,24 @@ import {AppUpdateInfo, AppUpdateStatus} from '../types';
 
 const ANDROID_APK_MIME_TYPE = 'application/vnd.android.package-archive';
 const FLAG_GRANT_READ_URI_PERMISSION = 1;
-const LOCAL_APP_VERSION = String((require('../../../../../app.json') as {expo?: {version?: string}}).expo?.version || '').trim();
+const LOCAL_APP_VERSION = String((require('../../../../app.json') as {expo?: {version?: string}}).expo?.version || '').trim();
+
+function hasCompleteUpdateInfo(update: Partial<AppUpdateInfo> | null | undefined): update is AppUpdateInfo {
+  return Boolean(update?.version && update?.content && update?.url);
+}
+
+function shouldIgnoreUpdateCheckError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || '');
+  return message.includes('Android 更新信息未配置完整')
+    || message.includes('更新信息不完整')
+    || message.includes('暂无版本信息')
+    || message.includes('Network request failed')
+    || message.includes('Failed to fetch')
+    || message.includes('fetch failed')
+    || message.includes('网络异常')
+    || message.includes('网络错误')
+    || message.includes('Network Error');
+}
 
 async function downloadAndOpenAndroidInstaller(update: AppUpdateInfo) {
   if (!FileSystem.cacheDirectory) {
@@ -41,7 +58,8 @@ export function AppUpdateGate({children}: PropsWithChildren) {
     }
 
     if (!LOCAL_APP_VERSION) {
-      setStatus({kind: 'failed', message: '当前 App 版本号读取失败，请联系管理员处理。'});
+      // 本地未打入版本号时，不阻断进入 App，也不弹失败/更新提示，避免“暂无版本信息”场景影响正常使用。
+      setStatus({kind: 'up_to_date'});
       return;
     }
 
@@ -49,8 +67,10 @@ export function AppUpdateGate({children}: PropsWithChildren) {
     setPromptDismissed(false);
     try {
       const latestUpdate = await fetchLatestAppUpdate();
-      if (!latestUpdate.version || !latestUpdate.content || !latestUpdate.url) {
-        throw new Error('更新信息不完整，请联系管理员检查后台配置。');
+      if (!hasCompleteUpdateInfo(latestUpdate)) {
+        // 后台暂未配置版本信息时，按“当前无更新可提示”处理，不再弹出更新异常弹窗。
+        setStatus({kind: 'up_to_date'});
+        return;
       }
       if (!/^https?:\/\//i.test(latestUpdate.url)) {
         throw new Error('更新链接无效，请联系管理员检查后台配置。');
@@ -59,6 +79,10 @@ export function AppUpdateGate({children}: PropsWithChildren) {
         ? {kind: 'required', update: latestUpdate}
         : {kind: 'up_to_date'});
     } catch (error) {
+      if (shouldIgnoreUpdateCheckError(error)) {
+        setStatus({kind: 'up_to_date'});
+        return;
+      }
       setStatus({kind: 'failed', message: error instanceof Error ? error.message : '版本检查失败，请重试。'});
     }
   }, []);
@@ -100,7 +124,7 @@ export function AppUpdateGate({children}: PropsWithChildren) {
         </View>
       )}
 
-      {status.kind === 'failed' ? (
+      {status.kind === 'failed' && !promptDismissed ? (
         <AppModal
           visible
           onRequestClose={() => setPromptDismissed(true)}

@@ -1,5 +1,5 @@
 import {httpClient} from '../../../shared/api/httpClient';
-import {AttendanceRecord, CheckInPayload, TodayAttendanceStatus} from '../types';
+import {AttendanceRecord, CheckInPayload, MobileHomeSummary, TodayAttendanceStatus} from '../types';
 
 function authHeaders(accessToken: string) {
   // 员工端业务接口只接受后端签发 token；页面必须显式传入当前 session，避免 service 层偷偷读取全局状态造成登出后串号。
@@ -24,6 +24,12 @@ export async function submitAttendanceCheckIn(accessToken: string, payload: Chec
 export async function fetchAttendanceRecords(accessToken: string, {limit = 7, offset = 0}: {limit?: number; offset?: number} = {}): Promise<AttendanceRecord[]> {
   const query = `?limit=${encodeURIComponent(String(limit))}&offset=${encodeURIComponent(String(offset))}`;
   return httpClient<AttendanceRecord[]>(`/api/mobile/attendance/records${query}`, {
+    headers: authHeaders(accessToken),
+  });
+}
+
+export async function fetchMobileHomeSummary(accessToken: string): Promise<MobileHomeSummary> {
+  return httpClient<MobileHomeSummary>('/api/mobile/home/summary', {
     headers: authHeaders(accessToken),
   });
 }

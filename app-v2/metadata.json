@@ -1,0 +1,6 @@
+{
+  "name": "WMSHR Employee App",
+  "description": "A mobile application for WMSHR employees to manage attendance, SOPs, and notifications.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

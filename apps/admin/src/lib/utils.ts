@@ -12,6 +12,16 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+export function formatLocalDatePart(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return {
+    yearMonth: `${year}-${month}`,
+    date: `${year}-${month}-${day}`
+  };
+}
+
 export const CURRENCY_SYMBOLS: Record<CurrencyCode, string> = {
   THB: '฿',
   USD: '$',
@@ -162,7 +172,7 @@ export function formatCompensation(employee: Pick<Employee, "salaryType" | "hour
 }
 
 export function getAttendanceRuleEffectiveStatus(rule: Pick<AttendanceRule, "effectiveStartDate" | "effectiveEndDate">) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = formatLocalDatePart().date;
 
   if (today < rule.effectiveStartDate) {
     return {

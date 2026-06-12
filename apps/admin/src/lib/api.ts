@@ -38,6 +38,7 @@ import {
   WorkspaceBootstrapStatusResponse,
   EmployeeUpsertPayload
 } from "../types";
+import { formatLocalDatePart } from "./utils";
 
 async function request<T>(input: string, init?: RequestInit): Promise<T> {
   const { data: { session } } = await supabase.auth.getSession();
@@ -99,7 +100,7 @@ export async function searchEmployees(keyword: string, options: { includeInactiv
 }
 
 export async function fetchDashboardData(params: { force?: boolean; yearMonth?: string } = {}): Promise<DashboardData> {
-  const yearMonth = params.yearMonth?.trim() || new Date().toISOString().slice(0, 7);
+  const yearMonth = params.yearMonth?.trim() || formatLocalDatePart().yearMonth;
   const cacheKey = yearMonth;
   const now = Date.now();
   const cached = dashboardDataCache.get(cacheKey);

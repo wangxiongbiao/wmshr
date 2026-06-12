@@ -122,6 +122,40 @@ async function requireGoogleAuth(req, res, next) {
 const app = express();
 app.use(express.json({ limit: "5mb" }));
 
+function isAllowedCorsOrigin(origin) {
+  if (!origin) {
+    return false;
+  }
+
+  if (origin === "https://admin.dutylix.com") {
+    return true;
+  }
+
+  try {
+    const url = new URL(origin);
+    return ["localhost", "127.0.0.1"].includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+app.use((req, res, next) => {
+  const origin = String(req.headers.origin || "");
+  if (isAllowedCorsOrigin(origin)) {
+    res.header("Access-Control-Allow-Origin", origin);
+    res.header("Vary", "Origin");
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+    res.header("Access-Control-Allow-Credentials", "true");
+  }
+
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
+
+  next();
+});
+
 function normalizeLeadRequestPayload(body = {}) {
   return {
     name: String(body.name || "").trim(),
@@ -3324,13 +3358,6 @@ function buildMobileAttendanceNote({ action, locationName, latitude, longitude, 
   return parts.join("；");
 }
 
-function isMobileAttendanceDescriptionRequired(action, time, config) {
-  const startShift = String(config.start_shift || DEFAULT_ATTENDANCE_CONFIG.start_shift).slice(0, 5);
-  const endShift = String(config.end_shift || DEFAULT_ATTENDANCE_CONFIG.end_shift).slice(0, 5);
-  // 用户已确认“上班时间内打卡需要描述”；这里由后端统一校验，移动端提示只是辅助，不能绕过服务端规则。
-  return time >= startShift && time <= endShift && (action === "check_in" || action === "check_out");
-}
-
 function mapMobileAttendanceStatus(record, config, date) {
   const checkInTime = record?.in_time ? String(record.in_time).slice(0, 5) : null;
   const checkOutTime = record?.out_time ? String(record.out_time).slice(0, 5) : null;
@@ -3344,7 +3371,7 @@ function mapMobileAttendanceStatus(record, config, date) {
     locationAccuracy: null,
     canCheckIn: status === "not_checked_in",
     canCheckOut: status === "checked_in",
-    requiresDescriptionInWorkTime: true,
+    requiresDescriptionInWorkTime: false,
     rule: {
       startShift: String(config.start_shift || DEFAULT_ATTENDANCE_CONFIG.start_shift).slice(0, 5),
       endShift: String(config.end_shift || DEFAULT_ATTENDANCE_CONFIG.end_shift).slice(0, 5)
@@ -3399,9 +3426,6 @@ async function upsertMobileAttendancePunch({ ownerUserId, employeeId, action, bo
   const accuracy = Number(body.accuracy);
   const locationName = String(body.locationName || "").trim();
   const description = String(body.description || "").trim();
-  if (isMobileAttendanceDescriptionRequired(action, time, config) && !description) {
-    throw new Error("上班时间内打卡需要填写说明");
-  }
 
   const payload = {
     owner_user_id: ownerUserId,
@@ -3450,8 +3474,58 @@ function mapMobileAttendanceRecord(row) {
     checkInTime: inTime,
     checkOutTime: outTime,
     type: row.type === "overtime" ? "overtime" : "normal",
-    hours: inTime !== "--:--" && outTime !== "--:--" ? `${inTime} - ${outTime}` : "未完整",
-    note: row.note || ""
+    hours: "0.0",
+  };
+}
+
+function mapMobileAttendanceRecordWithCalculation(row, calculationRow) {
+  const baseRecord = mapMobileAttendanceRecord(row);
+  const validHours = Number(calculationRow?.valid_hours || 0);
+  const overtimePayHours = Number(calculationRow?.overtime_pay_hours || 0);
+  const hasCompletePunch = baseRecord.checkInTime !== "--:--" && baseRecord.checkOutTime !== "--:--";
+
+  return {
+    ...baseRecord,
+    type: overtimePayHours > 0 ? "overtime" : baseRecord.type,
+    hours: hasCompletePunch ? String(roundToTwo(validHours).toFixed(1)) : "未完整",
+    workedHours: hasCompletePunch ? roundToTwo(validHours) : null,
+  };
+}
+
+async function fetchMobileHomeSummary(ownerUserId, employeeId) {
+  const yearMonth = getBangkokDateKey().slice(0, 7);
+  const monthDates = enumerateMonthDates(yearMonth);
+  const periodStartDate = monthDates[0];
+  const periodEndDate = monthDates[monthDates.length - 1];
+
+  const [calculationsResult, visibleSops] = await Promise.all([
+    supabase
+      .from("attendance_calculation_results")
+      .select("date, valid_hours")
+      .eq("owner_user_id", ownerUserId)
+      .eq("employee_id", Number(employeeId))
+      .gte("date", periodStartDate)
+      .lte("date", periodEndDate),
+    fetchSopDocuments(ownerUserId, { publishedOnly: true, employeeId: Number(employeeId) })
+  ]);
+
+  if (calculationsResult.error) {
+    throw calculationsResult.error;
+  }
+
+  const calculations = calculationsResult.data || [];
+  const monthHours = roundToTwo(calculations.reduce((sum, row) => sum + Number(row.valid_hours || 0), 0));
+  const attendanceDays = calculations.filter((row) => Number(row.valid_hours || 0) > 0).length;
+  const pendingSopCount = visibleSops.filter((row) => {
+    const readAt = row.reads?.[Number(employeeId)] || null;
+    return !readAt;
+  }).length;
+
+  return {
+    yearMonth,
+    monthHours,
+    attendanceDays,
+    pendingSopCount,
   };
 }
 
@@ -3496,9 +3570,31 @@ app.get("/api/mobile/attendance/records", requireEmployeeAppAuth, async (req, re
       // 员工端改为分页加载后，服务端必须按 offset/limit 返回稳定窗口；否则前端“加载更多”会不断重复首批数据。
       .range(offset, end);
     if (error) throw error;
-    res.json((data || []).map(mapMobileAttendanceRecord));
+    const records = data || [];
+    const recordIds = records.map((row) => Number(row.id)).filter(Number.isFinite);
+    const { data: calculations, error: calculationsError } = recordIds.length === 0
+      ? { data: [], error: null }
+      : await supabase
+        .from("attendance_calculation_results")
+        .select("attendance_record_id, valid_hours, overtime_pay_hours")
+        .eq("owner_user_id", req.employeeApp.ownerUserId)
+        .eq("employee_id", req.employeeApp.employeeId)
+        .in("attendance_record_id", recordIds);
+    if (calculationsError) throw calculationsError;
+
+    const calculationMap = new Map((calculations || []).map((row) => [Number(row.attendance_record_id), row]));
+    res.json(records.map((row) => mapMobileAttendanceRecordWithCalculation(row, calculationMap.get(Number(row.id)))));
   } catch (error) {
     res.status(500).json({ error: error.message || "员工端考勤记录加载失败" });
+  }
+});
+
+app.get("/api/mobile/home/summary", requireEmployeeAppAuth, async (req, res) => {
+  try {
+    const result = await fetchMobileHomeSummary(req.employeeApp.ownerUserId, req.employeeApp.employeeId);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "员工端首页汇总加载失败" });
   }
 });
 

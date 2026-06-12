@@ -1,12 +1,13 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import * as Location from 'expo-location';
-import {useFocusEffect} from '@react-navigation/native';
-import {Alert, Platform, StyleSheet, Text, TextInput, Vibration, View} from 'react-native';
+import {useFocusEffect} from 'expo-router';
+import {Alert, Platform, Pressable, StyleSheet, Text, Vibration, View} from 'react-native';
+import {Ionicons} from '@expo/vector-icons';
 import {useTranslation} from 'react-i18next';
 import {useAuth} from '../../../application/providers/AuthProvider';
 import {useToast} from '../../../application/providers/ToastProvider';
-import {fetchTodayAttendanceStatus, submitAttendanceCheckIn} from '../../attendance/services/attendanceApi';
-import {TodayAttendanceStatus} from '../../attendance/types';
+import {fetchMobileHomeSummary, fetchTodayAttendanceStatus, submitAttendanceCheckIn} from '../../attendance/services/attendanceApi';
+import {MobileHomeSummary, TodayAttendanceStatus} from '../../attendance/types';
 import {ScreenContainer} from '../../../shared/components/ScreenContainer';
 import {formatDateLabel, formatFullTime} from '../../../shared/utils/date';
 import {sharedStyles} from '../../../shared/constants/styles';
@@ -26,9 +27,7 @@ const FALLBACK_STATUS: TodayAttendanceStatus = {
 
 function getStatusHint(status: TodayAttendanceStatus, t: (value: string) => string) {
   if (status.status === 'not_checked_in') {
-    return status.requiresDescriptionInWorkTime
-      ? t('当前还未打卡；请先填写打卡说明，再开始上班打卡。')
-      : t('当前还未打卡；确认定位成功后即可开始上班打卡。');
+    return t('当前还未打卡；确认定位成功后即可开始上班打卡。');
   }
   if (status.status === 'checked_in') {
     return t('你已完成上班打卡；下班前请返回此页完成下班打卡。');
@@ -60,8 +59,8 @@ export function HomeScreen() {
   const {showToast} = useToast();
   const [currentTime, setCurrentTime] = useState(new Date());
   const [todayStatus, setTodayStatus] = useState<TodayAttendanceStatus | null>(null);
+  const [homeSummary, setHomeSummary] = useState<MobileHomeSummary | null>(null);
   const [todayStatusError, setTodayStatusError] = useState<string | null>(null);
-  const [description, setDescription] = useState('');
   const [phase, setPhase] = useState<CheckInPhase>('idle');
   const [helperText, setHelperText] = useState<string | null>(null);
 
@@ -89,39 +88,42 @@ export function HomeScreen() {
     }
   }, [session?.accessToken, showToast, t]);
 
+  const loadHomeSummary = useCallback(async () => {
+    if (!session?.accessToken) {
+      return;
+    }
+
+    try {
+      const summary = await fetchMobileHomeSummary(session.accessToken);
+      setHomeSummary(summary);
+    } catch (error) {
+      console.warn('[mobile-home] summary load failed', {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }, [session?.accessToken]);
+
   useEffect(() => {
     void loadTodayStatus(false);
-  }, [loadTodayStatus]);
+    void loadHomeSummary();
+  }, [loadHomeSummary, loadTodayStatus]);
 
   useFocusEffect(
     useCallback(() => {
       void loadTodayStatus(false);
-    }, [loadTodayStatus]),
+      void loadHomeSummary();
+    }, [loadHomeSummary, loadTodayStatus]),
   );
 
   const formattedDate = useMemo(() => formatDateLabel(currentTime), [currentTime]);
   const displayStatus = todayStatus ?? FALLBACK_STATUS;
-  const requiresDescription = Boolean(displayStatus.requiresDescriptionInWorkTime && displayStatus.status !== 'checked_out');
   const isBusy = phase === 'requesting_permission' || phase === 'locating' || phase === 'reverse_geocoding' || phase === 'submitting';
   const statusHint = todayStatus ? getStatusHint(todayStatus, t) : t('打卡界面已准备好，今日状态同步后会自动刷新。');
   const displayHelperText = todayStatus ? helperText : (todayStatusError ?? t('正在同步今日打卡状态，请稍候。'));
   const headerText = getHeaderText(todayStatus, t);
-  const summaryItems = [
-    {
-      label: t('说明'),
-      value: displayStatus.status === 'checked_out'
-        ? t('已结束')
-        : requiresDescription ? t('必填') : t('可选'),
-    },
-    {
-      label: t('定位'),
-      value: todayStatus ? t('已就绪') : t('同步中'),
-    },
-    {
-      label: t('状态'),
-      value: displayStatus.status === 'not_checked_in' ? t('待上班') : displayStatus.status === 'checked_in' ? t('待下班') : t('已完成'),
-    },
-  ];
+  const monthHours = useMemo(() => String(homeSummary?.monthHours ?? 0), [homeSummary?.monthHours]);
+  const attendanceDays = useMemo(() => String(homeSummary?.attendanceDays ?? 0), [homeSummary?.attendanceDays]);
+  const pendingSops = useMemo(() => String(homeSummary?.pendingSopCount ?? 0), [homeSummary?.pendingSopCount]);
 
   const handleCheckIn = async () => {
     if (!todayStatus || !session?.accessToken || isBusy) {
@@ -131,15 +133,6 @@ export function HomeScreen() {
 
     if (todayStatus.status === 'checked_out') {
       showToast(t('今日打卡已完成'));
-      return;
-    }
-
-    const trimmedDescription = description.trim();
-    if (requiresDescription && !trimmedDescription) {
-      // 后端已经有同一条强校验；前端先拦截是为了给员工明确、即时的上班时间说明要求，避免进入定位后才被接口拒绝。
-      setPhase('description_required');
-      setHelperText(t('上班时间打卡必须填写打卡说明。'));
-      showToast(t('上班时间打卡必须填写打卡说明。'));
       return;
     }
 
@@ -193,7 +186,6 @@ export function HomeScreen() {
         longitude: location.coords.longitude,
         accuracy: location.coords.accuracy ?? 0,
         locationName,
-        description: trimmedDescription,
         deviceId: `${Platform.OS}:${Platform.Version}`,
         // 服务端现在会用固定业务时区作为唯一判定时间源；这里保留客户端时间与时区，只用于排查跨时区打卡问题，不参与允许/不允许判定。
         clientTime: new Date().toISOString(),
@@ -202,7 +194,6 @@ export function HomeScreen() {
       });
 
       setTodayStatus(nextStatus);
-      setDescription('');
       setPhase('success');
       setHelperText(null);
       setTodayStatusError(null);
@@ -218,8 +209,6 @@ export function HomeScreen() {
         message,
         platform: Platform.OS,
         osVersion: Platform.Version,
-        requiresDescription,
-        hasDescription: Boolean(trimmedDescription),
         phase,
       });
       setPhase('failed');
@@ -234,18 +223,9 @@ export function HomeScreen() {
         <View>
           <Text style={sharedStyles.overline}>{headerText.eyebrow}</Text>
           <Text style={sharedStyles.title}>{headerText.title}</Text>
-          <Text style={sharedStyles.muted}>{employee?.name ?? t('员工')}</Text>
+          <Text style={sharedStyles.muted}>{employee?.dept ?? employee?.name ?? t('员工')}</Text>
         </View>
         <View style={sharedStyles.avatarSmall}><Text style={sharedStyles.avatarText}>{employee?.name?.[0] ?? 'E'}</Text></View>
-      </View>
-
-      <View style={styles.summaryStrip}>
-        {summaryItems.map(item => (
-          <View key={item.label} style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>{item.label}</Text>
-            <Text style={styles.summaryValue}>{item.value}</Text>
-          </View>
-        ))}
       </View>
 
       <CheckInCard
@@ -259,63 +239,93 @@ export function HomeScreen() {
         statusHint={statusHint}
         warningText={todayStatus?.warning ?? null}
       />
-      {displayStatus.status !== 'checked_out' ? (
-        <View style={[styles.descriptionCard, requiresDescription && styles.descriptionRequiredCard]}>
-          <View style={styles.descriptionHeader}>
-            <View>
-              <Text style={sharedStyles.cardTitle}>{requiresDescription ? t('打卡说明（必填）') : t('打卡说明')}</Text>
-              <Text style={[sharedStyles.muted, requiresDescription && styles.requiredText]}>{requiresDescription ? t('上班时间打卡必须填写打卡说明。') : t('非上班时间说明可选。')}</Text>
-            </View>
-            <View style={[styles.requirementBadge, requiresDescription ? styles.requirementBadgeWarn : styles.requirementBadgeNeutral]}>
-              <Text style={[styles.requirementBadgeText, requiresDescription ? styles.requirementBadgeTextWarn : styles.requirementBadgeTextNeutral]}>
-                {requiresDescription ? t('必填') : t('可选')}
-              </Text>
-            </View>
-          </View>
-          <View style={styles.descriptionTips}>
-            <Text style={styles.tipText}>{t('例如：外出盘点后返回')}</Text>
-            <Text style={styles.tipDot}>·</Text>
-            <Text style={styles.tipText}>{t('临时会议')}</Text>
-            <Text style={styles.tipDot}>·</Text>
-            <Text style={styles.tipText}>{t('门店支援')}</Text>
-          </View>
-          <TextInput
-            value={description}
-            onChangeText={value => {
-              setDescription(value);
-              if (phase === 'description_required' && value.trim()) {
-                setPhase('idle');
-                setHelperText(null);
-              }
-            }}
-            placeholder={t('例如：外出盘点后返回、临时会议等')}
-            style={[styles.input, requiresDescription && !description.trim() && styles.inputRequired]}
-            multiline
-          />
+
+      <View style={styles.statsGrid}>
+        <StatCard label={t('本月工时')} value={String(monthHours)} unit="h" />
+        <StatCard label={t('出勤天数')} value={String(attendanceDays)} unit="d" />
+        <StatCard label={t('待办SOP')} value={String(pendingSops)} unit="p" />
+      </View>
+
+      <View style={styles.noticeCard}>
+        <View style={styles.noticeHeader}>
+          <Text style={styles.noticeTitle}>{t('系统通知')}</Text>
+          <Pressable onPress={() => showToast(t('通知列表即将开放'))}>
+            <Text style={styles.noticeAction}>{t('查看全部')}</Text>
+          </Pressable>
         </View>
-      ) : null}
+
+        <NoticeRow
+          icon="notifications-outline"
+          iconColor={colors.primary}
+          iconBackground="#eff6ff"
+          title={t('仓库消防演练通知')}
+          detail={t('本周五下午 14:00 全员参与，请提前 10 分钟到 A 区集合。')}
+        />
+        <NoticeRow
+          icon="checkmark-circle-outline"
+          iconColor={colors.success}
+          iconBackground="#ecfdf5"
+          title={t('4 月工资条已生成')}
+          detail={t('请前往个人中心查看详情。')}
+        />
+      </View>
     </ScreenContainer>
   );
 }
 
+function StatCard({label, value, unit}: {label: string; value: string; unit: string}) {
+  return (
+    <View style={styles.statCard}>
+      <Text style={styles.statLabel}>{label}</Text>
+      <Text style={styles.statValue}>
+        {value}
+        <Text style={styles.statUnit}>{unit}</Text>
+      </Text>
+    </View>
+  );
+}
+
+function NoticeRow({
+  icon,
+  iconColor,
+  iconBackground,
+  title,
+  detail,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  iconColor: string;
+  iconBackground: string;
+  title: string;
+  detail: string;
+}) {
+  return (
+    <Pressable style={({pressed}) => [styles.noticeRow, pressed && styles.noticeRowPressed]}>
+      <View style={[styles.noticeIconWrap, {backgroundColor: iconBackground}]}>
+        <Ionicons name={icon} size={18} color={iconColor} />
+      </View>
+      <View style={styles.noticeCopy}>
+        <Text style={styles.noticeRowTitle}>{title}</Text>
+        <Text style={styles.noticeRowDetail} numberOfLines={2}>{detail}</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
-  summaryStrip: {marginTop: 4, marginBottom: 16, flexDirection: 'row', gap: 12},
-  summaryItem: {flex: 1, minHeight: 82, padding: 16, borderRadius: 24, backgroundColor: colors.white, justifyContent: 'space-between', shadowColor: colors.text, shadowOpacity: 0.03, shadowRadius: 16, shadowOffset: {width: 0, height: 6}, elevation: 2, borderWidth: 1, borderColor: '#f8fafc'},
-  summaryLabel: {fontSize: 12, color: colors.textMuted, fontWeight: '800'},
-  summaryValue: {fontSize: 16, lineHeight: 22, color: colors.text, fontWeight: '900'},
-  descriptionCard: {marginTop: 16, padding: 20, borderRadius: 28, backgroundColor: colors.white, gap: 12, shadowColor: colors.text, shadowOpacity: 0.03, shadowRadius: 20, shadowOffset: {width: 0, height: 8}, elevation: 3, borderWidth: 1, borderColor: '#f1f5f9'},
-  descriptionRequiredCard: {borderColor: '#fed7aa', backgroundColor: '#fffcf5'},
-  descriptionHeader: {flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12},
-  requirementBadge: {minWidth: 56, height: 32, paddingHorizontal: 12, borderRadius: 999, alignItems: 'center', justifyContent: 'center'},
-  requirementBadgeWarn: {backgroundColor: '#ffedd5'},
-  requirementBadgeNeutral: {backgroundColor: '#eff6ff'},
-  requirementBadgeText: {fontSize: 12, fontWeight: '900'},
-  requirementBadgeTextWarn: {color: colors.warning},
-  requirementBadgeTextNeutral: {color: colors.primary},
-  descriptionTips: {flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 4},
-  tipText: {fontSize: 13, lineHeight: 20, color: colors.textSubtle, fontWeight: '700'},
-  tipDot: {fontSize: 13, color: colors.textMuted, fontWeight: '900'},
-  requiredText: {color: colors.warning, fontWeight: '800'},
-  input: {minHeight: 100, padding: 16, borderRadius: 20, borderWidth: 1, borderColor: colors.border, color: colors.text, textAlignVertical: 'top', backgroundColor: '#f8fafc', fontSize: 15, lineHeight: 22},
-  inputRequired: {borderColor: colors.warning, backgroundColor: colors.white},
+  statsGrid: {marginTop: 16, flexDirection: 'row', gap: 12},
+  statCard: {flex: 1, minHeight: 94, paddingHorizontal: 14, paddingVertical: 18, borderRadius: 24, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center', shadowColor: colors.text, shadowOpacity: 0.03, shadowRadius: 16, shadowOffset: {width: 0, height: 6}, elevation: 2, borderWidth: 1, borderColor: '#f8fafc'},
+  statLabel: {fontSize: 10, color: colors.textMuted, fontWeight: '900', letterSpacing: 1.2, textTransform: 'uppercase'},
+  statValue: {marginTop: 8, fontSize: 24, lineHeight: 28, color: colors.text, fontWeight: '900'},
+  statUnit: {fontSize: 11, color: colors.textMuted, fontWeight: '800'},
+  noticeCard: {marginTop: 16, padding: 20, borderRadius: 28, backgroundColor: colors.white, shadowColor: colors.text, shadowOpacity: 0.03, shadowRadius: 20, shadowOffset: {width: 0, height: 8}, elevation: 3, borderWidth: 1, borderColor: '#f1f5f9'},
+  noticeHeader: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10},
+  noticeTitle: {fontSize: 13, color: colors.text, fontWeight: '900', letterSpacing: 1.4, textTransform: 'uppercase'},
+  noticeAction: {fontSize: 11, color: colors.primary, fontWeight: '900', letterSpacing: 1},
+  noticeRow: {flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 12},
+  noticeRowPressed: {opacity: 0.72},
+  noticeIconWrap: {width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center'},
+  noticeCopy: {flex: 1},
+  noticeRowTitle: {fontSize: 14, color: colors.text, fontWeight: '800'},
+  noticeRowDetail: {marginTop: 2, fontSize: 12, lineHeight: 18, color: colors.textSubtle, fontWeight: '600'},
 });

@@ -9,12 +9,13 @@ type Props = PropsWithChildren<{
 
 export function ScreenContainer({children, scrollProps}: Props) {
   const insets = useSafeAreaInsets();
+  const bottomContentPadding = 112 + Math.max(insets.bottom, 10);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeArea}>
       {/* 页面级自动分页依赖 ScrollView 的 onScroll / onMomentumScrollBegin；容器统一透传，避免每个页面复制一份壳层。 */}
-      {/* 页面内容底部留白要跟随真实设备 inset 增长，否则底部卡片/按钮会被手势条或三键导航栏顶住。 */}
-      <ScrollView contentContainerStyle={[styles.content, {paddingBottom: 112 + insets.bottom}]} showsVerticalScrollIndicator={false} {...scrollProps}>
+      {/* TabBar 已经吃掉了底部安全区，这里只保留内容和 Tab 的视觉间距，避免页面容器再次叠一层底部 inset。 */}
+      <ScrollView contentContainerStyle={[styles.content, {paddingBottom: bottomContentPadding}]} showsVerticalScrollIndicator={false} {...scrollProps}>
         {children}
       </ScrollView>
     </SafeAreaView>

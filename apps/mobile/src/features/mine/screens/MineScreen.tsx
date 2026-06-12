@@ -1,20 +1,17 @@
 import React, {useState} from 'react';
 import {Ionicons} from '@expo/vector-icons';
-import {NativeStackScreenProps} from '@react-navigation/native-stack';
+import {Link} from 'expo-router';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {useTranslation} from 'react-i18next';
 import {useAuth} from '../../../application/providers/AuthProvider';
 import {useToast} from '../../../application/providers/ToastProvider';
-import {MineStackParamList} from '../../../application/navigationTypes';
 import {AppButton} from '../../../shared/components/AppButton';
 import {AppModal} from '../../../shared/components/AppModal';
 import {ScreenContainer} from '../../../shared/components/ScreenContainer';
 import {colors} from '../../../shared/constants/colors';
 import {sharedStyles} from '../../../shared/constants/styles';
 
-type Props = NativeStackScreenProps<MineStackParamList, 'MineHome'>;
-
-export function MineScreen({navigation}: Props) {
+export function MineScreen() {
   const { t } = useTranslation('app');
   const {employee, logout} = useAuth();
   const {showToast} = useToast();
@@ -44,13 +41,15 @@ export function MineScreen({navigation}: Props) {
         <Text style={sharedStyles.muted}>{t('你可以在这里查看个人信息、切换语言，或在离开设备前安全退出登录。')}</Text>
       </View>
 
-      <Pressable style={sharedStyles.listCard} onPress={() => navigation.navigate('Settings')}>
-        <Ionicons name="settings-outline" size={24} color={colors.primary} />
-        <View style={sharedStyles.flexOne}>
-          <Text style={sharedStyles.cardTitle}>{t('设置')}</Text>
-          <Text style={sharedStyles.muted}>{t('当前仅开放语言切换，其余通知和账号安全入口暂未开放。')}</Text>
-        </View>
-      </Pressable>
+      <Link href="/mine/settings" push asChild>
+        <Pressable style={sharedStyles.listCard}>
+          <Ionicons name="settings-outline" size={24} color={colors.primary} />
+          <View style={sharedStyles.flexOne}>
+            <Text style={sharedStyles.cardTitle}>{t('设置')}</Text>
+            <Text style={sharedStyles.muted}>{t('当前仅开放语言切换，其余通知和账号安全入口暂未开放。')}</Text>
+          </View>
+        </Pressable>
+      </Link>
       <AppButton title={t('退出登录')} icon="log-out-outline" onPress={() => setLogoutConfirmVisible(true)} variant="secondary" />
 
       <AppModal

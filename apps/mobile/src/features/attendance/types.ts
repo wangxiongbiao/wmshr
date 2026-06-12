@@ -33,5 +33,12 @@ export interface AttendanceRecord {
   checkOutTime: string;
   type: 'normal' | 'overtime';
   hours: string;
-  note?: string;
+  workedHours?: number | null;
+}
+
+export interface MobileHomeSummary {
+  yearMonth: string;
+  monthHours: number;
+  attendanceDays: number;
+  pendingSopCount: number;
 }

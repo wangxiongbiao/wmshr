@@ -1,6 +1,7 @@
 import React, {useCallback, useMemo, useRef, useState} from 'react';
 import {NativeScrollEvent, NativeSyntheticEvent, Pressable, StyleSheet, Text, View} from 'react-native';
-import {useFocusEffect} from '@react-navigation/native';
+import {Ionicons} from '@expo/vector-icons';
+import {useFocusEffect} from 'expo-router';
 import {useTranslation} from 'react-i18next';
 import {useAuth} from '../../../application/providers/AuthProvider';
 import {useToast} from '../../../application/providers/ToastProvider';
@@ -16,17 +17,22 @@ const END_REACHED_THRESHOLD = 120;
 function getRecordMeta(item: AttendanceRecord, t: (value: string) => string) {
   const isIncomplete = item.checkInTime === '--:--' || item.checkOutTime === '--:--' || item.hours === t('未完整');
   if (isIncomplete) {
-    return {label: t('记录未完整'), badgeStyle: styles.badgeIncomplete, textStyle: styles.badgeIncompleteText};
+    return {label: t('未完整'), badgeStyle: styles.badgeIncomplete, textStyle: styles.badgeIncompleteText};
   }
   if (item.type === 'overtime') {
-    return {label: t('加班记录'), badgeStyle: sharedStyles.badgeWarn, textStyle: sharedStyles.badgeWarnText};
+    return {label: t('加班'), badgeStyle: styles.badgeOvertime, textStyle: styles.badgeOvertimeText};
   }
-  return {label: t('已完成'), badgeStyle: styles.badgeDone, textStyle: styles.badgeDoneText};
+  return {label: t('常规'), badgeStyle: styles.badgeDone, textStyle: styles.badgeDoneText};
+}
+
+function getHoursNumber(hours: string) {
+  const parsed = Number.parseFloat(hours.replace(/[^0-9.]/g, ''));
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 export function AttendanceListScreen() {
   const { t } = useTranslation('app');
-  const {session} = useAuth();
+  const {employee, session} = useAuth();
   const {showToast} = useToast();
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [hasFetchedOnce, setHasFetchedOnce] = useState(false);
@@ -99,41 +105,73 @@ export function AttendanceListScreen() {
     scrollEventThrottle: 16,
   }), [handleScroll]);
 
+  const summary = useMemo(() => {
+    const totalHours = records.reduce((sum, item) => sum + (typeof item.workedHours === 'number' ? item.workedHours : getHoursNumber(item.hours)), 0);
+    const overtimeCount = records.filter(item => item.type === 'overtime').length;
+    const completeCount = records.filter(item => item.checkInTime !== '--:--' && item.checkOutTime !== '--:--').length;
+    return {
+      totalHours: totalHours > 0 ? totalHours.toFixed(1) : '0.0',
+      overtimeCount: String(overtimeCount),
+      completeCount: String(completeCount),
+    };
+  }, [records]);
+
   return (
     <ScreenContainer scrollProps={scrollProps}>
       <View style={sharedStyles.screenTitle}>
+        <Text style={sharedStyles.overline}>{t('打卡流水')}</Text>
         <Text style={sharedStyles.title}>{t('考勤记录')}</Text>
-        <Text style={sharedStyles.muted}>{t('最近 31 天打卡明细')}</Text>
+        <Text style={sharedStyles.muted}>{employee?.dept ?? t('最近 31 天打卡明细')}</Text>
       </View>
 
-      <View style={styles.summaryCard}>
-        <Text style={sharedStyles.cardTitle}>{t('列表页直接查看')}</Text>
-        <Text style={sharedStyles.muted}>{t('无需进入详情页，也可直接查看每天的上下班时间、记录状态和备注说明。')}</Text>
+      <View style={styles.heroCard}>
+        <View style={styles.heroHeader}>
+          <View style={styles.heroIconWrap}>
+            <Ionicons name="calendar-outline" size={18} color={colors.primary} />
+          </View>
+          <View style={styles.heroCopy}>
+            <Text style={styles.heroTitle}>{t('最近打卡总览')}</Text>
+            <Text style={styles.heroDetail}>{t('列表页直接查看每天的上下班时间、工时和记录状态。')}</Text>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.statsGrid}>
+        <StatCard label={t('累计工时')} value={summary.totalHours} unit="h" />
+        <StatCard label={t('加班次数')} value={summary.overtimeCount} unit="d" />
+        <StatCard label={t('完整记录')} value={summary.completeCount} unit="p" />
       </View>
 
       {records.map(item => {
         const meta = getRecordMeta(item, t);
         return (
-          <View key={item.id} style={[sharedStyles.listCard, styles.recordCard]}>
-            <View style={sharedStyles.flexOne}>
-              <View style={styles.recordHeaderRow}>
-                <Text style={sharedStyles.cardTitle}>{item.date}</Text>
-                <View style={[sharedStyles.badge, meta.badgeStyle]}>
-                  <Text style={[sharedStyles.badgeText, meta.textStyle]}>{meta.label}</Text>
-                </View>
+          <Pressable key={item.id} style={({pressed}) => [styles.recordCard, pressed && styles.recordCardPressed]}>
+            <View style={styles.recordTopRow}>
+              <View>
+                <Text style={styles.recordDate}>{item.date}</Text>
+                <Text style={styles.recordTimeRange}>{item.checkInTime} - {item.checkOutTime}</Text>
               </View>
-              <Text style={styles.timeRangeText}>{t('上班 {{checkIn}} · 下班 {{checkOut}}', {checkIn: item.checkInTime, checkOut: item.checkOutTime})}</Text>
-              <Text style={styles.hoursText}>{t('记录结果：{{hours}}', {hours: item.hours})}</Text>
-              {item.note ? <Text style={styles.noteText}>{t('备注：{{note}}', {note: item.note})}</Text> : <Text style={styles.notePlaceholder}>{t('备注：无')}</Text>}
+              <View style={[styles.recordBadge, meta.badgeStyle]}>
+                <Text style={[styles.recordBadgeText, meta.textStyle]}>{meta.label}</Text>
+              </View>
             </View>
-          </View>
+
+            <View style={styles.recordMetrics}>
+              <MetricPill icon="time-outline" text={t('工时 {{hours}}', {hours: item.hours})} />
+              <MetricPill icon="log-in-outline" text={t('上班 {{time}}', {time: item.checkInTime})} />
+              <MetricPill icon="log-out-outline" text={t('下班 {{time}}', {time: item.checkOutTime})} />
+            </View>
+          </Pressable>
         );
       })}
 
       {hasFetchedOnce && records.length === 0 ? (
         <View style={styles.placeholderCard}>
-          <Text style={sharedStyles.cardTitle}>{errorText ? t('考勤记录暂时加载失败') : t('暂无考勤记录')}</Text>
-          <Text style={sharedStyles.muted}>{errorText ?? t('当你完成上班或下班打卡后，这里会显示最近 31 天的考勤明细。')}</Text>
+          <View style={styles.placeholderIcon}>
+            <Ionicons name={errorText ? 'alert-circle-outline' : 'calendar-clear-outline'} size={24} color={errorText ? colors.warning : colors.primary} />
+          </View>
+          <Text style={styles.placeholderTitle}>{errorText ? t('考勤记录暂时加载失败') : t('暂无考勤记录')}</Text>
+          <Text style={styles.placeholderDetail}>{errorText ?? t('当你完成上班或下班打卡后，这里会显示最近 31 天的考勤明细。')}</Text>
           {errorText ? (
             <Pressable style={styles.retryButton} onPress={() => void loadRecords({append: false, offset: 0, showErrorToast: true})}>
               <Text style={styles.retryButtonText}>{t('重新加载')}</Text>
@@ -144,6 +182,7 @@ export function AttendanceListScreen() {
 
       {records.length > 0 && isFetchingMore ? (
         <View style={styles.autoLoadHint}>
+          <View style={styles.autoLoadDot} />
           <Text style={styles.autoLoadHintText}>{t('正在加载更多记录...')}</Text>
         </View>
       ) : null}
@@ -151,21 +190,62 @@ export function AttendanceListScreen() {
   );
 }
 
+function StatCard({label, value, unit}: {label: string; value: string; unit: string}) {
+  return (
+    <View style={styles.statCard}>
+      <Text style={styles.statLabel}>{label}</Text>
+      <Text style={styles.statValue}>
+        {value}
+        <Text style={styles.statUnit}>{unit}</Text>
+      </Text>
+    </View>
+  );
+}
+
+function MetricPill({icon, text}: {icon: keyof typeof Ionicons.glyphMap; text: string}) {
+  return (
+    <View style={styles.metricPill}>
+      <Ionicons name={icon} size={14} color={colors.textSubtle} />
+      <Text style={styles.metricText}>{text}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  summaryCard: {backgroundColor: '#eff6ff', borderRadius: 22, padding: 16, marginBottom: 12},
-  placeholderCard: {backgroundColor: colors.white, borderRadius: 22, padding: 18, alignItems: 'center', gap: 10},
-  retryButton: {marginTop: 6, height: 44, minWidth: 120, borderRadius: 16, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16},
+  heroCard: {backgroundColor: colors.white, borderRadius: 28, padding: 20, borderWidth: 1, borderColor: '#eef2ff', shadowColor: colors.text, shadowOpacity: 0.03, shadowRadius: 20, shadowOffset: {width: 0, height: 8}, elevation: 3},
+  heroHeader: {flexDirection: 'row', alignItems: 'flex-start', gap: 14},
+  heroIconWrap: {width: 42, height: 42, borderRadius: 16, backgroundColor: '#eff6ff', alignItems: 'center', justifyContent: 'center'},
+  heroCopy: {flex: 1},
+  heroTitle: {fontSize: 16, color: colors.text, fontWeight: '900'},
+  heroDetail: {marginTop: 4, fontSize: 13, lineHeight: 19, color: colors.textSubtle, fontWeight: '600'},
+  statsGrid: {marginTop: 16, flexDirection: 'row', gap: 12},
+  statCard: {flex: 1, minHeight: 94, paddingHorizontal: 14, paddingVertical: 18, borderRadius: 24, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center', shadowColor: colors.text, shadowOpacity: 0.03, shadowRadius: 16, shadowOffset: {width: 0, height: 6}, elevation: 2, borderWidth: 1, borderColor: '#f8fafc'},
+  statLabel: {fontSize: 10, color: colors.textMuted, fontWeight: '900', letterSpacing: 1.2, textTransform: 'uppercase'},
+  statValue: {marginTop: 8, fontSize: 24, lineHeight: 28, color: colors.text, fontWeight: '900'},
+  statUnit: {fontSize: 11, color: colors.textMuted, fontWeight: '800'},
+  placeholderCard: {marginTop: 16, backgroundColor: colors.white, borderRadius: 28, padding: 24, alignItems: 'center', gap: 10, borderWidth: 1, borderColor: '#eef2ff'},
+  placeholderIcon: {width: 52, height: 52, borderRadius: 18, backgroundColor: '#f8fafc', alignItems: 'center', justifyContent: 'center'},
+  placeholderTitle: {fontSize: 18, color: colors.text, fontWeight: '900'},
+  placeholderDetail: {fontSize: 13, lineHeight: 20, color: colors.textSubtle, textAlign: 'center'},
+  retryButton: {marginTop: 8, height: 46, minWidth: 132, borderRadius: 18, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18},
   retryButtonText: {color: colors.white, fontSize: 15, fontWeight: '900'},
-  autoLoadHint: {marginTop: 6, alignItems: 'center', justifyContent: 'center'},
+  autoLoadHint: {marginTop: 8, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8},
+  autoLoadDot: {width: 8, height: 8, borderRadius: 999, backgroundColor: colors.primary},
   autoLoadHintText: {color: colors.textMuted, fontSize: 13, fontWeight: '700'},
-  recordCard: {alignItems: 'flex-start'},
-  recordHeaderRow: {flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12},
-  timeRangeText: {fontSize: 14, color: colors.text, fontWeight: '800', marginTop: 8},
-  hoursText: {fontSize: 13, color: colors.textSubtle, marginTop: 6},
-  noteText: {fontSize: 13, color: colors.textSubtle, marginTop: 6, lineHeight: 18},
-  notePlaceholder: {fontSize: 13, color: colors.textMuted, marginTop: 6},
-  badgeDone: {backgroundColor: '#dcfce7'},
+  recordCard: {marginTop: 16, backgroundColor: colors.white, borderRadius: 28, padding: 20, borderWidth: 1, borderColor: '#f1f5f9', shadowColor: colors.text, shadowOpacity: 0.03, shadowRadius: 20, shadowOffset: {width: 0, height: 8}, elevation: 3},
+  recordCardPressed: {opacity: 0.84},
+  recordTopRow: {flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12},
+  recordDate: {fontSize: 17, color: colors.text, fontWeight: '900'},
+  recordTimeRange: {marginTop: 6, fontSize: 13, color: colors.textSubtle, fontWeight: '700'},
+  recordBadge: {minHeight: 30, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6, alignItems: 'center', justifyContent: 'center'},
+  recordBadgeText: {fontSize: 11, fontWeight: '900', letterSpacing: 0.4},
+  recordMetrics: {marginTop: 16, flexDirection: 'row', flexWrap: 'wrap', gap: 10},
+  metricPill: {flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 16, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#eef2ff'},
+  metricText: {fontSize: 12, color: colors.textSubtle, fontWeight: '700'},
+  badgeDone: {backgroundColor: '#ecfdf5'},
   badgeDoneText: {color: colors.success},
+  badgeOvertime: {backgroundColor: '#fff7ed'},
+  badgeOvertimeText: {color: colors.warning},
   badgeIncomplete: {backgroundColor: '#fee2e2'},
   badgeIncompleteText: {color: '#b91c1c'},
 });

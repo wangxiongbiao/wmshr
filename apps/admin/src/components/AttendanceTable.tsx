@@ -26,7 +26,7 @@ import {
   updateAttendanceRecord
 } from "../lib/api";
 import { ModalShell } from "./ModalShell";
-import { cn, formatCurrency as formatPayrollCurrency, formatDuration } from "../lib/utils";
+import { cn, formatCurrency as formatPayrollCurrency, formatDuration, formatLocalDatePart } from "../lib/utils";
 import { Pagination } from "./Pagination";
 import { SearchableSelect, type SearchableSelectOption } from "./SearchableSelect";
 import { YearMonthPicker } from "./YearMonthPicker";
@@ -67,11 +67,11 @@ const STATUS_CLASS_NAMES: Record<string, string> = {
 };
 
 function getDefaultDate() {
-  return new Date().toISOString().slice(0, 10);
+  return formatLocalDatePart().date;
 }
 
 function getDefaultMonth() {
-  return new Date().toISOString().slice(0, 7);
+  return formatLocalDatePart().yearMonth;
 }
 
 function formatCurrency(value: number, currency: string) {
@@ -99,6 +99,10 @@ function parseHolidayDatesInput(value: string) {
 
 function formatHolidayDatesInput(dates: string[] | undefined) {
   return Array.isArray(dates) ? dates.join("\n") : "";
+}
+
+function getDaysInMonth(year: number, month: number) {
+  return new Date(year, month, 0).getDate();
 }
 
 function getAttendanceTotalPayWithService(item: AttendanceCalculationResult) {
@@ -199,6 +203,7 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
   });
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [adjustmentLoading, setAdjustmentLoading] = useState(false);
   const [maintenanceMessage, setMaintenanceMessage] = useState("");
   const [error, setError] = useState("");
   const [lastLoadedAt, setLastLoadedAt] = useState(0);
@@ -252,6 +257,27 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
       keywords: [employee.name, employee.nickname, employee.employeeNo, employee.role, employee.dept]
     }));
   }, [createEmployeeSearchResults, selectedCreateEmployee]);
+  const selectedDay = selectedDate.startsWith(`${selectedMonth}-`) ? selectedDate.slice(8, 10) : "";
+  const selectedMonthDayOptions = useMemo(() => {
+    const [yearPart, monthPart] = selectedMonth.split("-");
+    const year = Number(yearPart);
+    const month = Number(monthPart);
+    if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+      return [];
+    }
+
+    const totalDays = getDaysInMonth(year, month);
+    const isCurrentMonth = selectedMonth === getDefaultMonth();
+    const maxDay = isCurrentMonth ? Number(getDefaultDate().slice(8, 10)) : totalDays;
+
+    return Array.from({ length: maxDay }, (_, index) => {
+      const day = index + 1;
+      return {
+        value: String(day).padStart(2, "0"),
+        label: String(day)
+      };
+    });
+  }, [selectedMonth]);
 
   useEffect(() => {
     const employeeIds = calculations
@@ -600,11 +626,21 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
   };
 
   const handleOpenAdjustment = async (result: AttendanceCalculationResult) => {
-    setSubmitting(true);
+    setAdjustingResult(result);
+    setAdjustForm({
+      date: result.date,
+      type: "",
+      inTime: result.rawInTime || null,
+      outTime: result.rawOutTime || null,
+      note: result.note || "",
+      employeeOvertimeHourlyFee: "",
+      employeeOvertimeRuleEnabled: configForm?.overtimeRuleEnabled ?? null
+    });
+    setIsAdjustmentOpen(true);
+    setAdjustmentLoading(true);
     setError("");
     try {
       const detail = result.attendanceRecordId ? await fetchAttendanceCalculationDetail(result.id) : null;
-      setAdjustingResult(result);
       setAdjustForm({
         date: detail?.record?.date || result.date,
         type: detail?.record?.type || "",
@@ -618,7 +654,7 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : tAdmin("考勤记录加载失败"));
     } finally {
-      setSubmitting(false);
+      setAdjustmentLoading(false);
     }
   };
 
@@ -814,17 +850,20 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
                 availableMonths={[selectedMonth, getDefaultMonth()]}
                 className="w-full"
               />
-              <input
-                type="date"
-                value={selectedDate}
-                min={`${selectedMonth}-01`}
-                max={(() => {
-                  const monthLastDate = `${selectedMonth}-${new Date(Number(selectedMonth.slice(0, 4)), Number(selectedMonth.slice(5, 7)), 0).getDate().toString().padStart(2, "0")}`;
-                  return monthLastDate > getDefaultDate() ? getDefaultDate() : monthLastDate;
-                })()}
-                onChange={(event) => setSelectedDate(event.target.value)}
-                className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-slate-700 h-[38px] text-sm font-mono sm:max-w-[180px]"
-              />
+              <select
+                value={selectedDay}
+                onChange={(event) => {
+                  const nextDay = event.target.value;
+                  setSelectedDate(nextDay ? `${selectedMonth}-${nextDay}` : "");
+                }}
+                aria-label={tAdmin("日期")}
+                className="h-[38px] w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-brand-500 sm:max-w-[120px]"
+              >
+                <option value="">{tAdmin("日期")}</option>
+                {selectedMonthDayOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
               <button
                 type="button"
                 onClick={() => setSelectedDate("")}
@@ -1189,13 +1228,18 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
         footer={(
           <div className="flex justify-end gap-3">
             <button type="button" onClick={() => setIsAdjustmentOpen(false)} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100">{tAdmin("取消")}</button>
-            <button type="submit" form="attendance-adjust-form" disabled={submitting} className="rounded-lg bg-brand-600 px-6 py-2 text-sm text-white transition hover:bg-brand-700 disabled:opacity-60">
+            <button type="submit" form="attendance-adjust-form" disabled={submitting || adjustmentLoading} className="rounded-lg bg-brand-600 px-6 py-2 text-sm text-white transition hover:bg-brand-700 disabled:opacity-60">
               {submitting ? tAdmin("保存中...") : tAdmin("保存并重算")}
             </button>
           </div>
         )}
       >
         <form id="attendance-adjust-form" onSubmit={handleSaveAdjustment} className="space-y-4">
+          {adjustmentLoading ? (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+              {tAdmin("请稍候，正在准备弹窗内容")}
+            </div>
+          ) : null}
           {(() => {
             const isHourlyEmployee = adjustingResult?.salaryType === "hourly";
             const useEmployeeRule = Boolean(adjustForm.employeeOvertimeRuleEnabled ?? configForm?.overtimeRuleEnabled);
@@ -1203,9 +1247,9 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
             return (
               <>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <Field label={tAdmin("日期")}><input type="date" max={getDefaultDate()} value={adjustForm.date} onChange={(event) => setAdjustForm((prev) => ({ ...prev, date: event.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500" /></Field>
+            <Field label={tAdmin("日期")}><input type="date" max={getDefaultDate()} value={adjustForm.date} onChange={(event) => setAdjustForm((prev) => ({ ...prev, date: event.target.value }))} disabled={adjustmentLoading} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" /></Field>
             <Field label={tAdmin("考勤类型")}>
-              <select value={adjustForm.type} onChange={(event) => setAdjustForm((prev) => applyDefaultTimeWhenNormal(prev, event.target.value as AttendanceRecordUpdatePayload["type"] | ""))} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500">
+              <select value={adjustForm.type} onChange={(event) => setAdjustForm((prev) => applyDefaultTimeWhenNormal(prev, event.target.value as AttendanceRecordUpdatePayload["type"] | ""))} disabled={adjustmentLoading} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400">
                 <option value="">{tAdmin("请选择考勤类型")}</option>
                 <option value="normal">{tAdmin("全勤")}</option>
                 <option value="late">{tAdmin("迟到")}</option>
@@ -1216,8 +1260,8 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
                 <option value="overtime">{tAdmin("加班")}</option>
               </select>
             </Field>
-            <Field label={tAdmin("上班时间")}><input type="time" value={adjustForm.inTime || ""} onChange={(event) => setAdjustForm((prev) => ({ ...prev, inTime: event.target.value || null }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500" /></Field>
-            <Field label={tAdmin("下班时间")}><input type="time" value={adjustForm.outTime || ""} onChange={(event) => setAdjustForm((prev) => ({ ...prev, outTime: event.target.value || null }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500" /></Field>
+            <Field label={tAdmin("上班时间")}><input type="time" value={adjustForm.inTime || ""} onChange={(event) => setAdjustForm((prev) => ({ ...prev, inTime: event.target.value || null }))} disabled={adjustmentLoading} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" /></Field>
+            <Field label={tAdmin("下班时间")}><input type="time" value={adjustForm.outTime || ""} onChange={(event) => setAdjustForm((prev) => ({ ...prev, outTime: event.target.value || null }))} disabled={adjustmentLoading} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" /></Field>
             <Field label={tAdmin("员工加班费（{{currency}}/小时）", { currency: adjustingResult?.currency || "THB" })}>
               <input
                 type="number"
@@ -1226,31 +1270,54 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
                 value={adjustForm.employeeOvertimeHourlyFee ?? ""}
                 onChange={(event) => setAdjustForm((prev) => ({ ...prev, employeeOvertimeHourlyFee: event.target.value === "" ? "" : Number(event.target.value) }))}
                 placeholder={disableEmployeeOtFeeInput ? tAdmin("启用倍率后按时薪自动计算") : tAdmin("留空则使用系统默认")}
-                disabled={disableEmployeeOtFeeInput}
+                disabled={disableEmployeeOtFeeInput || adjustmentLoading}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
               />
             </Field>
             <Field label={tAdmin("员工是否启用倍率规则")}>
-              <label className="flex items-center gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={Boolean(adjustForm.employeeOvertimeRuleEnabled ?? configForm?.overtimeRuleEnabled)}
-                  onChange={(event) => setAdjustForm((prev) => ({
-                    ...prev,
-                    employeeOvertimeRuleEnabled: event.target.checked,
-                    employeeOvertimeHourlyFee: adjustingResult?.salaryType === "hourly" && event.target.checked
-                      ? ""
-                      : prev.employeeOvertimeHourlyFee
-                  }))}
-                  className="h-4 w-4 accent-brand-600"
-                />
-                {Boolean(adjustForm.employeeOvertimeRuleEnabled ?? configForm?.overtimeRuleEnabled)
-                  ? tAdmin("这个员工启用倍率规则")
-                  : tAdmin("这个员工不启用倍率规则")}
-              </label>
+              <div className="flex items-center gap-6 rounded-lg border border-slate-300 bg-white px-3 py-2">
+                <label className={cn(
+                  "flex items-center gap-2 text-sm transition",
+                  !Boolean(adjustForm.employeeOvertimeRuleEnabled ?? configForm?.overtimeRuleEnabled)
+                    ? "text-brand-700"
+                    : "text-slate-700"
+                )}>
+                  <input
+                    type="radio"
+                    name="employeeOvertimeRuleEnabled"
+                    checked={!Boolean(adjustForm.employeeOvertimeRuleEnabled ?? configForm?.overtimeRuleEnabled)}
+                    onChange={() => setAdjustForm((prev) => ({
+                      ...prev,
+                      employeeOvertimeRuleEnabled: false
+                    }))}
+                    disabled={adjustmentLoading}
+                    className="h-4 w-4 accent-brand-600"
+                  />
+                  <span className="leading-tight">{tAdmin("否")}</span>
+                </label>
+                <label className={cn(
+                  "flex items-center gap-2 text-sm transition",
+                  Boolean(adjustForm.employeeOvertimeRuleEnabled ?? configForm?.overtimeRuleEnabled)
+                    ? "text-brand-700"
+                    : "text-slate-700"
+                )}>
+                  <input
+                    type="radio"
+                    name="employeeOvertimeRuleEnabled"
+                    checked={Boolean(adjustForm.employeeOvertimeRuleEnabled ?? configForm?.overtimeRuleEnabled)}
+                    onChange={() => setAdjustForm((prev) => ({
+                      ...prev,
+                      employeeOvertimeRuleEnabled: true
+                    }))}
+                    disabled={adjustmentLoading}
+                    className="h-4 w-4 accent-brand-600"
+                  />
+                  <span className="leading-tight">{tAdmin("是")}</span>
+                </label>
+              </div>
             </Field>
           </div>
-          <Field label={tAdmin("调整备注")}><textarea value={adjustForm.note} onChange={(event) => setAdjustForm((prev) => ({ ...prev, note: event.target.value }))} rows={3} className="w-full resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500" /></Field>
+          <Field label={tAdmin("调整备注")}><textarea value={adjustForm.note} onChange={(event) => setAdjustForm((prev) => ({ ...prev, note: event.target.value }))} rows={3} disabled={adjustmentLoading} className="w-full resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" /></Field>
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             {disableEmployeeOtFeeInput
               ? tAdmin("当前员工是时薪制，并且已启用倍率规则，所以加班费会直接按员工时薪计算，不能单独输入。保存后会更新该员工配置，并重算受影响的考勤与薪资。")
@@ -1286,15 +1353,34 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
               <Field label={tAdmin("加班费标准（{{currency}}/小时）", { currency: configForm.currency || "THB" })}><input type="number" min="0" step="0.01" value={configForm.otHourlyFee} onChange={(event) => setConfigForm((prev) => prev ? { ...prev, otHourlyFee: Number(event.target.value) } : prev)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500" /></Field>
               <Field label={tAdmin("是否启用加班规则计算")}>
                 <div className="space-y-2">
-                  <label className="flex items-center gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={configForm.overtimeRuleEnabled}
-                      onChange={(event) => setConfigForm((prev) => prev ? { ...prev, overtimeRuleEnabled: event.target.checked } : prev)}
-                      className="h-4 w-4 accent-brand-600"
-                    />
-                    {configForm.overtimeRuleEnabled ? tAdmin("已启用倍率规则") : tAdmin("未启用倍率规则")}
-                  </label>
+                  <div className="flex items-center gap-6 rounded-lg border border-slate-300 bg-white px-3 py-2">
+                    <label className={cn(
+                      "flex items-center gap-2 text-sm transition",
+                      !configForm.overtimeRuleEnabled ? "text-brand-700" : "text-slate-700"
+                    )}>
+                      <input
+                        type="radio"
+                        name="overtimeRuleEnabled"
+                        checked={!configForm.overtimeRuleEnabled}
+                        onChange={() => setConfigForm((prev) => prev ? { ...prev, overtimeRuleEnabled: false } : prev)}
+                        className="h-4 w-4 accent-brand-600"
+                      />
+                      <span className="leading-tight">{tAdmin("否")}</span>
+                    </label>
+                    <label className={cn(
+                      "flex items-center gap-2 text-sm transition",
+                      configForm.overtimeRuleEnabled ? "text-brand-700" : "text-slate-700"
+                    )}>
+                      <input
+                        type="radio"
+                        name="overtimeRuleEnabled"
+                        checked={configForm.overtimeRuleEnabled}
+                        onChange={() => setConfigForm((prev) => prev ? { ...prev, overtimeRuleEnabled: true } : prev)}
+                        className="h-4 w-4 accent-brand-600"
+                      />
+                      <span className="leading-tight">{tAdmin("是")}</span>
+                    </label>
+                  </div>
                   <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
                     {tAdmin("提醒：开启后，时薪员工按正常时薪套工作日 1.5 倍、周末 2 倍、节假日 3 倍；固定薪资员工按加班费基数套同样倍率。")}
                   </div>

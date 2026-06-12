@@ -391,16 +391,38 @@ export function EmployeeModal({
           </div>
           <div>
             <FieldLabel>{tAdmin("是否派遣人员")}</FieldLabel>
-            <label className="flex items-center gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                name="isDispatchPersonnel"
-                checked={formData.isDispatchPersonnel}
-                onChange={(event) => setFormData((prev) => ({ ...prev, isDispatchPersonnel: event.target.checked }))}
-                className="h-4 w-4 accent-brand-600"
-              />
-              {formData.isDispatchPersonnel ? tAdmin("是派遣人员") : tAdmin("不是派遣人员")}
-            </label>
+            <div className="flex items-center gap-6 rounded-lg border border-slate-300 bg-white px-3 py-2">
+              <label className={cn(
+                "flex items-center gap-2 text-sm transition",
+                !formData.isDispatchPersonnel
+                  ? "text-brand-700"
+                  : "text-slate-700"
+              )}>
+                <input
+                  type="radio"
+                  name="isDispatchPersonnel"
+                  checked={!formData.isDispatchPersonnel}
+                  onChange={() => setFormData((prev) => ({ ...prev, isDispatchPersonnel: false }))}
+                  className="h-4 w-4 accent-brand-600"
+                />
+                <span className="leading-tight">{tAdmin("否")}</span>
+              </label>
+              <label className={cn(
+                "flex items-center gap-2 text-sm transition",
+                formData.isDispatchPersonnel
+                  ? "text-brand-700"
+                  : "text-slate-700"
+              )}>
+                <input
+                  type="radio"
+                  name="isDispatchPersonnel"
+                  checked={formData.isDispatchPersonnel}
+                  onChange={() => setFormData((prev) => ({ ...prev, isDispatchPersonnel: true }))}
+                  className="h-4 w-4 accent-brand-600"
+                />
+                <span className="leading-tight">{tAdmin("是")}</span>
+              </label>
+            </div>
           </div>
           <div>
             <FieldLabel>{tAdmin("时薪 (不输则根据基础薪资折算)")}</FieldLabel>
