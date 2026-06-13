@@ -10,13 +10,6 @@ dotenv.config();
 const PUBLIC_ADMIN_API_BASE_URL = process.env.ADMIN_API_BASE_URL
   || (process.env.NODE_ENV !== "production" ? "http://127.0.0.1:8788" : "https://admin.dutylix.com");
 
-function getPublicRequestBaseUrl(req: express.Request) {
-  const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
-  const protocol = forwardedProto || req.protocol || "https";
-  const host = String(req.get("host") || "dutylix.com").trim();
-  return `${protocol}://${host}`;
-}
-
 async function startServer() {
   const app = express();
   const PORT = 3001;
@@ -75,7 +68,7 @@ async function startServer() {
     }
   });
 
-  app.get("/api/public/mobile-app-update", async (req, res) => {
+  app.get("/api/public/mobile-app-update", async (_req, res) => {
     try {
       // 门户前端只通过本站同源接口取最新包信息，避免把后台域名和跨域细节散落到 React 组件里。
       // 这里转发后台统一公开更新接口，保证门户下载按钮和移动端更新弹窗消费的是同一份版本数据。
@@ -86,10 +79,7 @@ async function startServer() {
         return res.status(response.status).json(payload || { error: "Unable to load mobile app update" });
       }
 
-      res.json({
-        ...payload,
-        url: `${getPublicRequestBaseUrl(req)}/api/public/mobile-app-download`,
-      });
+      res.json(payload);
     } catch (error: any) {
       res.status(502).json({ error: error.message || "Unable to load mobile app update" });
     }

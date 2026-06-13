@@ -214,13 +214,6 @@ function validateGoogleAuthRedirectUrl(redirectTo) {
   return null;
 }
 
-function getPublicRequestBaseUrl(req) {
-  const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
-  const protocol = forwardedProto || req.protocol || "https";
-  const host = String(req.get("host") || "admin.dutylix.com").trim();
-  return `${protocol}://${host}`;
-}
-
 function buildMobileDownloadFilename(version) {
   const normalizedVersion = String(version || "")
     .trim()
@@ -260,7 +253,7 @@ async function getMobileAndroidUpdatePayload(req) {
   return {
     version: release.version,
     content: release.content,
-    url: `${getPublicRequestBaseUrl(req)}/api/public/mobile-app-download`,
+    url: release.url,
   };
 }
 
