@@ -95,11 +95,25 @@ async function startServer() {
     }
   });
 
-  app.get("/api/public/mobile-app-download", async (_req, res) => {
+  async function handleMobileAppDownload(req: express.Request, res: express.Response) {
     try {
-      const response = await fetch(`${PUBLIC_ADMIN_API_BASE_URL}/api/public/mobile-app-download`);
+      const requestHeaders: Record<string, string> = {};
+      const range = String(req.headers.range || "").trim();
+      const ifRange = String(req.headers["if-range"] || "").trim();
 
-      if (!response.ok || !response.body) {
+      if (range) {
+        requestHeaders.Range = range;
+      }
+      if (ifRange) {
+        requestHeaders["If-Range"] = ifRange;
+      }
+
+      const response = await fetch(`${PUBLIC_ADMIN_API_BASE_URL}/api/public/mobile-app-download`, {
+        method: req.method,
+        headers: requestHeaders,
+      });
+
+      if (!response.ok) {
         const payload = await response.text();
         return res.status(response.status).send(payload);
       }
@@ -107,6 +121,10 @@ async function startServer() {
       const contentType = response.headers.get("content-type");
       const contentDisposition = response.headers.get("content-disposition");
       const contentLength = response.headers.get("content-length");
+      const contentRange = response.headers.get("content-range");
+      const acceptRanges = response.headers.get("accept-ranges");
+      const etag = response.headers.get("etag");
+      const lastModified = response.headers.get("last-modified");
 
       if (contentType) {
         res.setHeader("Content-Type", contentType);
@@ -117,13 +135,40 @@ async function startServer() {
       if (contentLength) {
         res.setHeader("Content-Length", contentLength);
       }
+      if (contentRange) {
+        res.setHeader("Content-Range", contentRange);
+      }
+      if (acceptRanges) {
+        res.setHeader("Accept-Ranges", acceptRanges);
+      } else {
+        res.setHeader("Accept-Ranges", "bytes");
+      }
+      if (etag) {
+        res.setHeader("ETag", etag);
+      }
+      if (lastModified) {
+        res.setHeader("Last-Modified", lastModified);
+      }
       res.setHeader("Cache-Control", "no-store");
+
+      res.status(response.status);
+
+      if (req.method === "HEAD") {
+        return res.end();
+      }
+
+      if (!response.body) {
+        return res.status(502).json({ error: "Unable to download mobile app" });
+      }
 
       Readable.fromWeb(response.body as any).pipe(res);
     } catch (error: any) {
       res.status(502).json({ error: error.message || "Unable to download mobile app" });
     }
-  });
+  }
+
+  app.head("/api/public/mobile-app-download", handleMobileAppDownload);
+  app.get("/api/public/mobile-app-download", handleMobileAppDownload);
 
   app.get("/api/public/google-auth-url", async (req, res) => {
     try {

@@ -3408,17 +3408,35 @@ app.get("/api/public/mobile-app-update", async (_req, res) => {
   }
 });
 
-app.get("/api/public/mobile-app-download", async (_req, res) => {
+async function handleMobileAppDownload(req, res) {
   try {
     const release = await getMobileAndroidReleaseRecord();
-    const upstream = await fetch(release.url);
+    const requestHeaders = {};
+    const range = String(req.headers.range || "").trim();
+    const ifRange = String(req.headers["if-range"] || "").trim();
 
-    if (!upstream.ok || !upstream.body) {
+    if (range) {
+      requestHeaders.Range = range;
+    }
+    if (ifRange) {
+      requestHeaders["If-Range"] = ifRange;
+    }
+
+    const upstream = await fetch(release.url, {
+      method: req.method,
+      headers: requestHeaders,
+    });
+
+    if (!upstream.ok) {
       return res.status(502).json({ error: "Android 安装包下载源不可用" });
     }
 
     const contentType = upstream.headers.get("content-type") || "application/octet-stream";
     const contentLength = upstream.headers.get("content-length");
+    const contentRange = upstream.headers.get("content-range");
+    const acceptRanges = upstream.headers.get("accept-ranges");
+    const etag = upstream.headers.get("etag");
+    const lastModified = upstream.headers.get("last-modified");
 
     res.setHeader("Content-Type", contentType);
     res.setHeader("Content-Disposition", `attachment; filename="${buildMobileDownloadFilename(release.version)}"`);
@@ -3426,12 +3444,39 @@ app.get("/api/public/mobile-app-download", async (_req, res) => {
     if (contentLength) {
       res.setHeader("Content-Length", contentLength);
     }
+    if (contentRange) {
+      res.setHeader("Content-Range", contentRange);
+    }
+    if (acceptRanges) {
+      res.setHeader("Accept-Ranges", acceptRanges);
+    } else {
+      res.setHeader("Accept-Ranges", "bytes");
+    }
+    if (etag) {
+      res.setHeader("ETag", etag);
+    }
+    if (lastModified) {
+      res.setHeader("Last-Modified", lastModified);
+    }
+
+    res.status(upstream.status);
+
+    if (req.method === "HEAD") {
+      return res.end();
+    }
+
+    if (!upstream.body) {
+      return res.status(502).json({ error: "Android 安装包下载源无响应内容" });
+    }
 
     Readable.fromWeb(upstream.body).pipe(res);
   } catch (error) {
     res.status(500).json({ error: error.message || "Android 安装包下载失败" });
   }
-});
+}
+
+app.head("/api/public/mobile-app-download", handleMobileAppDownload);
+app.get("/api/public/mobile-app-download", handleMobileAppDownload);
 
 app.get("/api/mobile/app-update", async (_req, res) => {
   try {

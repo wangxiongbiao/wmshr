@@ -34,6 +34,9 @@ BUILD_MESSAGE=""
 DRY_RUN=0
 SKIP_LINT=0
 CURRENT_VERSION=""
+BUILD_JSON_FILE=""
+BUILD_VIEW_JSON_FILE=""
+DB_RESULT_FILE=""
 
 usage() {
   cat <<'EOF'
@@ -168,6 +171,13 @@ run() {
   "$@"
 }
 
+cleanup_temp_files() {
+  rm -f \
+    "${BUILD_JSON_FILE:-}" \
+    "${BUILD_VIEW_JSON_FILE:-}" \
+    "${DB_RESULT_FILE:-}"
+}
+
 update_mobile_version_files() {
   local next_version="$1"
   python3 - "$APP_JSON_PATH" "$MOBILE_PACKAGE_JSON_PATH" "$next_version" <<'PY'
@@ -241,24 +251,24 @@ main() {
     run npm --workspace @wmshr/mobile run lint
   fi
 
-  local build_json_file build_view_json_file build_id artifact_url db_result_file
-  build_json_file="$(mktemp -t wmshr-mobile-build.XXXXXX.json)"
-  build_view_json_file="$(mktemp -t wmshr-mobile-build-view.XXXXXX.json)"
-  db_result_file="$(mktemp -t wmshr-mobile-db-result.XXXXXX.json)"
-  trap 'rm -f "$build_json_file" "$build_view_json_file" "$db_result_file"' EXIT
+  local build_id artifact_url
+  BUILD_JSON_FILE="$(mktemp -t wmshr-mobile-build.XXXXXX.json)"
+  BUILD_VIEW_JSON_FILE="$(mktemp -t wmshr-mobile-build-view.XXXXXX.json)"
+  DB_RESULT_FILE="$(mktemp -t wmshr-mobile-db-result.XXXXXX.json)"
+  trap cleanup_temp_files EXIT
 
   echo "+ cd ${MOBILE_DIR} && HOME=${HOME:-} npx eas-cli build -p ${BUILD_PLATFORM} --profile ${PROFILE} --wait --json --non-interactive -m '${BUILD_MESSAGE}'"
   (
     cd "${MOBILE_DIR}"
     HOME="${HOME}" npx eas-cli build -p "${BUILD_PLATFORM}" --profile "${PROFILE}" --wait --json --non-interactive -m "${BUILD_MESSAGE}"
-  ) >"${build_json_file}"
+  ) >"${BUILD_JSON_FILE}"
 
-  build_id="$(extract_build_field "${build_json_file}" "id")"
-  artifact_url="$(extract_build_field "${build_json_file}" "artifacts.applicationArchiveUrl")"
+  build_id="$(extract_build_field "${BUILD_JSON_FILE}" "id")"
+  artifact_url="$(extract_build_field "${BUILD_JSON_FILE}" "artifacts.applicationArchiveUrl")"
 
   if [[ -z "${build_id}" ]]; then
     echo "Could not parse EAS build id from build output." >&2
-    cat "${build_json_file}" >&2
+    cat "${BUILD_JSON_FILE}" >&2
     exit 1
   fi
 
@@ -267,16 +277,16 @@ main() {
     (
       cd "${MOBILE_DIR}"
       HOME="${HOME}" npx eas-cli build:view "${build_id}" --json
-    ) >"${build_view_json_file}"
-    artifact_url="$(extract_build_field "${build_view_json_file}" "artifacts.applicationArchiveUrl")"
+    ) >"${BUILD_VIEW_JSON_FILE}"
+    artifact_url="$(extract_build_field "${BUILD_VIEW_JSON_FILE}" "artifacts.applicationArchiveUrl")"
   fi
 
   if [[ -z "${artifact_url}" ]]; then
     echo "Could not resolve applicationArchiveUrl for build ${build_id}." >&2
-    if [[ -s "${build_view_json_file}" ]]; then
-      cat "${build_view_json_file}" >&2
+    if [[ -s "${BUILD_VIEW_JSON_FILE}" ]]; then
+      cat "${BUILD_VIEW_JSON_FILE}" >&2
     else
-      cat "${build_json_file}" >&2
+      cat "${BUILD_JSON_FILE}" >&2
     fi
     exit 1
   fi
@@ -292,7 +302,7 @@ main() {
   node "${REPO_ROOT}/scripts/update-mobile-android-release.mjs" \
     --version "${VERSION}" \
     --content "${CONTENT}" \
-    --url "${artifact_url}" >"${db_result_file}"
+    --url "${artifact_url}" >"${DB_RESULT_FILE}"
 
   echo "== Android release completed =="
   echo "Version: ${VERSION}"
@@ -300,7 +310,7 @@ main() {
   echo "Build ID: ${build_id}"
   echo "Artifact URL: ${artifact_url}"
   echo "DB Row:"
-  cat "${db_result_file}"
+  cat "${DB_RESULT_FILE}"
 }
 
 main "$@"

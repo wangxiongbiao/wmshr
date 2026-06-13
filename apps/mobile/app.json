@@ -2,7 +2,7 @@
   "expo": {
     "name": "WMSHR App",
     "slug": "wmshr-app",
-    "version": "0.1.2",
+    "version": "0.1.3",
     "scheme": "wmshrapp",
     "icon": "./assets/app-icon.png",
     "orientation": "portrait",
@@ -20,7 +20,7 @@
     "android": {
       "package": "com.wmshr.app",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/app-icon-foreground.png",
+        "foregroundImage": "./assets/app-icon.png",
         "backgroundColor": "#2563eb"
       }
     },
@@ -31,7 +31,8 @@
       "expo-asset",
       "expo-secure-store",
       "expo-font",
-      "expo-router"
+      "expo-router",
+      "expo-web-browser"
     ],
     "extra": {
       "eas": {
