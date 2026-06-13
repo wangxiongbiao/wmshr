@@ -9,6 +9,7 @@ export interface EmployeeProfile {
   phone?: string;
   role: string;
   dept: string;
+  photo?: string | null;
   status: 'active' | 'on_leave' | 'probation' | 'disabled' | 'resigned';
 }
 

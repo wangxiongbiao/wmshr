@@ -2,14 +2,13 @@ import React, {useState} from 'react';
 import {Ionicons} from '@expo/vector-icons';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {useTranslation} from 'react-i18next';
-import {TodayAttendanceStatus} from '../../attendance/types';
+import {normalizeLanguage, SupportedLanguageCode} from '@wmshr/i18n';
+import {LocalizedLocationName, TodayAttendanceStatus} from '../../attendance/types';
 import {colors} from '../../../shared/constants/colors';
 
 export type CheckInPhase = 'idle' | 'requesting_permission' | 'locating' | 'reverse_geocoding' | 'submitting' | 'success' | 'failed';
 
 type Props = {
-  currentTime: string;
-  currentDate: string;
   status: TodayAttendanceStatus;
   onCheckIn: () => void;
   phase?: CheckInPhase;
@@ -19,7 +18,12 @@ type Props = {
   warningText?: string | null;
 };
 
-function getButtonText(status: TodayAttendanceStatus, phase: CheckInPhase, t: (value: string) => string) {
+type Translate = (value: string, options?: Record<string, unknown>) => string;
+type LocationNameValue = TodayAttendanceStatus['locationName'];
+
+const LOCATION_PREFIX_PATTERN = /^(?:位置|location|lokasi|ตำแหน่ง|ubicación|localização)\s*[:：]\s*/i;
+
+function getButtonText(status: TodayAttendanceStatus, phase: CheckInPhase, t: Translate) {
   if (phase === 'requesting_permission') return t('请求定位权限...');
   if (phase === 'locating') return t('正在定位...');
   if (phase === 'reverse_geocoding') return t('正在获取地址...');
@@ -30,33 +34,67 @@ function getButtonText(status: TodayAttendanceStatus, phase: CheckInPhase, t: (v
   return t('今日已完成');
 }
 
-function getActionMeta(status: TodayAttendanceStatus, phase: CheckInPhase, t: (value: string) => string) {
-  if (phase === 'requesting_permission') {
-    return {title: t('正在确认定位权限'), detail: t('请允许 App 使用定位，随后会自动继续。'), icon: 'shield-checkmark-outline' as const};
+function parseLocationName(value: string) {
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
   }
-  if (phase === 'locating') {
-    return {title: t('正在获取当前位置'), detail: t('请保持设备稳定，避免切到后台。'), icon: 'locate-outline' as const};
+
+  if (!normalized.startsWith('{')) {
+    return normalized;
   }
-  if (phase === 'reverse_geocoding') {
-    return {title: t('正在识别地址信息'), detail: t('坐标已获取，正在补全可读地址。'), icon: 'map-outline' as const};
+
+  try {
+    return JSON.parse(normalized) as LocalizedLocationName;
+  } catch {
+    return normalized;
   }
-  if (phase === 'submitting') {
-    return {title: t('正在提交打卡记录'), detail: t('请稍候，提交成功后会立即刷新今日状态。'), icon: 'cloud-upload-outline' as const};
-  }
-  if (status.status === 'not_checked_in') {
-    return {title: t('准备开始今天的工作'), detail: t('确认当前位置无误后，直接完成上班打卡。'), icon: 'sunny-outline' as const};
-  }
-  if (status.status === 'checked_in') {
-    return {title: t('你已完成上班打卡'), detail: t('结束工作前回到这里，完成下班打卡。'), icon: 'briefcase-outline' as const};
-  }
-  return {title: t('今日打卡已完成'), detail: t('上下班记录都已提交，当前无需额外操作。'), icon: 'checkmark-done-outline' as const};
 }
 
-export function CheckInCard({currentTime, currentDate, status, onCheckIn, phase = 'idle', disabled = false, helperText = null, statusHint = null, warningText = null}: Props) {
-  const { t } = useTranslation('app');
+function pickLocalizedLocationName(value: LocationNameValue, language: string) {
+  if (!value) {
+    return null;
+  }
+
+  const parsedValue = typeof value === 'string' ? parseLocationName(value) : value;
+  if (!parsedValue) {
+    return null;
+  }
+
+  if (typeof parsedValue === 'string') {
+    return parsedValue;
+  }
+
+  const normalizedLanguage = normalizeLanguage(language) as SupportedLanguageCode;
+  return parsedValue[normalizedLanguage]
+    || parsedValue.default
+    || parsedValue.name
+    || parsedValue.label
+    || parsedValue.zh
+    || parsedValue.en
+    || Object.values(parsedValue).find(item => typeof item === 'string' && item.trim().length > 0)
+    || null;
+}
+
+function formatLocationDisplay(value: LocationNameValue, language: string, t: Translate) {
+  const pickedLocation = pickLocalizedLocationName(value, language);
+  if (!pickedLocation) {
+    return t('未知地点');
+  }
+
+  const location = pickedLocation.trim();
+  const locationWithoutPrefix = location.replace(LOCATION_PREFIX_PATTERN, '').trim();
+  if (locationWithoutPrefix !== location) {
+    return t('位置：{{location}}', {location: locationWithoutPrefix});
+  }
+
+  return location;
+}
+
+export function CheckInCard({status, onCheckIn, phase = 'idle', disabled = false, helperText = null, statusHint = null, warningText = null}: Props) {
+  const { t, i18n } = useTranslation('app');
   const buttonText = getButtonText(status, phase, t);
-  const actionMeta = getActionMeta(status, phase, t);
-  const gpsText = status.locationName ?? t('未知地点');
+  const gpsText = formatLocationDisplay(status.locationName, i18n.language, t);
   const isDisabled = disabled || status.status === 'checked_out';
   const [expandedKey, setExpandedKey] = useState<'check_in' | 'check_out' | null>(null);
   const isCheckedIn = status.status === 'checked_in' || status.status === 'checked_out';
@@ -69,27 +107,9 @@ export function CheckInCard({currentTime, currentDate, status, onCheckIn, phase 
 
   return (
     <View style={styles.clockCard}>
-      <View style={styles.topBand}>
-        <View style={styles.clockBlock}>
-          <Text style={styles.clockLabel}>{t('系统时间')}</Text>
-          <Text style={styles.clock}>{currentTime}</Text>
-          <Text style={styles.clockDate}>{currentDate}</Text>
-        </View>
-      </View>
-
       <View style={styles.timeGrid}>
         <TimeBox label={t('上班时间')} value={status.checkInTime ?? '--:--'} active={Boolean(status.checkInTime)} />
         <TimeBox label={t('下班时间')} value={status.checkOutTime ?? '--:--'} active={Boolean(status.checkOutTime)} />
-      </View>
-
-      <View style={styles.actionCard}>
-        <View style={styles.actionIconWrap}>
-          <Ionicons name={actionMeta.icon} size={20} color={colors.primary} />
-        </View>
-        <View style={styles.actionCopy}>
-          <Text style={styles.actionTitle}>{actionMeta.title}</Text>
-          <Text style={styles.actionDetail}>{actionMeta.detail}</Text>
-        </View>
       </View>
 
       <View style={styles.flowCard}>
@@ -176,17 +196,7 @@ function FlowStepRow({
 
 const styles = StyleSheet.create({
   clockCard: {backgroundColor: colors.white, borderRadius: 32, padding: 24, shadowColor: colors.text, shadowOpacity: 0.05, shadowRadius: 28, shadowOffset: {width: 0, height: 14}, elevation: 5, borderWidth: 1, borderColor: 'rgba(241,245,249,0.9)'},
-  topBand: {flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12},
-  clockBlock: {flex: 1, minWidth: 0},
-  clockLabel: {fontSize: 11, color: colors.textMuted, fontWeight: '900', letterSpacing: 1.8, textTransform: 'uppercase'},
-  clock: {fontSize: 42, color: colors.text, fontWeight: '900', marginTop: 6, letterSpacing: -1.2},
-  clockDate: {fontSize: 13, color: colors.textSubtle, fontWeight: '700', marginTop: 4},
-  actionCard: {marginTop: 20, borderRadius: 24, backgroundColor: '#f8fafc', padding: 18, flexDirection: 'row', gap: 14, alignItems: 'flex-start', borderWidth: 1, borderColor: '#eef2ff'},
-  actionIconWrap: {width: 36, height: 36, borderRadius: 14, backgroundColor: '#eff6ff', alignItems: 'center', justifyContent: 'center'},
-  actionCopy: {flex: 1},
-  actionTitle: {fontSize: 15, lineHeight: 20, color: colors.text, fontWeight: '900'},
-  actionDetail: {marginTop: 4, fontSize: 12, lineHeight: 18, color: colors.textSubtle, fontWeight: '600'},
-  timeGrid: {flexDirection: 'row', gap: 14, marginTop: 24},
+  timeGrid: {flexDirection: 'row', gap: 14},
   timeBox: {flex: 1, backgroundColor: '#f8fafc', borderRadius: 24, padding: 18, alignItems: 'center', borderWidth: 1, borderColor: '#f1f5f9'},
   timeLabel: {fontSize: 11, color: colors.textMuted, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5},
   timeValue: {fontSize: 26, color: colors.text, fontWeight: '900', marginTop: 8, letterSpacing: -0.5},

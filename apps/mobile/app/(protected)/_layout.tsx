@@ -22,6 +22,10 @@ export default function ProtectedLayout() {
   return (
     <Stack screenOptions={{headerShown: false}}>
       <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="mine/settings" />
+      <Stack.Screen name="notifications" />
+      <Stack.Screen name="payroll/[payrollId]" />
+      <Stack.Screen name="sop/[sopId]" />
     </Stack>
   );
 }

@@ -15,7 +15,12 @@ const PAGE_SIZE = 7;
 const END_REACHED_THRESHOLD = 120;
 
 function getRecordMeta(item: AttendanceRecord, t: (value: string) => string) {
-  const isIncomplete = item.checkInTime === '--:--' || item.checkOutTime === '--:--' || item.hours === t('未完整');
+  const normalizedHours = String(item.hours || '').trim();
+  const isIncomplete = item.checkInTime === '--:--'
+    || item.checkOutTime === '--:--'
+    || normalizedHours === '未完整'
+    || normalizedHours === '--'
+    || normalizedHours === '';
   if (isIncomplete) {
     return {label: t('未完整'), badgeStyle: styles.badgeIncomplete, textStyle: styles.badgeIncompleteText};
   }
@@ -157,7 +162,7 @@ export function AttendanceListScreen() {
             </View>
 
             <View style={styles.recordMetrics}>
-              <MetricPill icon="time-outline" text={t('工时 {{hours}}', {hours: item.hours})} />
+              <MetricPill icon="time-outline" text={t('工时 {{hours}}', {hours: meta.label === t('未完整') ? t('未完整') : item.hours})} />
               <MetricPill icon="log-in-outline" text={t('上班 {{time}}', {time: item.checkInTime})} />
               <MetricPill icon="log-out-outline" text={t('下班 {{time}}', {time: item.checkOutTime})} />
             </View>

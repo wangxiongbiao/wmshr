@@ -1,6 +1,6 @@
 import React, {useCallback, useState} from 'react';
 import {useFocusEffect, useLocalSearchParams} from 'expo-router';
-import {ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
+import {ActivityIndicator, Image, Pressable, StyleSheet, Text, View} from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
 import {WebView} from 'react-native-webview';
 import {useTranslation} from 'react-i18next';
@@ -9,6 +9,7 @@ import {useToast} from '../../../application/providers/ToastProvider';
 import {confirmSopRead, fetchSopDocument} from '../services/sopApi';
 import {SopDocument} from '../types';
 import {ScreenContainer} from '../../../shared/components/ScreenContainer';
+import {InnerScreenHeader} from '../../../shared/components/InnerScreenHeader';
 import {colors} from '../../../shared/constants/colors';
 import {sharedStyles} from '../../../shared/constants/styles';
 
@@ -133,102 +134,100 @@ export function SopDetailScreen() {
   };
 
   return (
-    <ScreenContainer>
-      <ScrollView showsVerticalScrollIndicator={false}>
-        <Text style={sharedStyles.title}>{document?.title ?? t('SOP 详情')}</Text>
-        <Text style={sharedStyles.muted}>{document ? `${document.version} · ${t('更新')} ${document.updatedAt}` : loading ? t('正在加载详情') : t('详情暂不可用')}</Text>
-        {loading ? (
-          <View style={styles.placeholderCard}>
-            <ActivityIndicator color={colors.primary} />
-            <Text style={sharedStyles.cardTitle}>{t('正在加载 SOP 详情...')}</Text>
-            <Text style={sharedStyles.muted}>{t('请稍候，系统正在同步正文、附件和阅读状态。')}</Text>
+    <ScreenContainer header={<InnerScreenHeader title={t('SOP 详情')} fallbackHref="/sop" />} withBottomSafeArea>
+      <Text style={sharedStyles.title}>{document?.title ?? t('SOP 详情')}</Text>
+      <Text style={sharedStyles.muted}>{document ? `${document.version} · ${t('更新')} ${document.updatedAt}` : loading ? t('正在加载详情') : t('详情暂不可用')}</Text>
+      {loading ? (
+        <View style={styles.placeholderCard}>
+          <ActivityIndicator color={colors.primary} />
+          <Text style={sharedStyles.cardTitle}>{t('正在加载 SOP 详情...')}</Text>
+          <Text style={sharedStyles.muted}>{t('请稍候，系统正在同步正文、附件和阅读状态。')}</Text>
+        </View>
+      ) : loadError ? (
+        <View style={styles.placeholderCard}>
+          <Text style={sharedStyles.cardTitle}>{t('SOP 详情暂时加载失败')}</Text>
+          <Text style={sharedStyles.muted}>{loadError}</Text>
+          <Pressable style={styles.retryButton} onPress={() => void loadDocument(true)}>
+            <Text style={styles.readButtonText}>{t('重新加载')}</Text>
+          </Pressable>
+        </View>
+      ) : document ? (
+        <>
+          <View style={styles.statusCard}>
+            <Text style={sharedStyles.cardTitle}>{document.readStatus === 'read' ? t('已完成阅读确认') : t('待确认已阅读')}</Text>
+            <Text style={sharedStyles.muted}>{document.readStatus === 'read' ? t('你已完成本 SOP 的阅读确认；返回列表后状态会同步显示为已读。') : t('请确认正文和附件都已阅读后，再点击下方按钮完成阅读确认。')}</Text>
           </View>
-        ) : loadError ? (
-          <View style={styles.placeholderCard}>
-            <Text style={sharedStyles.cardTitle}>{t('SOP 详情暂时加载失败')}</Text>
-            <Text style={sharedStyles.muted}>{loadError}</Text>
-            <Pressable style={styles.retryButton} onPress={() => void loadDocument(true)}>
-              <Text style={styles.readButtonText}>{t('重新加载')}</Text>
-            </Pressable>
+          <View style={styles.contentCard}>
+            <Text style={styles.contentText}>{stripHtml(document.content) || t('暂无正文内容')}</Text>
           </View>
-        ) : document ? (
-          <>
-            <View style={styles.statusCard}>
-              <Text style={sharedStyles.cardTitle}>{document.readStatus === 'read' ? t('已完成阅读确认') : t('待确认已阅读')}</Text>
-              <Text style={sharedStyles.muted}>{document.readStatus === 'read' ? t('你已完成本 SOP 的阅读确认；返回列表后状态会同步显示为已读。') : t('请确认正文和附件都已阅读后，再点击下方按钮完成阅读确认。')}</Text>
-            </View>
-            <View style={styles.contentCard}>
-              <Text style={styles.contentText}>{stripHtml(document.content) || t('暂无正文内容')}</Text>
-            </View>
-            {activePreview ? (
-              <View style={styles.inlinePreviewCard}>
-                <View style={styles.inlinePreviewHeader}>
-                  <View style={styles.inlinePreviewTitleWrap}>
-                    <Ionicons name={activePreview.type === 'image' ? 'image-outline' : 'document-text-outline'} size={18} color={colors.primary} />
-                    <Text style={styles.inlinePreviewTitle} numberOfLines={1}>{activePreview.title}</Text>
-                  </View>
-                  <Pressable style={styles.inlinePreviewClose} onPress={() => setActivePreview(null)}>
-                    <Ionicons name="close" size={16} color={colors.textSubtle} />
-                  </Pressable>
+          {activePreview ? (
+            <View style={styles.inlinePreviewCard}>
+              <View style={styles.inlinePreviewHeader}>
+                <View style={styles.inlinePreviewTitleWrap}>
+                  <Ionicons name={activePreview.type === 'image' ? 'image-outline' : 'document-text-outline'} size={18} color={colors.primary} />
+                  <Text style={styles.inlinePreviewTitle} numberOfLines={1}>{activePreview.title}</Text>
                 </View>
-
-                {activePreview.type === 'image' ? (
-                  <View style={styles.inlineImageViewer}>
-                    <Image source={{uri: activePreview.url}} style={styles.inlinePreviewImage} resizeMode="contain" />
-                  </View>
-                ) : (
-                  <View style={styles.inlineDocumentViewer}>
-                    <WebView
-                      source={{uri: activePreview.url}}
-                      startInLoadingState
-                      style={styles.inlineDocumentWebview}
-                      renderLoading={() => (
-                        <View style={styles.inlinePreviewLoading}>
-                          <ActivityIndicator color={colors.primary} />
-                          <Text style={sharedStyles.muted}>{t('正在加载文档预览...')}</Text>
-                        </View>
-                      )}
-                    />
-                  </View>
-                )}
+                <Pressable style={styles.inlinePreviewClose} onPress={() => setActivePreview(null)}>
+                  <Ionicons name="close" size={16} color={colors.textSubtle} />
+                </Pressable>
               </View>
-            ) : null}
-            {(document.attachments || []).map(item => (
-              <Pressable
-                key={item.url}
-                style={({pressed}) => [
-                  styles.attachmentCard,
-                  activePreview?.url === getAttachmentPreviewUrl(item.url) && styles.attachmentCardActive,
-                  pressed && styles.attachmentCardPressed,
-                ]}
-                onPress={() => void handleOpenAttachment(item.name, item.url)}
-              >
-                {getAttachmentType(item.url) === 'image' ? (
-                  <Image source={{uri: item.url}} style={styles.attachmentPreviewImage} resizeMode="cover" />
-                ) : (
-                  <View style={styles.attachmentIconWrap}>
-                    <Ionicons name="document-attach-outline" size={20} color={colors.primary} />
-                  </View>
-                )}
-                <View style={sharedStyles.flexOne}>
-                  <Text style={sharedStyles.cardTitle}>{item.name}</Text>
-                  <Text style={sharedStyles.muted}>
-                    {item.size || t('附件')} · {getAttachmentType(item.url) === 'image' ? t('图片查看') : t('文档查看')}
-                  </Text>
+
+              {activePreview.type === 'image' ? (
+                <View style={styles.inlineImageViewer}>
+                  <Image source={{uri: activePreview.url}} style={styles.inlinePreviewImage} resizeMode="contain" />
                 </View>
-                <Ionicons name="open-outline" size={18} color={colors.textMuted} />
-              </Pressable>
-            ))}
+              ) : (
+                <View style={styles.inlineDocumentViewer}>
+                  <WebView
+                    source={{uri: activePreview.url}}
+                    startInLoadingState
+                    style={styles.inlineDocumentWebview}
+                    renderLoading={() => (
+                      <View style={styles.inlinePreviewLoading}>
+                        <ActivityIndicator color={colors.primary} />
+                        <Text style={sharedStyles.muted}>{t('正在加载文档预览...')}</Text>
+                      </View>
+                    )}
+                  />
+                </View>
+              )}
+            </View>
+          ) : null}
+          {(document.attachments || []).map(item => (
             <Pressable
-              disabled={submitting || document.readStatus === 'read'}
-              style={[styles.readButton, document.readStatus === 'read' && styles.readButtonDone]}
-              onPress={handleConfirmRead}
+              key={item.url}
+              style={({pressed}) => [
+                styles.attachmentCard,
+                activePreview?.url === getAttachmentPreviewUrl(item.url) && styles.attachmentCardActive,
+                pressed && styles.attachmentCardPressed,
+              ]}
+              onPress={() => void handleOpenAttachment(item.name, item.url)}
             >
-              <Text style={styles.readButtonText}>{submitting ? t('正在确认...') : document.readStatus === 'read' ? t('已确认阅读') : t('确认已阅读')}</Text>
+              {getAttachmentType(item.url) === 'image' ? (
+                <Image source={{uri: item.url}} style={styles.attachmentPreviewImage} resizeMode="cover" />
+              ) : (
+                <View style={styles.attachmentIconWrap}>
+                  <Ionicons name="document-attach-outline" size={20} color={colors.primary} />
+                </View>
+              )}
+              <View style={sharedStyles.flexOne}>
+                <Text style={sharedStyles.cardTitle}>{item.name}</Text>
+                <Text style={sharedStyles.muted}>
+                  {item.size || t('附件')} · {getAttachmentType(item.url) === 'image' ? t('图片查看') : t('文档查看')}
+                </Text>
+              </View>
+              <Ionicons name="open-outline" size={18} color={colors.textMuted} />
             </Pressable>
-          </>
-        ) : null}
-      </ScrollView>
+          ))}
+          <Pressable
+            disabled={submitting || document.readStatus === 'read'}
+            style={[styles.readButton, document.readStatus === 'read' && styles.readButtonDone]}
+            onPress={handleConfirmRead}
+          >
+            <Text style={styles.readButtonText}>{submitting ? t('正在确认...') : document.readStatus === 'read' ? t('已确认阅读') : t('确认已阅读')}</Text>
+          </Pressable>
+        </>
+      ) : null}
     </ScreenContainer>
   );
 }

@@ -2,8 +2,9 @@
   "expo": {
     "name": "WMSHR App",
     "slug": "wmshr-app",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "scheme": "wmshrapp",
+    "icon": "./assets/app-icon.png",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "assetBundlePatterns": [
@@ -19,6 +20,7 @@
     "android": {
       "package": "com.wmshr.app",
       "adaptiveIcon": {
+        "foregroundImage": "./assets/app-icon-foreground.png",
         "backgroundColor": "#2563eb"
       }
     },

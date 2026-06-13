@@ -19,6 +19,7 @@ yarn-error.log*
 .expo-shared/
 .metro-cache/
 apps/mobile/dist-web/
+apps/mobile/google-service-account.json
 
 supabase/.temp/
 

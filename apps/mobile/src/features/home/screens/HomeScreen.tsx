@@ -1,18 +1,18 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import * as Location from 'expo-location';
-import {useFocusEffect} from 'expo-router';
+import {useFocusEffect, useRouter} from 'expo-router';
 import {Alert, Platform, Pressable, StyleSheet, Text, Vibration, View} from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
 import {useTranslation} from 'react-i18next';
 import {useAuth} from '../../../application/providers/AuthProvider';
 import {useToast} from '../../../application/providers/ToastProvider';
-import {fetchMobileHomeSummary, fetchTodayAttendanceStatus, submitAttendanceCheckIn} from '../../attendance/services/attendanceApi';
+import {fetchMobileHomeSummary, fetchTodayAttendanceStatus, markEmployeeNotificationRead, submitAttendanceCheckIn, syncAttendanceLocation} from '../../attendance/services/attendanceApi';
 import {MobileHomeSummary, TodayAttendanceStatus} from '../../attendance/types';
 import {ScreenContainer} from '../../../shared/components/ScreenContainer';
-import {formatDateLabel, formatFullTime} from '../../../shared/utils/date';
 import {sharedStyles} from '../../../shared/constants/styles';
 import {colors} from '../../../shared/constants/colors';
 import {CheckInCard, CheckInPhase} from '../components/CheckInCard';
+import {localizeNotificationCopy} from '../utils/notifications';
 
 const FALLBACK_STATUS: TodayAttendanceStatus = {
   date: '',
@@ -57,17 +57,12 @@ export function HomeScreen() {
   const { t } = useTranslation('app');
   const {employee, session} = useAuth();
   const {showToast} = useToast();
-  const [currentTime, setCurrentTime] = useState(new Date());
+  const router = useRouter();
   const [todayStatus, setTodayStatus] = useState<TodayAttendanceStatus | null>(null);
   const [homeSummary, setHomeSummary] = useState<MobileHomeSummary | null>(null);
   const [todayStatusError, setTodayStatusError] = useState<string | null>(null);
   const [phase, setPhase] = useState<CheckInPhase>('idle');
   const [helperText, setHelperText] = useState<string | null>(null);
-
-  useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
 
   const loadTodayStatus = useCallback(async (showErrorToast = false) => {
     if (!session?.accessToken) {
@@ -115,7 +110,6 @@ export function HomeScreen() {
     }, [loadHomeSummary, loadTodayStatus]),
   );
 
-  const formattedDate = useMemo(() => formatDateLabel(currentTime), [currentTime]);
   const displayStatus = todayStatus ?? FALLBACK_STATUS;
   const isBusy = phase === 'requesting_permission' || phase === 'locating' || phase === 'reverse_geocoding' || phase === 'submitting';
   const statusHint = todayStatus ? getStatusHint(todayStatus, t) : t('打卡界面已准备好，今日状态同步后会自动刷新。');
@@ -124,10 +118,17 @@ export function HomeScreen() {
   const monthHours = useMemo(() => String(homeSummary?.monthHours ?? 0), [homeSummary?.monthHours]);
   const attendanceDays = useMemo(() => String(homeSummary?.attendanceDays ?? 0), [homeSummary?.attendanceDays]);
   const pendingSops = useMemo(() => String(homeSummary?.pendingSopCount ?? 0), [homeSummary?.pendingSopCount]);
+  const notifications = homeSummary?.notifications || [];
 
   const handleCheckIn = async () => {
-    if (!todayStatus || !session?.accessToken || isBusy) {
+    if (!session?.accessToken || isBusy) {
       showToast(todayStatusError ?? t('今日状态同步中，请稍后再试。'));
+      return;
+    }
+
+    if (!todayStatus) {
+      await loadTodayStatus(true);
+      showToast(todayStatusError ?? t('今日状态已重新同步，请再点一次打卡。'));
       return;
     }
 
@@ -139,30 +140,35 @@ export function HomeScreen() {
     try {
       setHelperText(null);
       setPhase('requesting_permission');
-      const permission = await Location.requestForegroundPermissionsAsync();
+      const currentPermission = await Location.getForegroundPermissionsAsync();
+      const permission = currentPermission.status === Location.PermissionStatus.GRANTED
+        ? currentPermission
+        : await Location.requestForegroundPermissionsAsync();
       if (permission.status !== Location.PermissionStatus.GRANTED) {
         throw new Error(t('定位失败，不能打卡。请重试定位；如果一直失败，请重启 App 后再试。'));
       }
 
       setPhase('locating');
       const providerStatus = Platform.OS === 'android' ? await Location.getProviderStatusAsync().catch(() => null) : null;
-      let location = null;
+      let location = await Location.getLastKnownPositionAsync({maxAge: 10 * 60 * 1000, requiredAccuracy: 1500}).catch(() => null);
 
-      try {
-        location = await Location.getCurrentPositionAsync({accuracy: Location.Accuracy.Balanced, mayShowUserSettingsDialog: false});
-      } catch (error) {
-        if (!isAndroidLocationServicesInvalid(error)) {
-          throw error;
-        }
-
-        // 某些安卓真机/ROM 缺少可用的 Google LocationServices 时，expo-location 的 fused current location 会直接报 SERVICE_INVALID；
-        // 这里回退到系统原生 last known provider，优先保住打卡闭环，而不是把整条流程卡死在 Google 定位实现上。
-        location = await Location.getLastKnownPositionAsync({maxAge: 15 * 60 * 1000, requiredAccuracy: 3000});
-        if (!location) {
-          if (providerStatus?.gpsAvailable || providerStatus?.networkAvailable) {
-            throw new Error(t('当前设备实时定位服务不可用，且暂时没有可复用的位置缓存。请先在系统地图中完成一次定位后再重试打卡。'));
+      if (!location) {
+        try {
+          location = await Location.getCurrentPositionAsync({accuracy: Location.Accuracy.Balanced, mayShowUserSettingsDialog: false});
+        } catch (error) {
+          if (!isAndroidLocationServicesInvalid(error)) {
+            throw error;
           }
-          throw new Error(t('当前设备未提供可用定位服务，请先在系统设置中打开定位后再重试打卡。'));
+
+          // 某些安卓真机/ROM 缺少可用的 Google LocationServices 时，expo-location 的 fused current location 会直接报 SERVICE_INVALID；
+          // 这里回退到系统原生 last known provider，优先保住打卡闭环，而不是把整条流程卡死在 Google 定位实现上。
+          location = await Location.getLastKnownPositionAsync({maxAge: 15 * 60 * 1000, requiredAccuracy: 3000});
+          if (!location) {
+            if (providerStatus?.gpsAvailable || providerStatus?.networkAvailable) {
+              throw new Error(t('当前设备实时定位服务不可用，且暂时没有可复用的位置缓存。请先在系统地图中完成一次定位后再重试打卡。'));
+            }
+            throw new Error(t('当前设备未提供可用定位服务，请先在系统设置中打开定位后再重试打卡。'));
+          }
         }
       }
 
@@ -170,22 +176,24 @@ export function HomeScreen() {
         throw new Error(t('定位失败，不能打卡。请重试定位；如果一直失败，请重启 App 后再试。'));
       }
 
-      setPhase('reverse_geocoding');
-      const [address] = await Location.reverseGeocodeAsync(location.coords).catch(error => {
-        // 地址反查失败不阻断打卡：已按需求保留坐标提交，并记录失败原因帮助后续排查地图/系统服务问题。
-        console.warn('[mobile-attendance] reverse geocode failed; submit with coordinates only', {message: error instanceof Error ? error.message : String(error)});
-        return [];
-      });
-      const locationName = address ? [address.city, address.district, address.street].filter(Boolean).join(' ') : '';
-
       setPhase('submitting');
       const action = todayStatus.status === 'not_checked_in' ? 'check_in' : 'check_out';
+      const reverseGeocodeTask = Location.reverseGeocodeAsync(location.coords)
+        .then((addresses) => {
+          const [address] = addresses || [];
+          return address ? [address.city, address.district, address.street].filter(Boolean).join(' ') : '';
+        })
+        .catch(error => {
+          // 地址反查改成提交后的异步补偿，不再阻塞打卡成功返回；失败时只记日志，不影响主流程。
+          console.warn('[mobile-attendance] reverse geocode failed; skip async location sync', {message: error instanceof Error ? error.message : String(error)});
+          return '';
+        });
       const nextStatus = await submitAttendanceCheckIn(session.accessToken, {
         type: action,
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
         accuracy: location.coords.accuracy ?? 0,
-        locationName,
+        locationName: '',
         deviceId: `${Platform.OS}:${Platform.Version}`,
         // 服务端现在会用固定业务时区作为唯一判定时间源；这里保留客户端时间与时区，只用于排查跨时区打卡问题，不参与允许/不允许判定。
         clientTime: new Date().toISOString(),
@@ -201,6 +209,18 @@ export function HomeScreen() {
       Vibration.vibrate(Platform.OS === 'ios' ? 400 : [0, 180, 80, 180]);
       Alert.alert(t('打卡成功'), nextStatus.status === 'checked_in' ? t('上班打卡成功') : t('下班打卡成功'));
       showToast(nextStatus.status === 'checked_in' ? t('上班打卡成功') : t('下班打卡成功'));
+      void reverseGeocodeTask.then((resolvedLocationName) => {
+        if (!resolvedLocationName || !session?.accessToken) {
+          return;
+        }
+        void syncAttendanceLocation(session.accessToken, {locationName: resolvedLocationName})
+          .then((syncedStatus) => {
+            setTodayStatus(currentStatus => currentStatus ? {...currentStatus, locationName: syncedStatus.locationName} : syncedStatus);
+          })
+          .catch(error => {
+            console.warn('[mobile-attendance] async location sync failed', {message: error instanceof Error ? error.message : String(error)});
+          });
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : t('打卡失败');
       // 失败日志只记录非敏感排障信息；后端契约尚未包含 appVersion/deviceInfo 字段，避免擅自扩展接口导致请求被拒。
@@ -217,6 +237,37 @@ export function HomeScreen() {
     }
   };
 
+  const handleNotificationPress = useCallback(async (notificationId: number, readAt: string | null, bizId: number | null) => {
+    if (!session?.accessToken) {
+      return;
+    }
+
+    try {
+      if (!readAt) {
+        const nextNotification = await markEmployeeNotificationRead(session.accessToken, notificationId);
+        setHomeSummary((currentSummary) => {
+          if (!currentSummary) {
+            return currentSummary;
+          }
+          const nextNotifications = currentSummary.notifications.map((item) => (
+            item.id === nextNotification.id ? nextNotification : item
+          ));
+          return {
+            ...currentSummary,
+            notifications: nextNotifications,
+            unreadNotificationCount: nextNotifications.filter((item) => !item.readAt).length,
+          };
+        });
+      }
+
+      if (bizId) {
+        router.push({pathname: '/payroll/[payrollId]', params: {payrollId: String(bizId)}});
+      }
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : t('通知状态更新失败'));
+    }
+  }, [router, session?.accessToken, showToast, t]);
+
   return (
     <ScreenContainer>
       <View style={sharedStyles.header}>
@@ -225,16 +276,13 @@ export function HomeScreen() {
           <Text style={sharedStyles.title}>{headerText.title}</Text>
           <Text style={sharedStyles.muted}>{employee?.dept ?? employee?.name ?? t('员工')}</Text>
         </View>
-        <View style={sharedStyles.avatarSmall}><Text style={sharedStyles.avatarText}>{employee?.name?.[0] ?? 'E'}</Text></View>
       </View>
 
       <CheckInCard
-        currentTime={formatFullTime(currentTime)}
-        currentDate={formattedDate}
         status={displayStatus}
         onCheckIn={handleCheckIn}
         phase={phase}
-        disabled={isBusy || !todayStatus}
+        disabled={isBusy || displayStatus.status === 'checked_out'}
         helperText={displayHelperText}
         statusHint={statusHint}
         warningText={todayStatus?.warning ?? null}
@@ -248,26 +296,44 @@ export function HomeScreen() {
 
       <View style={styles.noticeCard}>
         <View style={styles.noticeHeader}>
-          <Text style={styles.noticeTitle}>{t('系统通知')}</Text>
-          <Pressable onPress={() => showToast(t('通知列表即将开放'))}>
+          <View style={styles.noticeTitleWrap}>
+            <Text style={styles.noticeTitle}>{t('系统通知')}</Text>
+            {homeSummary?.unreadNotificationCount ? (
+              <View style={styles.noticeBadge}>
+                <Text style={styles.noticeBadgeText}>{homeSummary.unreadNotificationCount}</Text>
+              </View>
+            ) : null}
+          </View>
+          <Pressable onPress={() => router.push('/notifications')}>
             <Text style={styles.noticeAction}>{t('查看全部')}</Text>
           </Pressable>
         </View>
 
-        <NoticeRow
-          icon="notifications-outline"
-          iconColor={colors.primary}
-          iconBackground="#eff6ff"
-          title={t('仓库消防演练通知')}
-          detail={t('本周五下午 14:00 全员参与，请提前 10 分钟到 A 区集合。')}
-        />
-        <NoticeRow
-          icon="checkmark-circle-outline"
-          iconColor={colors.success}
-          iconBackground="#ecfdf5"
-          title={t('4 月工资条已生成')}
-          detail={t('请前往个人中心查看详情。')}
-        />
+        {notifications.length > 0 ? notifications.map((item) => (
+          (() => {
+            const copy = localizeNotificationCopy(item, t);
+            return (
+          <NoticeRow
+            key={item.id}
+            icon="receipt-outline"
+            iconColor={item.readAt ? colors.textMuted : colors.primary}
+            iconBackground={item.readAt ? '#f8fafc' : '#eff6ff'}
+            title={copy.title}
+            detail={copy.content}
+            unread={!item.readAt}
+            onPress={() => void handleNotificationPress(item.id, item.readAt, item.bizId)}
+          />
+            );
+          })()
+        )) : (
+          <NoticeRow
+            icon="notifications-outline"
+            iconColor={colors.textMuted}
+            iconBackground="#f8fafc"
+            title={t('暂无通知')}
+            detail={t('当前还没有新的系统通知。')}
+          />
+        )}
       </View>
     </ScreenContainer>
   );
@@ -291,20 +357,27 @@ function NoticeRow({
   iconBackground,
   title,
   detail,
+  unread = false,
+  onPress,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
   iconColor: string;
   iconBackground: string;
   title: string;
   detail: string;
+  unread?: boolean;
+  onPress?: () => void;
 }) {
   return (
-    <Pressable style={({pressed}) => [styles.noticeRow, pressed && styles.noticeRowPressed]}>
+    <Pressable style={({pressed}) => [styles.noticeRow, pressed && styles.noticeRowPressed]} onPress={onPress}>
       <View style={[styles.noticeIconWrap, {backgroundColor: iconBackground}]}>
         <Ionicons name={icon} size={18} color={iconColor} />
       </View>
       <View style={styles.noticeCopy}>
-        <Text style={styles.noticeRowTitle}>{title}</Text>
+        <View style={styles.noticeRowTitleWrap}>
+          <Text style={styles.noticeRowTitle}>{title}</Text>
+          {unread ? <View style={styles.noticeUnreadDot} /> : null}
+        </View>
         <Text style={styles.noticeRowDetail} numberOfLines={2}>{detail}</Text>
       </View>
       <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
@@ -320,12 +393,17 @@ const styles = StyleSheet.create({
   statUnit: {fontSize: 11, color: colors.textMuted, fontWeight: '800'},
   noticeCard: {marginTop: 16, padding: 20, borderRadius: 28, backgroundColor: colors.white, shadowColor: colors.text, shadowOpacity: 0.03, shadowRadius: 20, shadowOffset: {width: 0, height: 8}, elevation: 3, borderWidth: 1, borderColor: '#f1f5f9'},
   noticeHeader: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10},
+  noticeTitleWrap: {flexDirection: 'row', alignItems: 'center', gap: 8},
   noticeTitle: {fontSize: 13, color: colors.text, fontWeight: '900', letterSpacing: 1.4, textTransform: 'uppercase'},
   noticeAction: {fontSize: 11, color: colors.primary, fontWeight: '900', letterSpacing: 1},
+  noticeBadge: {minWidth: 20, height: 20, borderRadius: 999, paddingHorizontal: 6, backgroundColor: '#dbeafe', alignItems: 'center', justifyContent: 'center'},
+  noticeBadgeText: {fontSize: 11, color: colors.primary, fontWeight: '900'},
   noticeRow: {flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 12},
   noticeRowPressed: {opacity: 0.72},
   noticeIconWrap: {width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center'},
   noticeCopy: {flex: 1},
+  noticeRowTitleWrap: {flexDirection: 'row', alignItems: 'center', gap: 8},
   noticeRowTitle: {fontSize: 14, color: colors.text, fontWeight: '800'},
   noticeRowDetail: {marginTop: 2, fontSize: 12, lineHeight: 18, color: colors.textSubtle, fontWeight: '600'},
+  noticeUnreadDot: {width: 8, height: 8, borderRadius: 999, backgroundColor: colors.primary},
 });

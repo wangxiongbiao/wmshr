@@ -1929,6 +1929,40 @@ async function fetchCalculationContext(yearMonth, ownerUserId) {
   };
 }
 
+async function fetchScopedDailyCalculationContext({ ownerUserId, employeeId, date, attendanceConfig = null, record = undefined }) {
+  const [employeeResult, resolvedConfig, resolvedRecord] = await Promise.all([
+    supabase
+      .from("employees")
+      .select("*")
+      .eq("owner_user_id", ownerUserId)
+      .eq("id", Number(employeeId))
+      .maybeSingle(),
+    attendanceConfig ? Promise.resolve(attendanceConfig) : resolveAttendanceConfig(ownerUserId),
+    record === undefined ? fetchMobileAttendanceRecord(ownerUserId, employeeId, date) : Promise.resolve(record)
+  ]);
+
+  if (employeeResult.error) {
+    throw employeeResult.error;
+  }
+
+  const employee = employeeResult.data;
+  const employees = employee ? [employee] : [];
+  const employeeMap = new Map(employees.map((row) => [Number(row.id), row]));
+  const recordMap = new Map();
+  if (resolvedRecord) {
+    recordMap.set(`${employeeId}:${date}`, resolvedRecord);
+  }
+
+  return {
+    employees,
+    employeeMap,
+    recordMap,
+    attendanceConfig: resolvedConfig,
+    calculationMap: new Map(),
+    summaryMap: new Map()
+  };
+}
+
 
 function omitUnsupportedAttendanceMetadataForLegacySchema(payload) {
   const { meal_allowance_amount, calculation_phase, generated_by, settled_at, ...legacyPayload } = payload;
@@ -2693,7 +2727,8 @@ async function fetchPayrollResultDetail(resultId, ownerUserId) {
     salaryProfile: context.salaryProfile ? mapSalaryProfileRow(context.salaryProfile) : null,
     attendanceSummary: context.attendanceSummary ? mapAttendanceSummaryRow(context.attendanceSummary, employeeMap) : null,
     dailyStandardHours: Number(attendanceConfig?.standard_hours ?? DEFAULT_ATTENDANCE_CONFIG.standard_hours),
-    adjustmentItems: context.adjustmentItems.map(mapSalaryAdjustmentItemRow)
+    adjustmentItems: context.adjustmentItems.map(mapSalaryAdjustmentItemRow),
+    exceptionDetails: buildPayrollExceptionDetails(context.dailyCalculations)
   };
   const totalDurationMs = Date.now() - requestStartedAt;
   if (totalDurationMs >= 400) {
@@ -2710,6 +2745,28 @@ async function fetchPayrollResultDetail(resultId, ownerUserId) {
   }
 
   return payload;
+}
+
+async function fetchMobilePayrollResultDetail(ownerUserId, employeeId, resultId) {
+  const { data: row, error } = await supabase
+    .from("monthly_payroll_results")
+    .select("id, owner_user_id, employee_id, calculation_status")
+    .eq("owner_user_id", ownerUserId)
+    .eq("employee_id", Number(employeeId))
+    .eq("id", Number(resultId))
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+  if (!row) {
+    throw new Error("工资条不存在");
+  }
+  if (String(row.calculation_status || "") !== "confirmed") {
+    throw new Error("该工资条暂未开放查看");
+  }
+
+  return fetchPayrollResultDetail(Number(resultId), ownerUserId);
 }
 
 function normalizeEmployeePayload(body, authUser) {
@@ -3361,6 +3418,32 @@ function extractMobileAttendanceLocationName(note) {
   return rawNote;
 }
 
+function scheduleMonthlyAttendanceRecalculation(yearMonth, ownerUserId, employeeId) {
+  setTimeout(() => {
+    void recalculateMonthlyAttendance(yearMonth, ownerUserId, Number(employeeId)).catch((error) => {
+      console.error("[mobile-attendance] async monthly recalculation failed", {
+        ownerUserId,
+        employeeId,
+        yearMonth,
+        message: error?.message || String(error)
+      });
+    });
+  }, 0);
+}
+
+function scheduleDailyAttendanceRecalculation({ ownerUserId, employeeId, date, context, options }) {
+  setTimeout(() => {
+    void recalculateDailyAttendance(Number(employeeId), date, ownerUserId, context, options).catch((error) => {
+      console.error("[mobile-attendance] async daily recalculation failed", {
+        ownerUserId,
+        employeeId,
+        date,
+        message: error?.message || String(error)
+      });
+    });
+  }, 0);
+}
+
 function mapMobileAttendanceStatus(record, config, date) {
   const checkInTime = record?.in_time ? String(record.in_time).slice(0, 5) : null;
   const checkOutTime = record?.out_time ? String(record.out_time).slice(0, 5) : null;
@@ -3458,14 +3541,54 @@ async function upsertMobileAttendancePunch({ ownerUserId, employeeId, action, bo
     if (error) throw error;
   }
 
-  await recalculateDailyAttendance(Number(employeeId), date, ownerUserId, null, {
-    // 员工端上班打卡后当天仍是过程态；下班前展示 checked_in，不能按历史结算口径标成缺下班异常。
-    pendingIfNoRecord: date === getBangkokDateKey(),
-    inProgressIfMissingOut: date === getBangkokDateKey(),
-    generatedBy: "draft_job"
+  const latestRecord = await fetchMobileAttendanceRecord(ownerUserId, employeeId, date);
+  const dailyContext = await fetchScopedDailyCalculationContext({
+    ownerUserId,
+    employeeId,
+    date,
+    attendanceConfig: config,
+    record: latestRecord
   });
-  await recalculateMonthlyAttendance(date.slice(0, 7), ownerUserId, Number(employeeId));
-  return fetchMobileAttendanceStatus(ownerUserId, employeeId, date);
+
+  scheduleDailyAttendanceRecalculation({
+    ownerUserId,
+    employeeId,
+    date,
+    context: dailyContext,
+    options: {
+    // 员工端上班打卡后当天仍是过程态；下班前展示 checked_in，不能按历史结算口径标成缺下班异常。
+      pendingIfNoRecord: date === getBangkokDateKey(),
+      inProgressIfMissingOut: date === getBangkokDateKey(),
+      generatedBy: "draft_job"
+    }
+  });
+  scheduleMonthlyAttendanceRecalculation(date.slice(0, 7), ownerUserId, employeeId);
+  return mapMobileAttendanceStatus(latestRecord, config, date);
+}
+
+async function syncMobileAttendanceLocation({ ownerUserId, employeeId, locationName, date = getBangkokDateKey() }) {
+  const normalizedLocationName = String(locationName || "").trim();
+  if (!normalizedLocationName) {
+    return fetchMobileAttendanceStatus(ownerUserId, employeeId, date);
+  }
+
+  const existingRecord = await fetchMobileAttendanceRecord(ownerUserId, employeeId, date);
+  if (!existingRecord) {
+    return fetchMobileAttendanceStatus(ownerUserId, employeeId, date);
+  }
+
+  const nextNote = buildMobileAttendanceNote({ action: existingRecord.out_time ? "check_out" : "check_in", locationName: normalizedLocationName });
+  const { error } = await supabase
+    .from("attendance_records")
+    .update({ note: nextNote, updated_at: new Date().toISOString() })
+    .eq("owner_user_id", ownerUserId)
+    .eq("id", Number(existingRecord.id));
+  if (error) {
+    throw error;
+  }
+
+  const config = await resolveAttendanceConfig(ownerUserId);
+  return mapMobileAttendanceStatus({ ...existingRecord, note: nextNote }, config, date);
 }
 
 function mapMobileAttendanceRecord(row) {
@@ -3496,12 +3619,13 @@ function mapMobileAttendanceRecordWithCalculation(row, calculationRow) {
 }
 
 async function fetchMobileHomeSummary(ownerUserId, employeeId) {
+  await ensurePayrollConfirmedNotifications(ownerUserId, employeeId);
   const yearMonth = getBangkokDateKey().slice(0, 7);
   const monthDates = enumerateMonthDates(yearMonth);
   const periodStartDate = monthDates[0];
   const periodEndDate = monthDates[monthDates.length - 1];
 
-  const [calculationsResult, visibleSops] = await Promise.all([
+  const [calculationsResult, visibleSops, notificationsResult, unreadNotificationsResult] = await Promise.all([
     supabase
       .from("attendance_calculation_results")
       .select("date, valid_hours")
@@ -3509,11 +3633,30 @@ async function fetchMobileHomeSummary(ownerUserId, employeeId) {
       .eq("employee_id", Number(employeeId))
       .gte("date", periodStartDate)
       .lte("date", periodEndDate),
-    fetchSopDocuments(ownerUserId, { publishedOnly: true, employeeId: Number(employeeId) })
+    fetchSopDocuments(ownerUserId, { publishedOnly: true, employeeId: Number(employeeId) }),
+    supabase
+      .from("employee_notifications")
+      .select("*")
+      .eq("owner_user_id", ownerUserId)
+      .eq("employee_id", Number(employeeId))
+      .order("created_at", { ascending: false })
+      .limit(3),
+    supabase
+      .from("employee_notifications")
+      .select("id", { count: "exact", head: true })
+      .eq("owner_user_id", ownerUserId)
+      .eq("employee_id", Number(employeeId))
+      .is("read_at", null)
   ]);
 
   if (calculationsResult.error) {
     throw calculationsResult.error;
+  }
+  if (notificationsResult.error) {
+    throw notificationsResult.error;
+  }
+  if (unreadNotificationsResult.error) {
+    throw unreadNotificationsResult.error;
   }
 
   const calculations = calculationsResult.data || [];
@@ -3523,13 +3666,87 @@ async function fetchMobileHomeSummary(ownerUserId, employeeId) {
     const readAt = row.reads?.[Number(employeeId)] || null;
     return !readAt;
   }).length;
+  const notifications = (notificationsResult.data || []).map(mapEmployeeNotificationRow);
+  const unreadNotificationCount = Number(unreadNotificationsResult.count || 0);
 
   return {
     yearMonth,
     monthHours,
     attendanceDays,
     pendingSopCount,
+    unreadNotificationCount,
+    notifications,
   };
+}
+
+function mapEmployeeNotificationRow(row) {
+  return {
+    id: Number(row.id),
+    type: String(row.type || "payroll_confirmed"),
+    title: String(row.title || ""),
+    content: String(row.content || ""),
+    bizId: row.biz_id === null || row.biz_id === undefined ? null : Number(row.biz_id),
+    bizMonth: row.biz_month || null,
+    readAt: row.read_at || null,
+    createdAt: row.created_at || null
+  };
+}
+
+async function createPayrollConfirmedNotification({ ownerUserId, employeeId, payrollResultId, yearMonth }) {
+  const { error } = await supabase
+    .from("employee_notifications")
+    .upsert({
+      owner_user_id: ownerUserId,
+      employee_id: Number(employeeId),
+      type: "payroll_confirmed",
+      title: `${yearMonth} 工资条已发放`,
+      content: `你 ${yearMonth} 的工资条已确认发放，请及时查看。`,
+      biz_id: Number(payrollResultId),
+      biz_month: yearMonth,
+      updated_at: new Date().toISOString()
+    }, { onConflict: "owner_user_id,employee_id,type,biz_id" });
+
+  if (error) {
+    throw error;
+  }
+}
+
+async function ensurePayrollConfirmedNotifications(ownerUserId, employeeId) {
+  const [payrollResult, notificationsResult] = await Promise.all([
+    supabase
+      .from("monthly_payroll_results")
+      .select("id, year_month")
+      .eq("owner_user_id", ownerUserId)
+      .eq("employee_id", Number(employeeId))
+      .eq("calculation_status", "confirmed")
+      .order("confirmed_at", { ascending: false })
+      .limit(12),
+    supabase
+      .from("employee_notifications")
+      .select("biz_id")
+      .eq("owner_user_id", ownerUserId)
+      .eq("employee_id", Number(employeeId))
+      .eq("type", "payroll_confirmed")
+  ]);
+
+  if (payrollResult.error) {
+    throw payrollResult.error;
+  }
+  if (notificationsResult.error) {
+    throw notificationsResult.error;
+  }
+
+  const existingBizIds = new Set((notificationsResult.data || []).map((row) => Number(row.biz_id)).filter(Number.isFinite));
+  const missingResults = (payrollResult.data || []).filter((row) => !existingBizIds.has(Number(row.id)));
+
+  for (const row of missingResults) {
+    await createPayrollConfirmedNotification({
+      ownerUserId,
+      employeeId,
+      payrollResultId: Number(row.id),
+      yearMonth: String(row.year_month || "")
+    });
+  }
 }
 
 function mapMobileSopDocument(row, employeeId) {
@@ -3601,6 +3818,95 @@ app.get("/api/mobile/home/summary", requireEmployeeAppAuth, async (req, res) => 
   }
 });
 
+app.get("/api/mobile/notifications", requireEmployeeAppAuth, async (req, res) => {
+  try {
+    const ownerUserId = req.employeeApp.ownerUserId;
+    const employeeId = req.employeeApp.employeeId;
+    const limit = Math.min(50, Math.max(1, Number(req.query.limit || 20)));
+    const offset = Math.max(0, Number(req.query.offset || 0));
+    const end = offset + limit - 1;
+
+    await ensurePayrollConfirmedNotifications(ownerUserId, employeeId);
+
+    const [notificationsResult, totalResult] = await Promise.all([
+      supabase
+        .from("employee_notifications")
+        .select("*")
+        .eq("owner_user_id", ownerUserId)
+        .eq("employee_id", Number(employeeId))
+        .order("created_at", { ascending: false })
+        .range(offset, end),
+      supabase
+        .from("employee_notifications")
+        .select("id", { count: "exact", head: true })
+        .eq("owner_user_id", ownerUserId)
+        .eq("employee_id", Number(employeeId))
+    ]);
+
+    if (notificationsResult.error) {
+      throw notificationsResult.error;
+    }
+    if (totalResult.error) {
+      throw totalResult.error;
+    }
+
+    res.json({
+      items: (notificationsResult.data || []).map(mapEmployeeNotificationRow),
+      total: Number(totalResult.count || 0),
+      limit,
+      offset
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "通知列表加载失败" });
+  }
+});
+
+app.post("/api/mobile/notifications/:id/read", requireEmployeeAppAuth, async (req, res) => {
+  try {
+    const notificationId = Number(req.params.id);
+    if (!notificationId) {
+      return res.status(400).json({ error: "通知 ID 不正确" });
+    }
+
+    const { data, error } = await supabase
+      .from("employee_notifications")
+      .update({
+        read_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .eq("owner_user_id", req.employeeApp.ownerUserId)
+      .eq("employee_id", req.employeeApp.employeeId)
+      .eq("id", notificationId)
+      .select("*")
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+    if (!data) {
+      return res.status(404).json({ error: "通知不存在" });
+    }
+
+    res.json(mapEmployeeNotificationRow(data));
+  } catch (error) {
+    res.status(500).json({ error: error.message || "通知已读更新失败" });
+  }
+});
+
+app.get("/api/mobile/payroll-results/:id", requireEmployeeAppAuth, async (req, res) => {
+  try {
+    const resultId = Number(req.params.id);
+    if (!resultId) {
+      return res.status(400).json({ error: "工资条 ID 不正确" });
+    }
+
+    const detail = await fetchMobilePayrollResultDetail(req.employeeApp.ownerUserId, req.employeeApp.employeeId, resultId);
+    res.json(detail);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "工资条详情加载失败" });
+  }
+});
+
 app.post("/api/mobile/attendance/check-in", requireEmployeeAppAuth, async (req, res) => {
   try {
     const result = await upsertMobileAttendancePunch({ ownerUserId: req.employeeApp.ownerUserId, employeeId: req.employeeApp.employeeId, action: "check_in", body: req.body || {} });
@@ -3616,6 +3922,20 @@ app.post("/api/mobile/attendance/check-out", requireEmployeeAppAuth, async (req,
     res.json(result);
   } catch (error) {
     res.status(400).json({ error: error.message || "下班打卡失败" });
+  }
+});
+
+app.post("/api/mobile/attendance/location", requireEmployeeAppAuth, async (req, res) => {
+  try {
+    const result = await syncMobileAttendanceLocation({
+      ownerUserId: req.employeeApp.ownerUserId,
+      employeeId: req.employeeApp.employeeId,
+      locationName: req.body?.locationName,
+      date: getBangkokDateKey(),
+    });
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "打卡位置同步失败" });
   }
 });
 
@@ -5515,6 +5835,13 @@ app.patch("/api/admin/payroll-results/:id/confirm", async (req, res) => {
       throw error;
     }
 
+    await createPayrollConfirmedNotification({
+      ownerUserId,
+      employeeId: Number(data.employee_id),
+      payrollResultId: Number(data.id),
+      yearMonth: String(data.year_month || "")
+    });
+
     clearPayrollResultsCache(ownerUserId);
     const employeeResult = await supabase.from("employees").select("*").eq("owner_user_id", ownerUserId).eq("id", Number(data.employee_id)).maybeSingle();
     if (employeeResult.error) throw employeeResult.error;
@@ -6386,8 +6713,9 @@ const isDirectRun = process.argv[1]
 // 执行 `node server/index.js` 时才启动监听，避免 serverless 入口被本地
 // app.listen 长连接卡住。若部署入口调整，请同时检查根目录 `api/[...path].js` 和 `vercel.json`。
 if (isDirectRun) {
-  app.listen(PORT, () => {
-    console.log(`wmshr-admin API running on http://127.0.0.1:${PORT}`);
+  // 员工端 Expo 真机调试要通过局域网直连本机 API；只监听 127.0.0.1 会导致电脑可用、手机登录始终报网络错误。
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`wmshr-admin API running on http://0.0.0.0:${PORT}`);
   });
 }
 

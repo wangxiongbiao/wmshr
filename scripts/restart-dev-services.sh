@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_DIR="$ROOT_DIR/.dev-logs"
 PID_DIR="$LOG_DIR/pids"
+TMUX_ADMIN_API_SESSION="wmshr-admin-api"
+TMUX_EXPO_SESSION="wmshr-mobile-expo"
 mkdir -p "$LOG_DIR" "$PID_DIR"
 
 # 这个脚本只管理 WMSHR 本地开发服务；端口来自各 workspace 的固定启动入口。
@@ -23,6 +25,11 @@ stop_pid_files() {
     fi
     rm -f "$pid_file"
   done
+
+  if command -v tmux >/dev/null 2>&1; then
+    tmux kill-session -t "$TMUX_ADMIN_API_SESSION" 2>/dev/null || true
+    tmux kill-session -t "$TMUX_EXPO_SESSION" 2>/dev/null || true
+  fi
 }
 
 stop_ports() {
@@ -59,6 +66,23 @@ start_service() {
   echo $! >"$PID_DIR/$name.pid"
 }
 
+start_tmux_service() {
+  local name="$1"
+  local session_name="$2"
+  local command="$3"
+  local log_file="$LOG_DIR/$name.log"
+
+  if ! command -v tmux >/dev/null 2>&1; then
+    echo "[error] tmux is required for $name but was not found"
+    return 1
+  fi
+
+  echo "[start] $name (tmux:$session_name) -> $log_file"
+  : >"$log_file"
+  tmux kill-session -t "$session_name" 2>/dev/null || true
+  tmux new-session -d -s "$session_name" "cd \"$ROOT_DIR\" && exec bash -lc '$command'"
+}
+
 wait_port() {
   local name="$1"
   local port="$2"
@@ -67,6 +91,16 @@ wait_port() {
     if lsof -tiTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
       echo "[ready] $name listening on $port"
       return 0
+    fi
+    if [[ "$name" == "admin-api" ]] && command -v tmux >/dev/null 2>&1 && ! tmux has-session -t "$TMUX_ADMIN_API_SESSION" 2>/dev/null; then
+      echo "[error] $name exited early; tail log:"
+      tail -n 60 "$log_file" || true
+      return 1
+    fi
+    if [[ "$name" == "mobile-expo" ]] && command -v tmux >/dev/null 2>&1 && ! tmux has-session -t "$TMUX_EXPO_SESSION" 2>/dev/null; then
+      echo "[error] $name exited early; tail log:"
+      tail -n 60 "$log_file" || true
+      return 1
     fi
     if [[ -f "$PID_DIR/$name.pid" ]] && ! kill -0 "$(cat "$PID_DIR/$name.pid")" 2>/dev/null; then
       echo "[error] $name exited early; tail log:"
@@ -134,10 +168,12 @@ stop_ports
 wait_stopped
 
 # Admin API、Admin Web、门户和员工移动端分别独立启动，便于单独看日志和定位端口冲突。
-start_service "admin-api" "npm run dev:admin:api"
+# Admin API 与 Expo CLI 都需要稳定驻留；在当前桌面环境里，nohup 后台托管会出现“短暂可用后静默退出”，改用 tmux 托管避免手机端频繁报网络错误。
+start_tmux_service "admin-api" "$TMUX_ADMIN_API_SESSION" "npm --workspace @wmshr/admin run start:api | tee \"$LOG_DIR/admin-api.log\""
 start_service "admin-web" "npm run dev:admin"
 start_service "home-web" "npm run dev:home"
-start_service "mobile-expo" "cd apps/mobile && EXPO_NO_TELEMETRY=1 npx expo start --host lan"
+# Expo CLI 在 nohup/无 TTY 场景下经常“看起来启动成功、随后静默退出”；改用独立 tmux session 托管，避免改完代码后员工端调试服务反复断开。
+start_tmux_service "mobile-expo" "$TMUX_EXPO_SESSION" "cd apps/mobile && EXPO_NO_TELEMETRY=1 npx expo start --host lan --clear | tee \"$LOG_DIR/mobile-expo.log\""
 
 wait_http_local "admin-api" "127.0.0.1" "8788" "/api/health"
 wait_http_local "admin-web" "127.0.0.1" "3000" "/"

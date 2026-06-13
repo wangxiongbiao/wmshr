@@ -3,6 +3,8 @@ import i18next from 'i18next';
 import {fetchCurrentEmployee, loginEmployeeApp} from '../../features/auth/services/authApi';
 import {EmployeeProfile} from '../../features/auth/types';
 import {deletePersistentItem, getPersistentItem, setPersistentItem} from '../../shared/utils/persistentStorage';
+import {env} from '../../shared/config/env';
+import {getScreenshotSession} from '../../shared/api/screenshotMocks';
 
 type AuthSession = {
   accessToken: string;
@@ -26,19 +28,50 @@ type AuthContextValue = {
 const AUTH_STATE_KEY = 'wmshr-mobile-auth-state';
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+function getInitialScreenshotState() {
+  if (env.appEnv !== 'screenshots') {
+    return null;
+  }
+
+  const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
+  if (pathname === '/login') {
+    return {
+      session: null,
+      employee: null,
+      loading: false,
+    };
+  }
+
+  const screenshotSession = getScreenshotSession();
+  return {
+    session: {
+      accessToken: screenshotSession.accessToken,
+      expiresAt: screenshotSession.expiresAt,
+    },
+    employee: screenshotSession.employee,
+    loading: false,
+  };
+}
+
 function isSessionValid(session: AuthSession) {
   return new Date(session.expiresAt).getTime() > Date.now();
 }
 
 export function AuthProvider({children}: PropsWithChildren) {
+  const initialScreenshotState = getInitialScreenshotState();
   // 登录态现在持久化在 SecureStore：用于 App 重启后恢复 session；密码仍由登录页“记住我”单独管理，避免退出清理和账号回填互相影响。
-  const [session, setSession] = useState<AuthSession | null>(null);
-  const [employee, setEmployee] = useState<EmployeeProfile | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [session, setSession] = useState<AuthSession | null>(initialScreenshotState?.session ?? null);
+  const [employee, setEmployee] = useState<EmployeeProfile | null>(initialScreenshotState?.employee ?? null);
+  const [loading, setLoading] = useState<boolean>(initialScreenshotState?.loading ?? true);
 
   useEffect(() => {
     let mounted = true;
     async function restoreAuthState() {
+      if (env.appEnv === 'screenshots') {
+        setLoading(false);
+        return;
+      }
+
       const rawState = await getPersistentItem(AUTH_STATE_KEY);
       if (!mounted) {
         return;

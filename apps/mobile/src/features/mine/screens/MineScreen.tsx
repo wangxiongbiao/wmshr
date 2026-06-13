@@ -1,7 +1,7 @@
 import React, {useState} from 'react';
 import {Ionicons} from '@expo/vector-icons';
 import {Link} from 'expo-router';
-import {Pressable, StyleSheet, Text, View} from 'react-native';
+import {Image, Pressable, StyleSheet, Text, View} from 'react-native';
 import {useTranslation} from 'react-i18next';
 import {useAuth} from '../../../application/providers/AuthProvider';
 import {useToast} from '../../../application/providers/ToastProvider';
@@ -31,7 +31,13 @@ export function MineScreen() {
         <Text style={sharedStyles.muted}>{employee?.name ?? t('员工')}</Text>
       </View>
       <View style={sharedStyles.profileCard}>
-        <View style={sharedStyles.avatar}><Text style={sharedStyles.avatarText}>{employee?.name?.[0] ?? 'E'}</Text></View>
+        <View style={sharedStyles.avatar}>
+          {employee?.photo ? (
+            <Image source={{uri: employee.photo}} style={styles.avatarImage} resizeMode="cover" />
+          ) : (
+            <Text style={sharedStyles.avatarText}>{employee?.name?.[0] ?? 'E'}</Text>
+          )}
+        </View>
         <Text style={sharedStyles.profileName}>{employee?.name ?? t('员工')}</Text>
         <Text style={sharedStyles.muted}>{employee?.role ?? '--'} · {employee?.dept ?? '--'} · {employee?.country ?? '--'}</Text>
       </View>
@@ -67,5 +73,6 @@ export function MineScreen() {
 }
 
 const styles = StyleSheet.create({
+  avatarImage: {width: '100%', height: '100%'},
   summaryCard: {backgroundColor: '#eff6ff', borderRadius: 22, padding: 16, marginBottom: 12},
 });

@@ -8,11 +8,14 @@ declare global {
 }
 
 const runtimeConfig = globalThis.__WMSHR_RUNTIME_CONFIG__ ?? {};
+const webSearchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+const queryAppEnv = webSearchParams?.get('appEnv') || '';
+const queryApiBaseUrl = webSearchParams?.get('apiBaseUrl') || '';
 
 export const env = {
   // Expo Go 运行在手机上时不能访问电脑的 127.0.0.1；默认使用当前开发机局域网 IP，生产/其他网络可用 EXPO_PUBLIC_API_BASE_URL 覆盖。
-  apiBaseUrl: runtimeConfig.apiBaseUrl ?? process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://172.16.11.231:8788',
-  appEnv: runtimeConfig.appEnv ?? process.env.EXPO_PUBLIC_APP_ENV ?? 'local',
+  apiBaseUrl: queryApiBaseUrl || runtimeConfig.apiBaseUrl || process.env.EXPO_PUBLIC_API_BASE_URL || 'http://172.16.11.231:8788',
+  appEnv: queryAppEnv || runtimeConfig.appEnv || process.env.EXPO_PUBLIC_APP_ENV || 'local',
 };
 
 export type AppEnv = typeof env;

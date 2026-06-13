@@ -2,6 +2,7 @@ import React, {useEffect, useState} from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {useTranslation} from 'react-i18next';
 import {ScreenContainer} from '../../../shared/components/ScreenContainer';
+import {InnerScreenHeader} from '../../../shared/components/InnerScreenHeader';
 import {sharedStyles} from '../../../shared/constants/styles';
 import {colors} from '../../../shared/constants/colors';
 import {useToast} from '../../../application/providers/ToastProvider';
@@ -28,7 +29,7 @@ export function SettingsScreen() {
   };
 
   return (
-    <ScreenContainer>
+    <ScreenContainer header={<InnerScreenHeader title={t('设置')} fallbackHref="/mine" />} withBottomSafeArea>
       <Text style={sharedStyles.title}>{t('设置')}</Text>
       <Text style={sharedStyles.muted}>{t('当前仅开放语言切换；通知和账号安全功能暂未开放。')}</Text>
 

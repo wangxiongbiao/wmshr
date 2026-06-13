@@ -25,6 +25,8 @@
     "build:home": "npm --workspace @wmshr/home run build",
     "mobile:update-android-release": "node scripts/update-mobile-android-release.mjs",
     "mobile:release:android": "bash scripts/release-mobile-android.sh",
+    "mobile:setup:google-play-key": "bash scripts/setup-google-play-service-account.sh",
+    "mobile:release:android:play": "bash scripts/release-mobile-android-play.sh",
     "lint": "npm run lint --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
     "check:i18n": "node scripts/check-i18n-hardcoded.mjs",

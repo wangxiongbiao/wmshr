@@ -33,7 +33,8 @@ import { useTranslation } from "react-i18next";
 import { normalizeLanguage, SUPPORTED_LANGUAGES, type SupportedLanguageCode } from "@wmshr/i18n";
 import { useLocation, useNavigate } from "react-router-dom";
 import EmailFormPage from "./components/EmailFormPage";
-import { buildHomeRoute, parseHomeRoute } from "./lib/homeRoute";
+import LegalPage from "./components/LegalPage";
+import { buildHomeRoute, parseHomeRoute, type HomePageRoute } from "./lib/homeRoute";
 import teamMeetingImage from "./assets/images/zenith_team_meeting_1779183482085.png";
 import hqOfficeImage from "./assets/images/zenith_hq_office_1779183499882.png";
 // 门户 about 区块的 founder 头像固定使用本地静态图，避免继续回退到纯文字占位头像。
@@ -45,6 +46,8 @@ const ADMIN_PORTAL_URL = import.meta.env.VITE_ADMIN_PORTAL_URL
 // 门户下载区现在统一从数据库里的最新 Android 包记录读取地址；不要再把 APK 直链硬编码回组件或环境变量。
 // 如果后续出新包，更新数据库中的 `public.mobile_app_releases` 即可，门户按钮和二维码会自动切到新地址。
 const DOWNLOAD_SECTION_HASH = "#download";
+const PRIVACY_CONTACT_EMAIL = "dutylix@163.com";
+type LegalRoute = Extract<HomePageRoute, "privacy" | "terms" | "compliance">;
 
 type MobileAndroidUpdatePayload = {
   version: string;
@@ -584,6 +587,8 @@ export default function App() {
   const navigate = useNavigate();
   const routeState = parseHomeRoute(location.pathname);
   const currentLanguage = routeState.language;
+  const isLegalPage = routeState.page !== "home";
+  const legalPage: LegalRoute | null = isLegalPage ? (routeState.page as LegalRoute) : null;
   const [showEmailForm, setShowEmailForm] = useState(false);
   // 门户下载区固定读取数据库里当前“最新 Android 安装包”记录；不要再回退到组件内硬编码 URL，否则出新包后门户会和后台配置再次脱节。
   const [androidDownloadUrl, setAndroidDownloadUrl] = useState("");
@@ -694,13 +699,18 @@ export default function App() {
   }, [androidDownloadUrl]);
 
   const handleLanguageRouteChange = (language: SupportedLanguageCode) => {
-    navigate({ pathname: buildHomeRoute(language), hash: location.hash });
+    navigate({ pathname: buildHomeRoute(language, routeState.page), hash: isLegalPage ? "" : location.hash });
   };
 
   const navigateToHome = (targetHash = "") => {
     setShowEmailForm(false);
     // 顶部导航的首页锚点既要支持首页内滚动，也要支持从其它状态回首页后继续定位到对应区块。
     navigate({ pathname: buildHomeRoute(currentLanguage), hash: targetHash }, { replace: false });
+  };
+
+  const navigateToLegal = (page: LegalRoute) => {
+    setShowEmailForm(false);
+    navigate({ pathname: buildHomeRoute(currentLanguage, page), hash: "" }, { replace: false });
   };
 
   const navigateToDownload = () => {
@@ -740,7 +750,14 @@ export default function App() {
         onNavigateAdmin={openAdmin}
       />
 
-      {showEmailForm ? (
+      {legalPage ? (
+        <LegalPage
+          contactEmail={PRIVACY_CONTACT_EMAIL}
+          currentLanguage={currentLanguage}
+          page={legalPage}
+          onBackHome={() => navigateToHome()}
+        />
+      ) : showEmailForm ? (
         <div className="pt-24 pb-12">
           <EmailFormPage onBack={() => setShowEmailForm(false)} onOpenAdmin={openAdmin} />
         </div>
@@ -995,9 +1012,9 @@ export default function App() {
             <div className="col-span-2 md:col-span-1">
               <h4 className="font-bold mb-8 uppercase text-[10px] tracking-[0.2em] text-white/30">Legal</h4>
               <ul className="flex flex-col gap-5 text-white/50 text-sm font-medium">
-                <li><a href="#" className="hover:text-white transition-colors">{t('footer.links.privacy')}</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">{t('footer.links.terms')}</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">{t('footer.links.compliance')}</a></li>
+                <li><button type="button" onClick={() => navigateToLegal("privacy")} className="hover:text-white transition-colors">{t('footer.links.privacy')}</button></li>
+                <li><button type="button" onClick={() => navigateToLegal("terms")} className="hover:text-white transition-colors">{t('footer.links.terms')}</button></li>
+                <li><button type="button" onClick={() => navigateToLegal("compliance")} className="hover:text-white transition-colors">{t('footer.links.compliance')}</button></li>
               </ul>
             </div>
           </div>

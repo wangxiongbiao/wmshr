@@ -1,7 +1,8 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import {Ionicons} from '@expo/vector-icons';
-import {Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
+import {Modal, Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
 import {useTranslation} from 'react-i18next';
+import {SUPPORTED_LANGUAGES, type SupportedLanguageCode} from '@wmshr/i18n';
 import {useAuth} from '../../../application/providers/AuthProvider';
 import {useToast} from '../../../application/providers/ToastProvider';
 import {deletePersistentItem, getPersistentItem, setPersistentItem} from '../../../shared/utils/persistentStorage';
@@ -33,7 +34,7 @@ function getLoginToastMessage(loginError: unknown, t: (key: string) => string) {
 }
 
 export function LoginScreen() {
-  const { t } = useTranslation('app');
+  const { t, i18n } = useTranslation('app');
   const {login} = useAuth();
   const {showToast} = useToast();
   const [account, setAccount] = useState('');
@@ -42,7 +43,10 @@ export function LoginScreen() {
   const [rememberMe, setRememberMe] = useState(false);
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [forgotPasswordVisible, setForgotPasswordVisible] = useState(false);
+  const [languageMenuVisible, setLanguageMenuVisible] = useState(false);
   const [loginErrorText, setLoginErrorText] = useState<string | null>(null);
+  const currentLanguageCode = (i18n.resolvedLanguage || i18n.language) as SupportedLanguageCode;
+  const currentLanguage = SUPPORTED_LANGUAGES.find((item) => item.code === currentLanguageCode) || SUPPORTED_LANGUAGES[0];
 
   useEffect(() => {
     let mounted = true;
@@ -85,6 +89,17 @@ export function LoginScreen() {
     return null;
   }, [password, t]);
 
+  const handleChangeLanguage = async (languageCode: SupportedLanguageCode, nativeName: string) => {
+    if (languageCode === currentLanguageCode) {
+      setLanguageMenuVisible(false);
+      return;
+    }
+
+    await i18n.changeLanguage(languageCode);
+    setLanguageMenuVisible(false);
+    showToast(t('当前语言：{{language}}', {language: nativeName}));
+  };
+
   const handleLogin = async () => {
     const nextAccount = account.trim();
     if (!nextAccount) {
@@ -120,6 +135,20 @@ export function LoginScreen() {
   return (
     <ScreenContainer>
       <View style={styles.container}>
+        <View style={styles.languageTriggerRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{expanded: languageMenuVisible}}
+            disabled={submitting}
+            onPress={() => setLanguageMenuVisible((visible) => !visible)}
+            style={({pressed}) => [styles.languageTrigger, pressed && styles.languageTriggerPressed]}
+          >
+            <Ionicons name="language-outline" size={18} color={colors.primary} />
+            <Text style={styles.languageTriggerText}>{currentLanguage.nativeName}</Text>
+            <Ionicons name={languageMenuVisible ? 'chevron-up-outline' : 'chevron-down-outline'} size={16} color={colors.textSubtle} />
+          </Pressable>
+        </View>
+
         <Text style={sharedStyles.title}>{t('员工登录')}</Text>
         <Text style={sharedStyles.muted}>{t('请输入工号和密码登录')}</Text>
 
@@ -203,12 +232,40 @@ export function LoginScreen() {
         onRequestClose={() => setForgotPasswordVisible(false)}
         actions={[{label: t('知道了'), onPress: () => setForgotPasswordVisible(false)}]}
       />
+
+      <Modal transparent animationType="fade" visible={languageMenuVisible} onRequestClose={() => setLanguageMenuVisible(false)}>
+        <View style={styles.languageOverlay}>
+          <Pressable style={styles.languageOverlayBackdrop} onPress={() => setLanguageMenuVisible(false)} />
+          <View style={styles.languageMenuCard}>
+            {SUPPORTED_LANGUAGES.map((language) => {
+              const active = language.code === currentLanguageCode;
+              return (
+                <Pressable
+                  key={language.code}
+                  style={({pressed}) => [styles.languageMenuItem, active && styles.languageMenuItemActive, pressed && styles.languageMenuItemPressed]}
+                  onPress={() => void handleChangeLanguage(language.code, language.nativeName)}
+                >
+                  <View style={styles.languageMenuLabelBlock}>
+                    <Text style={[styles.languageMenuTitle, active && styles.languageMenuTitleActive]}>{language.nativeName}</Text>
+                    <Text style={styles.languageMenuCode}>{language.code.toUpperCase()}</Text>
+                  </View>
+                  {active ? <Ionicons name="checkmark-outline" size={18} color={colors.primary} /> : null}
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      </Modal>
     </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
   container: {flex: 1, justifyContent: 'center'},
+  languageTriggerRow: {position: 'absolute', top: 0, right: 0, zIndex: 2},
+  languageTrigger: {flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-end', backgroundColor: 'rgba(255,255,255,0.94)', borderRadius: 999, borderWidth: 1, borderColor: '#dbeafe', paddingHorizontal: 14, paddingVertical: 10, shadowColor: colors.text, shadowOpacity: 0.06, shadowRadius: 14, shadowOffset: {width: 0, height: 6}, elevation: 3},
+  languageTriggerPressed: {opacity: 0.9},
+  languageTriggerText: {fontSize: 13, fontWeight: '900', color: colors.primary},
   form: {marginTop: 32, backgroundColor: colors.white, borderRadius: 36, padding: 28, shadowColor: colors.text, shadowOpacity: 0.04, shadowRadius: 32, shadowOffset: {width: 0, height: 16}, elevation: 5, borderWidth: 1, borderColor: 'rgba(241,245,249,0.8)'},
   statusCard: {backgroundColor: '#eff6ff', borderRadius: 24, padding: 18, marginBottom: 12},
   statusTitle: {fontSize: 15, fontWeight: '900', color: colors.primary, letterSpacing: -0.3},
@@ -226,4 +283,14 @@ const styles = StyleSheet.create({
   rememberRow: {flexDirection: 'row', alignItems: 'center', gap: 10},
   rememberText: {fontSize: 15, fontWeight: '800', color: colors.textSubtle},
   linkText: {fontSize: 15, fontWeight: '900', color: colors.primary},
+  languageOverlay: {flex: 1, paddingTop: 18, paddingHorizontal: 20, backgroundColor: 'rgba(15, 23, 42, 0.08)'},
+  languageOverlayBackdrop: {...StyleSheet.absoluteFillObject},
+  languageMenuCard: {marginLeft: 'auto', width: 220, borderRadius: 24, backgroundColor: colors.white, borderWidth: 1, borderColor: '#dbeafe', padding: 8, shadowColor: colors.text, shadowOpacity: 0.12, shadowRadius: 20, shadowOffset: {width: 0, height: 12}, elevation: 8},
+  languageMenuItem: {minHeight: 54, borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12},
+  languageMenuItemActive: {backgroundColor: '#eff6ff'},
+  languageMenuItemPressed: {opacity: 0.88},
+  languageMenuLabelBlock: {flex: 1},
+  languageMenuTitle: {fontSize: 15, fontWeight: '900', color: colors.text},
+  languageMenuTitleActive: {color: colors.primary},
+  languageMenuCode: {marginTop: 2, fontSize: 11, fontWeight: '800', color: colors.textMuted, letterSpacing: 0.6},
 });

@@ -1,4 +1,5 @@
 import {env} from '../config/env';
+import {handleScreenshotRequest} from './screenshotMocks';
 
 type JsonObject = Record<string, unknown>;
 type DesktopResponse = {
@@ -24,6 +25,10 @@ declare global {
 }
 
 export async function httpClient<T>(path: string, init?: RequestInit): Promise<T> {
+  if (env.appEnv === 'screenshots') {
+    return handleScreenshotRequest<T>(path, init);
+  }
+
   const baseUrl = env.apiBaseUrl.replace(/\/$/, '');
   const requestPath = path.startsWith('/') ? path : `/${path}`;
   const url = `${baseUrl}${requestPath}`;

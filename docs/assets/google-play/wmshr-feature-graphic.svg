@@ -1,0 +1,27 @@
+<svg width="1024" height="500" viewBox="0 0 1024 500" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1024" height="500" rx="36" fill="#080C17"/>
+  <rect width="1024" height="500" rx="36" fill="url(#paint0_linear)"/>
+  <circle cx="824" cy="84" r="208" fill="#2563EB" fill-opacity="0.22"/>
+  <circle cx="150" cy="420" r="220" fill="#10B981" fill-opacity="0.12"/>
+  <circle cx="534" cy="250" r="260" fill="#6366F1" fill-opacity="0.14"/>
+  <g opacity="0.18">
+    <path d="M693 114L802 177V303L693 366L584 303V177L693 114Z" stroke="white" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M584 177L693 240L802 177" stroke="white" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M693 240V366" stroke="white" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M638 145L747 208" stroke="white" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M747 145L638 208" stroke="white" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <rect x="64" y="68" width="280" height="46" rx="23" fill="white" fill-opacity="0.08"/>
+  <text x="92" y="98" fill="#8FB6FF" font-size="22" font-family="Arial, sans-serif" font-weight="700" letter-spacing="4">WMSHR APP</text>
+  <text x="64" y="202" fill="white" font-size="70" font-family="Arial, sans-serif" font-weight="700">Attendance.</text>
+  <text x="64" y="284" fill="white" font-size="70" font-family="Arial, sans-serif" font-weight="700">Payroll.</text>
+  <text x="64" y="366" fill="#8FB6FF" font-size="70" font-family="Arial, sans-serif" font-weight="700">Employee Workflow.</text>
+  <text x="68" y="426" fill="white" fill-opacity="0.6" font-size="24" font-family="Arial, sans-serif">Secure sign-in, attendance check-in, payroll viewing, SOP acknowledgement, and work notifications.</text>
+  <defs>
+    <linearGradient id="paint0_linear" x1="121" y1="58" x2="905" y2="438" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B1220"/>
+      <stop offset="0.48" stop-color="#111C33"/>
+      <stop offset="1" stop-color="#0A1730"/>
+    </linearGradient>
+  </defs>
+</svg>
