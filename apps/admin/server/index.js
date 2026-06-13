@@ -3,6 +3,7 @@ import dotenv from "dotenv";
 import express from "express";
 import pg from "pg";
 import { createClient } from "@supabase/supabase-js";
+import { Readable } from "node:stream";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { DEFAULT_ATTENDANCE_CONFIG, calculateDailyAttendanceRow as calculateV2DailyAttendanceRow } from "./attendance-v2.js";
 
@@ -213,7 +214,24 @@ function validateGoogleAuthRedirectUrl(redirectTo) {
   return null;
 }
 
-async function getMobileAndroidUpdatePayload() {
+function getPublicRequestBaseUrl(req) {
+  const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
+  const protocol = forwardedProto || req.protocol || "https";
+  const host = String(req.get("host") || "admin.dutylix.com").trim();
+  return `${protocol}://${host}`;
+}
+
+function buildMobileDownloadFilename(version) {
+  const normalizedVersion = String(version || "")
+    .trim()
+    .replace(/[^0-9A-Za-z._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+
+  return `wms-${normalizedVersion || "latest"}.apk`;
+}
+
+async function getMobileAndroidReleaseRecord() {
   const { data, error } = await supabase
     .from("mobile_app_releases")
     .select("version, content, url")
@@ -233,6 +251,16 @@ async function getMobileAndroidUpdatePayload() {
     version: String(data.version).trim(),
     content: String(data.content).trim(),
     url: String(data.url).trim(),
+  };
+}
+
+async function getMobileAndroidUpdatePayload(req) {
+  const release = await getMobileAndroidReleaseRecord();
+
+  return {
+    version: release.version,
+    content: release.content,
+    url: `${getPublicRequestBaseUrl(req)}/api/public/mobile-app-download`,
   };
 }
 
@@ -3374,16 +3402,41 @@ app.get("/api/public/mobile-app-update", async (_req, res) => {
   try {
     // 门户下载区和移动端更新弹窗都走同一个无鉴权公开接口，避免两个入口各自维护不同路径或返回结构。
     // 这里继续只返回当前唯一最新对象，不扩成历史列表或灰度策略；如后续要做多平台，再先统一数据模型和调用方。
-    res.json(await getMobileAndroidUpdatePayload());
+    res.json(await getMobileAndroidUpdatePayload(_req));
   } catch (error) {
     res.status(500).json({ error: error.message || "Android 更新信息加载失败" });
+  }
+});
+
+app.get("/api/public/mobile-app-download", async (_req, res) => {
+  try {
+    const release = await getMobileAndroidReleaseRecord();
+    const upstream = await fetch(release.url);
+
+    if (!upstream.ok || !upstream.body) {
+      return res.status(502).json({ error: "Android 安装包下载源不可用" });
+    }
+
+    const contentType = upstream.headers.get("content-type") || "application/octet-stream";
+    const contentLength = upstream.headers.get("content-length");
+
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Disposition", `attachment; filename="${buildMobileDownloadFilename(release.version)}"`);
+    res.setHeader("Cache-Control", "no-store");
+    if (contentLength) {
+      res.setHeader("Content-Length", contentLength);
+    }
+
+    Readable.fromWeb(upstream.body).pipe(res);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Android 安装包下载失败" });
   }
 });
 
 app.get("/api/mobile/app-update", async (_req, res) => {
   try {
     // 兼容已经发出的移动端版本；新代码统一改走 `/api/public/mobile-app-update`，避免继续把公开接口挂在非 public 路径下。
-    res.json(await getMobileAndroidUpdatePayload());
+    res.json(await getMobileAndroidUpdatePayload(_req));
   } catch (error) {
     res.status(500).json({ error: error.message || "Android 更新信息加载失败" });
   }

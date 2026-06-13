@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import { Readable } from "node:stream";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
@@ -8,6 +9,13 @@ dotenv.config();
 
 const PUBLIC_ADMIN_API_BASE_URL = process.env.ADMIN_API_BASE_URL
   || (process.env.NODE_ENV !== "production" ? "http://127.0.0.1:8788" : "https://admin.dutylix.com");
+
+function getPublicRequestBaseUrl(req: express.Request) {
+  const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
+  const protocol = forwardedProto || req.protocol || "https";
+  const host = String(req.get("host") || "dutylix.com").trim();
+  return `${protocol}://${host}`;
+}
 
 async function startServer() {
   const app = express();
@@ -67,21 +75,53 @@ async function startServer() {
     }
   });
 
-  app.get("/api/public/mobile-app-update", async (_req, res) => {
+  app.get("/api/public/mobile-app-update", async (req, res) => {
     try {
       // 门户前端只通过本站同源接口取最新包信息，避免把后台域名和跨域细节散落到 React 组件里。
       // 这里转发后台统一公开更新接口，保证门户下载按钮和移动端更新弹窗消费的是同一份版本数据。
       const response = await fetch(`${PUBLIC_ADMIN_API_BASE_URL}/api/public/mobile-app-update`);
-      const payload = await response.text();
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok || !payload || typeof payload !== "object") {
+        return res.status(response.status).json(payload || { error: "Unable to load mobile app update" });
+      }
+
+      res.json({
+        ...payload,
+        url: `${getPublicRequestBaseUrl(req)}/api/public/mobile-app-download`,
+      });
+    } catch (error: any) {
+      res.status(502).json({ error: error.message || "Unable to load mobile app update" });
+    }
+  });
+
+  app.get("/api/public/mobile-app-download", async (_req, res) => {
+    try {
+      const response = await fetch(`${PUBLIC_ADMIN_API_BASE_URL}/api/public/mobile-app-download`);
+
+      if (!response.ok || !response.body) {
+        const payload = await response.text();
+        return res.status(response.status).send(payload);
+      }
+
       const contentType = response.headers.get("content-type");
+      const contentDisposition = response.headers.get("content-disposition");
+      const contentLength = response.headers.get("content-length");
 
       if (contentType) {
         res.setHeader("Content-Type", contentType);
       }
+      if (contentDisposition) {
+        res.setHeader("Content-Disposition", contentDisposition);
+      }
+      if (contentLength) {
+        res.setHeader("Content-Length", contentLength);
+      }
+      res.setHeader("Cache-Control", "no-store");
 
-      res.status(response.status).send(payload);
+      Readable.fromWeb(response.body as any).pipe(res);
     } catch (error: any) {
-      res.status(502).json({ error: error.message || "Unable to load mobile app update" });
+      res.status(502).json({ error: error.message || "Unable to download mobile app" });
     }
   });
 

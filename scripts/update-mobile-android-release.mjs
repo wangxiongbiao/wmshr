@@ -1,10 +1,21 @@
-import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
 import path from "path";
+import { createRequire } from "module";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const require = createRequire(import.meta.url);
+
+let createClient;
+try {
+  ({ createClient } = await import("@supabase/supabase-js"));
+} catch {
+  const fallbackPath = require.resolve("@supabase/supabase-js", {
+    paths: [path.resolve(__dirname, "../apps/admin/node_modules")],
+  });
+  ({ createClient } = await import(fallbackPath));
+}
 
 // 统一复用 apps/admin/.env 的 Supabase 连接信息，避免发布后门户/后台/回写脚本分别维护三套数据库入口。
 dotenv.config({ path: path.resolve(__dirname, "../apps/admin/.env"), override: false });
