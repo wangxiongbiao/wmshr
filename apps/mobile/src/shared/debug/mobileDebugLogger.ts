@@ -14,6 +14,7 @@ type DebugEntry = {
 declare global {
   var __WMSHR_MOBILE_DEBUG_LOGGER_INSTALLED__: boolean | undefined;
   var __WMSHR_MOBILE_DEBUG_SESSION_ID__: string | undefined;
+  var __WMSHR_MOBILE_DEBUG_LOG_PATH__: string | undefined;
 }
 
 type ErrorUtilsLike = {
@@ -21,7 +22,7 @@ type ErrorUtilsLike = {
   setGlobalHandler?: (handler: (error: Error, isFatal?: boolean) => void) => void;
 };
 
-const LOCAL_APP_VERSION = String((require('../../../../app.json') as {expo?: {version?: string}}).expo?.version || '').trim() || 'unknown';
+const LOCAL_APP_VERSION = String((require('../../../app.json') as {expo?: {version?: string}}).expo?.version || '').trim() || 'unknown';
 const sessionId = globalThis.__WMSHR_MOBILE_DEBUG_SESSION_ID__
   || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -29,6 +30,7 @@ globalThis.__WMSHR_MOBILE_DEBUG_SESSION_ID__ = sessionId;
 
 const pendingQueue: DebugEntry[] = [];
 let flushing = false;
+let localFileWriteQueue = Promise.resolve();
 
 function stringifyDetails(details: unknown) {
   if (details == null) {
@@ -73,20 +75,59 @@ async function flushQueue() {
   }
 }
 
+async function appendLocalEntry(entry: DebugEntry) {
+  const FileSystem = await import('expo-file-system/legacy');
+  const baseDirectory = FileSystem.documentDirectory || FileSystem.cacheDirectory;
+  if (!baseDirectory) {
+    return;
+  }
+
+  const debugDirectory = `${baseDirectory}wmshr-debug/`;
+  const debugFilePath = `${debugDirectory}startup-debug.log`;
+  globalThis.__WMSHR_MOBILE_DEBUG_LOG_PATH__ = debugFilePath;
+
+  await FileSystem.makeDirectoryAsync(debugDirectory, {intermediates: true}).catch(() => undefined);
+
+  const nextLine = [
+    `[${entry.timestamp}]`,
+    `[${entry.level}]`,
+    `[session:${entry.sessionId}]`,
+    `[version:${entry.appVersion}]`,
+    entry.message,
+    entry.details ? `| ${entry.details}` : '',
+  ].filter(Boolean).join(' ') + '\n';
+
+  let current = '';
+  try {
+    current = await FileSystem.readAsStringAsync(debugFilePath);
+  } catch {
+    current = '';
+  }
+
+  const merged = `${current}${nextLine}`;
+  const trimmed = merged.length > 200_000 ? merged.slice(-200_000) : merged;
+  await FileSystem.writeAsStringAsync(debugFilePath, trimmed);
+}
+
 function enqueue(level: DebugLevel, message: string, details?: unknown) {
-  pendingQueue.push({
+  const entry: DebugEntry = {
     sessionId,
     level,
     message,
     details: stringifyDetails(details) || undefined,
     timestamp: new Date().toISOString(),
     appVersion: LOCAL_APP_VERSION,
-  });
+  };
+
+  pendingQueue.push(entry);
 
   if (pendingQueue.length > 80) {
     pendingQueue.splice(0, pendingQueue.length - 80);
   }
 
+  localFileWriteQueue = localFileWriteQueue
+    .then(() => appendLocalEntry(entry))
+    .catch(() => undefined);
   void flushQueue();
 }
 

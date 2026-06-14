@@ -2,7 +2,7 @@
   "expo": {
     "name": "HMSHR",
     "slug": "wmshr-app",
-    "version": "0.1.5",
+    "version": "0.1.6",
     "scheme": "wmshrapp",
     "icon": "./assets/app-icon.png",
     "orientation": "portrait",
