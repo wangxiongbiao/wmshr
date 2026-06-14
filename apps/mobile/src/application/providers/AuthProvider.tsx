@@ -5,6 +5,7 @@ import {EmployeeProfile} from '../../features/auth/types';
 import {deletePersistentItem, getPersistentItem, setPersistentItem} from '../../shared/utils/persistentStorage';
 import {env} from '../../shared/config/env';
 import {getScreenshotSession} from '../../shared/api/screenshotMocks';
+import {mobileDebugLog} from '../../shared/debug/mobileDebugLogger';
 
 type AuthSession = {
   accessToken: string;
@@ -67,17 +68,21 @@ export function AuthProvider({children}: PropsWithChildren) {
   useEffect(() => {
     let mounted = true;
     async function restoreAuthState() {
+      mobileDebugLog('auth_restore_start', {appEnv: env.appEnv});
       if (env.appEnv === 'screenshots') {
+        mobileDebugLog('auth_restore_skip_screenshots');
         setLoading(false);
         return;
       }
 
       const rawState = await getPersistentItem(AUTH_STATE_KEY);
+      mobileDebugLog('auth_restore_storage_read', {hasState: Boolean(rawState)});
       if (!mounted) {
         return;
       }
 
       if (!rawState) {
+        mobileDebugLog('auth_restore_no_state');
         setLoading(false);
         return;
       }
@@ -85,16 +90,20 @@ export function AuthProvider({children}: PropsWithChildren) {
       try {
         const persistedState = JSON.parse(rawState) as PersistedAuthState;
         if (persistedState.session && persistedState.employee && isSessionValid(persistedState.session)) {
+          mobileDebugLog('auth_restore_success');
           setSession(persistedState.session);
           setEmployee(persistedState.employee);
         } else {
+          mobileDebugLog('auth_restore_expired_or_invalid');
           // 过期 token 不恢复，避免用户看到已登录界面后接口立即失败；后续若有 refresh token，应在这里接入刷新流程。
           await deletePersistentItem(AUTH_STATE_KEY);
         }
-      } catch {
+      } catch (error) {
+        mobileDebugLog('auth_restore_parse_failed', error);
         await deletePersistentItem(AUTH_STATE_KEY);
       } finally {
         if (mounted) {
+          mobileDebugLog('auth_restore_finish');
           setLoading(false);
         }
       }

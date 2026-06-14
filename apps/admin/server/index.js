@@ -58,6 +58,7 @@ const employeeCountCache = new Map();
 const employeeAvatarCache = new Map();
 const dashboardCache = new Map();
 const payrollResultsCache = new Map();
+const mobileDebugLogBuffer = [];
 const directDbPool = DATABASE_URL
   ? new Pool({
       connectionString: DATABASE_URL,
@@ -122,6 +123,13 @@ async function requireGoogleAuth(req, res, next) {
 
 const app = express();
 app.use(express.json({ limit: "5mb" }));
+
+function pushMobileDebugLog(entry) {
+  mobileDebugLogBuffer.push(entry);
+  if (mobileDebugLogBuffer.length > 500) {
+    mobileDebugLogBuffer.splice(0, mobileDebugLogBuffer.length - 500);
+  }
+}
 
 function isAllowedCorsOrigin(origin) {
   if (!origin) {
@@ -3377,6 +3385,33 @@ app.post("/api/mobile/auth/login", async (req, res) => {
   } catch (error) {
     res.status(401).json({ error: error.message || "员工端登录失败" });
   }
+});
+
+app.post("/api/public/mobile-debug-log", async (req, res) => {
+  const payload = {
+    sessionId: String(req.body?.sessionId || ""),
+    level: String(req.body?.level || "info"),
+    message: String(req.body?.message || ""),
+    details: typeof req.body?.details === "string" ? req.body.details : "",
+    timestamp: String(req.body?.timestamp || new Date().toISOString()),
+    appVersion: String(req.body?.appVersion || ""),
+    ip: req.headers["x-forwarded-for"] || req.socket.remoteAddress || "",
+    userAgent: req.headers["user-agent"] || ""
+  };
+
+  if (!payload.sessionId || !payload.message) {
+    return res.status(400).json({ error: "缺少日志字段" });
+  }
+
+  pushMobileDebugLog(payload);
+  console.log("[mobile-debug]", JSON.stringify(payload));
+  res.json({ ok: true });
+});
+
+app.get("/api/public/mobile-debug-log", (_req, res) => {
+  res.json({
+    items: mobileDebugLogBuffer.slice(-100)
+  });
 });
 
 app.get("/api/mobile/auth/me", requireEmployeeAppAuth, async (req, res) => {

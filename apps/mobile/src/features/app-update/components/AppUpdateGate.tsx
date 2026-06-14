@@ -1,7 +1,5 @@
 import React, {PropsWithChildren, useCallback, useEffect, useMemo, useState} from 'react';
 import {ActivityIndicator, Platform, StyleSheet, Text, View} from 'react-native';
-import * as IntentLauncher from 'expo-intent-launcher';
-import * as FileSystem from 'expo-file-system/legacy';
 import {colors} from '../../../shared/constants/colors';
 import {AppModal} from '../../../shared/components/AppModal';
 import {fetchLatestAppUpdate} from '../services/appUpdateApi';
@@ -29,11 +27,14 @@ function shouldIgnoreUpdateCheckError(error: unknown) {
 }
 
 async function downloadAndOpenAndroidInstaller(update: AppUpdateInfo) {
+  const FileSystem = await import('expo-file-system/legacy');
+  const IntentLauncher = await import('expo-intent-launcher');
+
   if (!FileSystem.cacheDirectory) {
     throw new Error('当前设备不支持更新下载目录');
   }
 
-  const downloadUri = `${FileSystem.cacheDirectory}wmshr-${update.version}.apk`;
+  const downloadUri = `${FileSystem.cacheDirectory}hmshr-${update.version}.apk`;
   await FileSystem.deleteAsync(downloadUri, {idempotent: true}).catch(() => undefined);
   const result = await FileSystem.downloadAsync(update.url, downloadUri);
   const contentUri = await FileSystem.getContentUriAsync(result.uri);
