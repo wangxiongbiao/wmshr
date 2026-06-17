@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Clock, FileText, LayoutDashboard, Users, Wallet } from "lucide-react";
+import { Clock, FileText, Globe, LayoutDashboard, Package, Users, Wallet } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { TabId } from "../types";
 import { cn } from "../lib/utils";
@@ -22,12 +22,15 @@ interface SidebarProps {
 export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
   const { t } = useTranslation("admin");
   const navItems = [
-    // 数据看板已按 admin-v2 界面和接口契约恢复，继续保持 v2 模块顺序，避免旧后台入口回流。
+    // 数据看板已按 admin-v2 界面和接口契约恢复，继续保持旧模块在前、新并入的 v3 业务域在后，降低老用户迁移时的导航跳变。
     { id: 'dashboard' as TabId, label: t('数据看板'), icon: LayoutDashboard },
     { id: 'employees' as TabId, label: t('员工管理'), icon: Users },
     { id: 'attendance' as TabId, label: t('考勤计算'), icon: Clock },
     { id: 'payroll' as TabId, label: t('薪资核算'), icon: Wallet },
     { id: 'sop' as TabId, label: t('SOP管理'), icon: FileText },
+    { id: 'customers' as TabId, label: t('客户管理'), icon: Globe },
+    { id: 'goods' as TabId, label: t('入库管理'), icon: Package },
+    { id: 'expenses' as TabId, label: t('费用管理'), icon: Wallet },
   ];
 
   return (

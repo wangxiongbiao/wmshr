@@ -42,7 +42,7 @@ function getV2HourlyRate(employee: Employee) {
 
 export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, onEditEmployee, onManageAppAccount, onDeleteEmployee }: EmployeeListProps) {
   const [query, setSearchQuery] = useState("");
-  const [includeInactive, setIncludeInactive] = useState(false);
+  const [resignedOnly, setResignedOnly] = useState(false);
   const [page, setPage] = useState(1);
   const pageSize = 12;
   const loadRequestIdRef = useRef(0);
@@ -55,9 +55,9 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
   const [avatarMap, setAvatarMap] = useState<Record<number, string | null>>({});
 
   useEffect(() => {
-    // 搜索条件变化后必须回到第一页；真实后端分页下，旧页码继续请求会直接跳到深页，和用户当前筛选意图不一致。
+    // 搜索词或“只看离职”筛选变化后必须回到第一页；真实后端分页下，旧页码继续请求会直接跳到深页，和用户当前筛选意图不一致。
     setPage(1);
-  }, [includeInactive, query]);
+  }, [query, resignedOnly]);
 
   useEffect(() => {
     const requestId = ++loadRequestIdRef.current;
@@ -66,7 +66,7 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
 
     void fetchEmployeesPage({
       keyword: query,
-      includeInactive,
+      status: resignedOnly ? "resigned" : "all",
       page,
       pageSize
     }).then((result) => {
@@ -90,7 +90,7 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
       }
     });
   // 员工页只依赖自己的分页参数与显式刷新信号；避免父层全量 employees 变更把同一分页请求重复打一遍。
-  }, [includeInactive, page, pageSize, query, reloadKey]);
+  }, [page, pageSize, query, reloadKey, resignedOnly]);
 
   useEffect(() => {
     let cancelled = false;
@@ -99,7 +99,7 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
 
     void fetchEmployeesCount({
       keyword: query,
-      includeInactive
+      status: resignedOnly ? "resigned" : "all"
     }).then((nextTotal) => {
       if (cancelled) {
         return;
@@ -116,7 +116,7 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
     return () => {
       cancelled = true;
     };
-  }, [includeInactive, query, reloadKey]);
+  }, [query, reloadKey, resignedOnly]);
 
   useEffect(() => {
     const visibleIds = rows.map((row) => row.id).filter((id) => !(id in avatarMap));
@@ -172,11 +172,11 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
           <label className="inline-flex min-h-[38px] items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 select-none leading-tight">
             <input
               type="checkbox"
-              checked={includeInactive}
-              onChange={(event) => setIncludeInactive(event.target.checked)}
+              checked={resignedOnly}
+              onChange={(event) => setResignedOnly(event.target.checked)}
               className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
             />
-            <span className="whitespace-normal break-words">{tAdmin("展示离职人员")}</span>
+            <span className="whitespace-normal break-words">{tAdmin("只看离职人员")}</span>
           </label>
         </div>
         <button
@@ -207,6 +207,7 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
             const hourlyRate = getV2HourlyRate(emp);
             const statusLabel = getV2StatusLabel(emp);
             const employeePhoto = avatarMap[emp.id] ?? null;
+            const canDeleteEmployee = emp.status !== "resigned";
 
             return (
               <div key={emp.id} className="glass-panel rounded-xl p-5 hover:shadow-md transition-all duration-300 flex flex-col relative group">
@@ -226,9 +227,19 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
                     <Edit className="w-4 h-4" />
                   </button>
                   <button
-                    onClick={() => onDeleteEmployee(emp)}
-                    className="p-1.5 bg-white rounded-lg shadow-sm border border-red-200 hover:bg-red-50 text-red-500"
-                    title={tAdmin("删除")}
+                    onClick={() => {
+                      if (canDeleteEmployee) {
+                        onDeleteEmployee(emp);
+                      }
+                    }}
+                    disabled={!canDeleteEmployee}
+                    className={cn(
+                      "p-1.5 rounded-lg shadow-sm border",
+                      canDeleteEmployee
+                        ? "bg-white border-red-200 hover:bg-red-50 text-red-500"
+                        : "cursor-not-allowed bg-slate-100 border-slate-200 text-slate-300"
+                    )}
+                    title={canDeleteEmployee ? tAdmin("删除") : tAdmin("离职员工不可删除")}
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>

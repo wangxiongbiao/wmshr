@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export type TabId = 'dashboard' | 'employees' | 'attendance' | 'payroll' | 'sop';
+// Admin 一级页签在这里统一收口；v3 三模块已直接接入当前 admin 壳层，新增 tab 必须同步更新 adminRoute、Sidebar、App 标题映射与挂载逻辑。
+export type TabId = 'dashboard' | 'employees' | 'attendance' | 'payroll' | 'sop' | 'customers' | 'goods' | 'expenses';
 
 export type Gender = 'male' | 'female';
 
@@ -103,6 +104,88 @@ export interface SopDocument {
   creator: string;
   status: 'draft' | 'published';
   reads: Record<number, string>;
+}
+
+export interface ShopBinding {
+  id: string;
+  platform: 'TikTok' | 'Shopee';
+  shopName: string;
+  shopId: string;
+  status: 'enabled' | 'disabled';
+  authorizedAt: string;
+}
+
+export interface CreditLogRecord {
+  id: string;
+  type: 'recharge' | 'consumption';
+  amount: number;
+  balanceAfter: number;
+  createdAt: string;
+  note: string;
+  operator: string;
+}
+
+export interface Customer {
+  id: string;
+  name: string;
+  contact: string;
+  currency: string;
+  availableLimit: number;
+  creditLimit: number;
+  billingTemplate: string;
+  status: 'enabled' | 'disabled';
+  shops: ShopBinding[];
+  creditLogs?: CreditLogRecord[];
+}
+
+export interface GoodsRecord {
+  id: string;
+  customerName: string;
+  goodsName: string;
+  goodsPhoto?: string;
+  goodsPhotos?: string[];
+  arrivalDate: string;
+  pieces: number;
+  actualPieces?: number;
+  signSlipUrl?: string;
+  signSlipUrls?: string[];
+  signSlipName?: string;
+  receiverId?: number;
+  receiverName?: string;
+  entryNo: string;
+  status: 'pending' | 'arrived' | 'completed';
+  note?: string;
+  skus?: { sku: string; qty: number; desc?: string; actualQty?: number }[];
+  shippingMark?: string;
+  shippingMarks?: { mark: string; pieces: number; actualPieces?: number }[];
+}
+
+export interface ExpenseRecord {
+  id: string;
+  name: string;
+  type: string;
+  paymentMethod: string;
+  amount: number;
+  currency?: string;
+  receiptUrl?: string;
+  receiptUrls?: string[];
+  receiptName?: string;
+  payerId?: number;
+  payerName?: string;
+  paymentTime: string;
+  status: 'pending' | 'approved' | 'rejected';
+  approvedBy?: string;
+  approvedTime?: string;
+  approvalNote?: string;
+  note?: string;
+  targetApproverId?: number;
+  targetApproverName?: string;
+}
+
+// 费用模块除了记录列表，还允许账号级自定义类别；前端继续保留 v3 的整模块回写交互，因此 API 以单个快照对象返回，避免类别与历史记录分次保存后互相覆盖。
+export interface ExpenseModuleSnapshot {
+  expenses: ExpenseRecord[];
+  categories: string[];
 }
 
 export interface AttendanceRuleOption {

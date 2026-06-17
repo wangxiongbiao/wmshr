@@ -5,9 +5,10 @@
 
 import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { tAdmin } from "../lib/i18nText";
-import { Download, Edit, Plus, RefreshCw, Settings } from "lucide-react";
+import { Download, Edit, Eye, Plus, RefreshCw, Settings } from "lucide-react";
 import type {
   AppConfig,
+  AttendanceCalculationDetail,
   AttendanceCalculationResult,
   AttendanceRecordUpdatePayload,
   Employee
@@ -86,6 +87,24 @@ function formatMoneyNumber(value: number) {
 
 function formatEmployeeDisplayName(employee: Pick<Employee, "name" | "nickname">) {
   return employee.nickname ? `${employee.name}(${employee.nickname})` : employee.name;
+}
+
+function extractAttendanceLocation(note: string | null | undefined) {
+  const lines = String(note || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const locationLine = lines.find((line) => /^位置[:：]\s*/.test(line));
+  return locationLine ? locationLine.replace(/^位置[:：]\s*/, "").trim() : "";
+}
+
+function stripAttendanceLocationNote(note: string | null | undefined) {
+  return String(note || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => Boolean(line) && !/^位置[:：]\s*/.test(line))
+    .join("\n")
+    .trim();
 }
 
 function parseHolidayDatesInput(value: string) {
@@ -168,7 +187,7 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
   const [avatarMap, setAvatarMap] = useState<Record<number, string | null>>({});
   const backgroundRefreshTimersRef = useRef<number[]>([]);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | "all">("all");
-  const [includeInactive, setIncludeInactive] = useState(false);
+  const [resignedOnly, setResignedOnly] = useState(false);
   const [selectedDate, setSelectedDate] = useState("");
   const [selectedMonth, setSelectedMonth] = useState(getDefaultMonth());
   const [page, setPage] = useState(1);
@@ -182,8 +201,11 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isHolidaySettingsOpen, setIsHolidaySettingsOpen] = useState(false);
   const [isAdjustmentOpen, setIsAdjustmentOpen] = useState(false);
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isMaintenanceConfirmOpen, setIsMaintenanceConfirmOpen] = useState(false);
   const [adjustingResult, setAdjustingResult] = useState<AttendanceCalculationResult | null>(null);
+  const [detailResult, setDetailResult] = useState<AttendanceCalculationResult | null>(null);
+  const [detailRecord, setDetailRecord] = useState<AttendanceCalculationDetail["record"] | null>(null);
   const [createForm, setCreateForm] = useState<CreateAttendanceForm>({
     employeeId: "",
     date: getDefaultDate(),
@@ -204,6 +226,8 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [adjustmentLoading, setAdjustmentLoading] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
   const [maintenanceMessage, setMaintenanceMessage] = useState("");
   const [error, setError] = useState("");
   const [lastLoadedAt, setLastLoadedAt] = useState(0);
@@ -218,7 +242,7 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
   const [createEmployeeSearchResults, setCreateEmployeeSearchResults] = useState<Employee[]>([]);
   const [createEmployeeLoading, setCreateEmployeeLoading] = useState(false);
 
-  const isFiltered = includeInactive || selectedEmployeeId !== "all" || Boolean(selectedDate) || selectedMonth !== getDefaultMonth();
+  const isFiltered = resignedOnly || selectedEmployeeId !== "all" || Boolean(selectedDate) || selectedMonth !== getDefaultMonth();
   const getCreateDefaultTimes = () => ({
     inTime: configForm?.startShift || DEFAULT_CREATE_IN_TIME,
     outTime: configForm?.endShift || DEFAULT_CREATE_OUT_TIME
@@ -365,7 +389,9 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
     }
 
     try {
-      const rows = await searchEmployees(trimmedQuery, { includeInactive });
+      const rows = await searchEmployees(trimmedQuery, mode === "filter"
+        ? { status: resignedOnly ? "resigned" : "all", includeInactive: resignedOnly }
+        : {});
       if (requestId !== employeeSearchRequestIdRef.current) {
         return;
       }
@@ -400,7 +426,7 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
 
   const buildLoadFilterKey = () => JSON.stringify({
     employeeId: selectedEmployeeId,
-    includeInactive,
+    resignedOnly,
     selectedDate,
     selectedMonth,
     page
@@ -419,9 +445,10 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
         yearMonth: effectiveMonth,
         date: effectiveDate,
         employeeId: selectedEmployeeId === "all" ? null : selectedEmployeeId,
+        employeeStatus: resignedOnly ? "resigned" : "all",
         page,
         pageSize,
-        includeInactive
+        includeInactive: resignedOnly
       });
       if (requestId !== loadRequestIdRef.current) {
         return;
@@ -459,7 +486,7 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
 
     // 考勤页被缓存后切回来时需要按当前筛选条件后台重拉数据，但不能先清空表格主体。
     void loadData();
-  }, [calculations.length, includeInactive, isActive, lastLoadedAt, page, reloadNonce, selectedDate, selectedEmployeeId, selectedMonth]);
+  }, [calculations.length, isActive, lastLoadedAt, page, reloadNonce, resignedOnly, selectedDate, selectedEmployeeId, selectedMonth]);
 
   useEffect(() => {
     void fetchAttendanceConfig()
@@ -473,7 +500,7 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
   useEffect(() => {
     // 只有筛选条件变化时才回到第一页；真实后端分页下，翻页本身会触发 loadData，不能再被返回结果反向重置。
     setPage(1);
-  }, [includeInactive, selectedDate, selectedEmployeeId, selectedMonth]);
+  }, [resignedOnly, selectedDate, selectedEmployeeId, selectedMonth]);
 
   useEffect(() => {
     return () => {
@@ -507,7 +534,7 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
     setEmployeeFilterLoading(false);
     setSelectedDate("");
     setSelectedMonth(getDefaultMonth());
-    setIncludeInactive(false);
+    setResignedOnly(false);
     setFilterSelectResetKey((prev) => prev + 1);
     setLastLoadedAt(0);
     setReloadNonce((prev) => prev + 1);
@@ -655,6 +682,29 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
       setError(nextError instanceof Error ? nextError.message : tAdmin("考勤记录加载失败"));
     } finally {
       setAdjustmentLoading(false);
+    }
+  };
+
+  const handleOpenDetail = async (result: AttendanceCalculationResult) => {
+    // 详情弹窗必须允许查看离职员工的历史打卡；只有“调整”动作继续限制为在职员工，避免误改历史记录。
+    setDetailResult(result);
+    setDetailRecord(null);
+    setDetailError("");
+    setDetailLoading(false);
+    setIsDetailOpen(true);
+
+    if (!result.attendanceRecordId) {
+      return;
+    }
+
+    setDetailLoading(true);
+    try {
+      const detail = await fetchAttendanceCalculationDetail(result.id);
+      setDetailRecord(detail.record);
+    } catch (nextError) {
+      setDetailError(nextError instanceof Error ? nextError.message : tAdmin("考勤详情加载失败"));
+    } finally {
+      setDetailLoading(false);
     }
   };
 
@@ -880,11 +930,11 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
           <label className="inline-flex items-center gap-2 text-xs text-slate-600 select-none">
             <input
               type="checkbox"
-              checked={includeInactive}
-              onChange={(event) => setIncludeInactive(event.target.checked)}
+              checked={resignedOnly}
+              onChange={(event) => setResignedOnly(event.target.checked)}
               className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
             />
-            <span>{tAdmin("展示离职人员")}</span>
+            <span>{tAdmin("只看离职人员")}</span>
           </label>
         <div className="flex gap-2 flex-shrink-0">
           {isFiltered && (
@@ -1068,17 +1118,28 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
                       </span>
                     </td>
                     <td className="px-3 py-3 text-center whitespace-nowrap">
-                      {item.employeeStatus === "resigned" ? null : (
+                      <div className="inline-flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => void handleOpenAdjustment(item)}
-                          className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 hover:text-indigo-700 text-xs font-semibold rounded-lg transition inline-flex items-center gap-1 border border-indigo-100"
-                          title={tAdmin("手动补签/调整该员工当天的考勤记录")}
+                          onClick={() => void handleOpenDetail(item)}
+                          className="px-2.5 py-1 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-800 text-xs font-semibold rounded-lg transition inline-flex items-center gap-1 border border-slate-200"
+                          title={tAdmin("查看该员工当天打卡时间、位置和备注")}
                         >
-                          <Edit className="w-3 h-3" />
-                          <span>{tAdmin("调整")}</span>
+                          <Eye className="w-3 h-3" />
+                          <span>{tAdmin("详情")}</span>
                         </button>
-                      )}
+                        {item.employeeStatus === "resigned" ? null : (
+                          <button
+                            type="button"
+                            onClick={() => void handleOpenAdjustment(item)}
+                            className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 hover:text-indigo-700 text-xs font-semibold rounded-lg transition inline-flex items-center gap-1 border border-indigo-100"
+                            title={tAdmin("手动补签/调整该员工当天的考勤记录")}
+                          >
+                            <Edit className="w-3 h-3" />
+                            <span>{tAdmin("调整")}</span>
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -1327,6 +1388,80 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
             );
           })()}
         </form>
+      </Modal>
+
+      <Modal
+        isOpen={isDetailOpen}
+        title={tAdmin("考勤详情")}
+        onClose={() => setIsDetailOpen(false)}
+        className="max-w-2xl"
+        footer={(
+          <div className="flex justify-end gap-3">
+            <button type="button" onClick={() => setIsDetailOpen(false)} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100">{tAdmin("关闭")}</button>
+          </div>
+        )}
+      >
+        {(() => {
+          const activeResult = detailResult;
+          const activeRecord = detailRecord;
+          const inTime = activeRecord?.inTime || activeResult?.rawInTime || null;
+          const outTime = activeRecord?.outTime || activeResult?.rawOutTime || null;
+          const source = activeRecord?.source || activeResult?.source || null;
+          const note = activeRecord?.note || activeResult?.note || "";
+          const location = extractAttendanceLocation(note);
+          const remark = stripAttendanceLocationNote(note);
+
+          if (!activeResult) {
+            return <div className="py-8 text-center text-sm text-slate-500">{tAdmin("暂无可展示的考勤详情")}</div>;
+          }
+
+          return (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="font-semibold text-slate-900">{activeResult.employeeName}</span>
+                  <span className="rounded-full bg-white px-2 py-0.5 text-xs text-slate-500 ring-1 ring-slate-200">{activeResult.date}</span>
+                  {activeResult.employeeStatus === "resigned" ? (
+                    <span className="rounded-full bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-600 ring-1 ring-rose-100">{tAdmin("离职")}</span>
+                  ) : null}
+                </div>
+                <p className="mt-2 text-xs leading-5 text-slate-500">
+                  {tAdmin("这里展示的是该员工当天原始打卡记录；如果当天没有独立原始记录，则回退显示当前考勤计算结果里的时间和备注。")}
+                </p>
+              </div>
+
+              {detailLoading ? (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                  {tAdmin("请稍候，正在加载考勤详情")}
+                </div>
+              ) : null}
+              {detailError ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  {detailError}
+                </div>
+              ) : null}
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <Field label={tAdmin("上班打卡时间")}>
+                  <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-mono text-slate-700">{inTime || "-"}</div>
+                </Field>
+                <Field label={tAdmin("下班打卡时间")}>
+                  <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-mono text-slate-700">{outTime || "-"}</div>
+                </Field>
+                <Field label={tAdmin("打卡来源")}>
+                  <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">{source || "-"}</div>
+                </Field>
+                <Field label={tAdmin("打卡位置")}>
+                  <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 break-words">{location || tAdmin("暂无位置记录")}</div>
+                </Field>
+              </div>
+
+              <Field label={tAdmin("备注")}>
+                <div className="min-h-[96px] whitespace-pre-wrap rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm leading-6 text-slate-700">{remark || tAdmin("无")}</div>
+              </Field>
+            </div>
+          );
+        })()}
       </Modal>
 
       <Modal

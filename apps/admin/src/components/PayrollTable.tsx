@@ -131,7 +131,7 @@ export function PayrollTable({ isActive }: PayrollTableProps) {
   // PayrollTable 的可见文案仍集中通过 tAdmin() 渲染；这里显式订阅 react-i18next 语言状态，保证 Header 切换语言后整块薪资核算 UI 会重新渲染，而不是继续显示旧语言。
   const translationRenderLanguage = i18n.resolvedLanguage || i18n.language;
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | "all">("all");
-  const [includeInactive, setIncludeInactive] = useState(false);
+  const [resignedOnly, setResignedOnly] = useState(false);
   const [yearMonth, setYearMonth] = useState(getDefaultYearMonth());
   const [calculationStatus, setCalculationStatus] = useState("all");
   const [reviewStatus, setReviewStatus] = useState("all");
@@ -164,14 +164,14 @@ export function PayrollTable({ isActive }: PayrollTableProps) {
     calculationStatus?: string;
     reviewStatus?: string;
     employeeId?: number | "all";
-    includeInactive?: boolean;
+    resignedOnly?: boolean;
     page?: number;
   }) => JSON.stringify({
     yearMonth: params?.yearMonth ?? yearMonth,
     calculationStatus: params?.calculationStatus ?? calculationStatus,
     reviewStatus: params?.reviewStatus ?? reviewStatus,
     employeeId: params?.employeeId ?? selectedEmployeeId,
-    includeInactive: params?.includeInactive ?? includeInactive,
+    resignedOnly: params?.resignedOnly ?? resignedOnly,
     page: params?.page ?? page
   });
 
@@ -180,7 +180,7 @@ export function PayrollTable({ isActive }: PayrollTableProps) {
     calculationStatus?: string;
     reviewStatus?: string;
     employeeId?: number | "all";
-    includeInactive?: boolean;
+    resignedOnly?: boolean;
     page?: number;
     force?: boolean;
   }) => {
@@ -188,7 +188,7 @@ export function PayrollTable({ isActive }: PayrollTableProps) {
     const effectiveCalculationStatus = nextFilters?.calculationStatus ?? calculationStatus;
     const effectiveReviewStatus = nextFilters?.reviewStatus ?? reviewStatus;
     const effectiveEmployeeId = nextFilters?.employeeId ?? selectedEmployeeId;
-    const effectiveIncludeInactive = nextFilters?.includeInactive ?? includeInactive;
+    const effectiveResignedOnly = nextFilters?.resignedOnly ?? resignedOnly;
     const effectivePage = nextFilters?.page ?? page;
     const force = nextFilters?.force ?? false;
     const filterKey = buildFilterKey({
@@ -196,7 +196,7 @@ export function PayrollTable({ isActive }: PayrollTableProps) {
       calculationStatus: effectiveCalculationStatus,
       reviewStatus: effectiveReviewStatus,
       employeeId: effectiveEmployeeId,
-      includeInactive: effectiveIncludeInactive,
+      resignedOnly: effectiveResignedOnly,
       page: effectivePage
     });
 
@@ -206,9 +206,10 @@ export function PayrollTable({ isActive }: PayrollTableProps) {
       const nextPage = await fetchPayrollResults({
         yearMonth: effectiveYearMonth,
         employeeId: effectiveEmployeeId === "all" ? null : effectiveEmployeeId,
+        employeeStatus: effectiveResignedOnly ? "resigned" : "all",
         calculationStatus: effectiveCalculationStatus,
         reviewStatus: effectiveReviewStatus,
-        includeInactive: effectiveIncludeInactive,
+        includeInactive: effectiveResignedOnly,
         page: effectivePage,
         pageSize,
         force
@@ -247,7 +248,7 @@ export function PayrollTable({ isActive }: PayrollTableProps) {
     }, 0);
 
     return () => window.clearTimeout(timer);
-  }, [calculationStatus, hasLoadedResultsOnce, includeInactive, isActive, page, results.length, reviewStatus, selectedEmployeeId, yearMonth]);
+  }, [calculationStatus, hasLoadedResultsOnce, isActive, page, resignedOnly, results.length, reviewStatus, selectedEmployeeId, yearMonth]);
 
   useEffect(() => {
     setHasPromptedAutoGenerate(false);
@@ -342,7 +343,7 @@ export function PayrollTable({ isActive }: PayrollTableProps) {
 
     setEmployeeSearchLoading(true);
     try {
-      const rows = await searchEmployees(trimmedQuery, { includeInactive });
+      const rows = await searchEmployees(trimmedQuery, { status: resignedOnly ? "resigned" : "all", includeInactive: resignedOnly });
       setEmployeeSearchResults(rows);
     } finally {
       setEmployeeSearchLoading(false);
@@ -387,7 +388,7 @@ export function PayrollTable({ isActive }: PayrollTableProps) {
 
       await runGenerateMonthly();
     })();
-  }, [calculationStatus, confirm, error, hasLoadedResultsOnce, hasPromptedAutoGenerate, includeInactive, loading, results.length, reviewStatus, selectedEmployeeId, submitting, yearMonth]);
+  }, [calculationStatus, confirm, error, hasLoadedResultsOnce, hasPromptedAutoGenerate, loading, resignedOnly, results.length, reviewStatus, selectedEmployeeId, submitting, yearMonth]);
 
   const openPayslip = async (result: MonthlyPayrollResult) => {
     setIsPayslipOpen(true);
@@ -647,7 +648,7 @@ export function PayrollTable({ isActive }: PayrollTableProps) {
   useEffect(() => {
     // 只有筛选条件变化时才回到第一页；真实后端分页下，翻页本身会触发 loadData，不能再被返回结果重置。
     setPage(1);
-  }, [calculationStatus, includeInactive, reviewStatus, selectedEmployeeId, yearMonth]);
+  }, [calculationStatus, resignedOnly, reviewStatus, selectedEmployeeId, yearMonth]);
 
   const showRefreshing = loading && results.length > 0;
   const payoutFilter = calculationStatus === "confirmed" ? "paid" : reviewStatus === "pending" ? "pending" : "all";
@@ -836,11 +837,11 @@ export function PayrollTable({ isActive }: PayrollTableProps) {
             <label className="inline-flex items-center gap-2 text-xs text-slate-600 select-none">
               <input
                 type="checkbox"
-                checked={includeInactive}
-                onChange={(event) => setIncludeInactive(event.target.checked)}
+                checked={resignedOnly}
+                onChange={(event) => setResignedOnly(event.target.checked)}
                 className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
               />
-              <span>{tAdmin("展示离职人员")}</span>
+              <span>{tAdmin("只看离职人员")}</span>
             </label>
           </div>
         </div>

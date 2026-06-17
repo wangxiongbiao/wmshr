@@ -4660,6 +4660,7 @@ app.get("/api/admin/attendance-calculations", async (req, res) => {
     const employeeId = req.query.employeeId ? Number(req.query.employeeId) : null;
     const keyword = String(req.query.keyword || "").trim().toLowerCase();
     const status = String(req.query.status || "all");
+    const employeeStatus = String(req.query.employeeStatus || "all");
     const hasException = String(req.query.hasException || "all");
     // v2 考勤页列表只展示/导出 mapAttendanceCalculationRow 需要的结果字段；不要恢复 select("*")，否则新增列会无边界进入列表接口。
     const calculationListFields = [
@@ -4716,6 +4717,10 @@ app.get("/api/admin/attendance-calculations", async (req, res) => {
 
     if (employeeId) {
       employeeQuery = employeeQuery.eq("id", employeeId);
+    }
+    if (employeeStatus !== "all") {
+      // 这里的 employeeStatus 专门筛员工在职/离职状态；不要复用考勤结果 status，否则“只看离职人员”会误变成筛考勤正常/异常状态。
+      employeeQuery = employeeQuery.eq("status", employeeStatus);
     }
 
     const employeesPromise = employeeQuery.then((result) => ({
@@ -4841,6 +4846,7 @@ app.get("/api/admin/attendance-calculations", async (req, res) => {
         employeeId: employeeId || null,
         keywordLength: keyword.length,
         status,
+        employeeStatus,
         hasException,
         includeInactive,
         employeeCount: availableEmployeeRows.length,
@@ -5327,6 +5333,7 @@ app.get("/api/admin/payroll-results", async (req, res) => {
 
     const employeeId = req.query.employeeId ? Number(req.query.employeeId) : null;
     const keyword = String(req.query.keyword || "").trim().toLowerCase();
+    const employeeStatus = String(req.query.employeeStatus || "all");
     const salaryType = String(req.query.salaryType || "all");
     const calculationStatus = String(req.query.calculationStatus || "all");
     const reviewStatus = String(req.query.reviewStatus || "all");
@@ -5337,6 +5344,7 @@ app.get("/api/admin/payroll-results", async (req, res) => {
       pageSize,
       yearMonth,
       employeeId,
+      employeeStatus,
       keyword,
       salaryType,
       calculationStatus,
@@ -5398,6 +5406,9 @@ app.get("/api/admin/payroll-results", async (req, res) => {
     const targetEmployees = employeesResult.data.filter((employee) => {
       // 薪资核算主列表必须以当前可参与考勤/薪资的员工为准；历史停用/离职员工的工资结果只保留在库里，不进入当期工作流。
       if (!includeInactive && !isEmployeeAvailableForAttendanceAndPayroll(employee)) {
+        return false;
+      }
+      if (employeeStatus !== "all" && employee.status !== employeeStatus) {
         return false;
       }
       if (employeeId && Number(employee.id) !== employeeId) {
@@ -5481,6 +5492,7 @@ app.get("/api/admin/payroll-results", async (req, res) => {
         ownerUserId,
         yearMonth,
         employeeId,
+        employeeStatus,
         salaryType,
         calculationStatus,
         reviewStatus,
@@ -5978,6 +5990,387 @@ app.patch("/api/admin/payroll-results/:id/confirm", async (req, res) => {
   }
 });
 
+function normalizeCustomerShopBinding(item) {
+  return {
+    id: String(item?.id || `shop-${Date.now()}`).trim(),
+    platform: item?.platform === "Shopee" ? "Shopee" : "TikTok",
+    shopName: String(item?.shopName || "").trim(),
+    shopId: String(item?.shopId || "").trim(),
+    status: item?.status === "disabled" ? "disabled" : "enabled",
+    authorizedAt: String(item?.authorizedAt || "").trim() || getTodayDateKey()
+  };
+}
+
+function normalizeCustomerCreditLog(item) {
+  return {
+    id: String(item?.id || `tx-${Date.now()}`).trim(),
+    type: item?.type === "consumption" ? "consumption" : "recharge",
+    amount: Number.isFinite(Number(item?.amount)) ? Number(item.amount) : 0,
+    balanceAfter: Number.isFinite(Number(item?.balanceAfter)) ? Number(item.balanceAfter) : 0,
+    createdAt: String(item?.createdAt || "").trim() || new Date().toISOString().replace("T", " ").slice(0, 19),
+    note: String(item?.note || "").trim(),
+    operator: String(item?.operator || "").trim() || "系统"
+  };
+}
+
+function normalizeCustomerSnapshotItem(item, index = 0) {
+  const fallbackCode = `CUST-${String(index + 1).padStart(4, "0")}`;
+  const shops = Array.isArray(item?.shops)
+    ? item.shops.map(normalizeCustomerShopBinding).filter((shop) => shop.id && shop.shopName && shop.shopId)
+    : [];
+  const creditLogs = Array.isArray(item?.creditLogs)
+    ? item.creditLogs.map(normalizeCustomerCreditLog).filter((log) => log.id)
+    : [];
+
+  return {
+    customerCode: String(item?.id || fallbackCode).trim() || fallbackCode,
+    name: String(item?.name || "").trim(),
+    contact: String(item?.contact || "").trim(),
+    currency: String(item?.currency || "CNY").trim() || "CNY",
+    availableLimit: Number.isFinite(Number(item?.availableLimit)) ? Number(item.availableLimit) : 0,
+    creditLimit: Number.isFinite(Number(item?.creditLimit)) ? Number(item.creditLimit) : 0,
+    billingTemplate: String(item?.billingTemplate || "").trim(),
+    status: item?.status === "disabled" ? "disabled" : "enabled",
+    shops,
+    creditLogs
+  };
+}
+
+function validateCustomerSnapshot(customers) {
+  if (!Array.isArray(customers)) {
+    return "客户快照格式无效";
+  }
+
+  const codeSet = new Set();
+  for (let index = 0; index < customers.length; index += 1) {
+    const customer = normalizeCustomerSnapshotItem(customers[index], index);
+    if (!customer.customerCode) {
+      return `第 ${index + 1} 条客户缺少客户ID`;
+    }
+    if (!customer.name) {
+      return `第 ${index + 1} 条客户缺少客户名称`;
+    }
+    if (!customer.contact) {
+      return `第 ${index + 1} 条客户缺少对接人`;
+    }
+    if (codeSet.has(customer.customerCode)) {
+      return `客户ID重复：${customer.customerCode}`;
+    }
+    codeSet.add(customer.customerCode);
+  }
+
+  return null;
+}
+
+function mapCustomerAccount(row) {
+  return {
+    id: row.customer_code,
+    name: row.name,
+    contact: row.contact,
+    currency: row.currency,
+    availableLimit: Number(row.available_limit || 0),
+    creditLimit: Number(row.credit_limit || 0),
+    billingTemplate: row.billing_template || "",
+    status: row.status === "disabled" ? "disabled" : "enabled",
+    shops: Array.isArray(row.shops) ? row.shops.map(normalizeCustomerShopBinding) : [],
+    creditLogs: Array.isArray(row.credit_logs) ? row.credit_logs.map(normalizeCustomerCreditLog) : []
+  };
+}
+
+async function fetchCustomerAccounts(ownerUserId) {
+  const { data, error } = await supabase
+    .from("customer_accounts")
+    .select("*")
+    .eq("owner_user_id", ownerUserId)
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return (data || []).map(mapCustomerAccount);
+}
+
+async function replaceCustomerAccounts(ownerUserId, customers) {
+  const normalizedCustomers = customers.map((item, index) => normalizeCustomerSnapshotItem(item, index));
+  const customerCodes = normalizedCustomers.map((item) => item.customerCode);
+
+  const { data: existingRows, error: existingError } = await supabase
+    .from("customer_accounts")
+    .select("customer_code")
+    .eq("owner_user_id", ownerUserId);
+  if (existingError) {
+    throw existingError;
+  }
+
+  const existingCodes = new Set((existingRows || []).map((row) => String(row.customer_code || "")).filter(Boolean));
+  const incomingCodes = new Set(customerCodes);
+  const staleCodes = Array.from(existingCodes).filter((code) => !incomingCodes.has(code));
+
+  if (staleCodes.length > 0) {
+    const { error: deleteError } = await supabase
+      .from("customer_accounts")
+      .delete()
+      .eq("owner_user_id", ownerUserId)
+      .in("customer_code", staleCodes);
+    if (deleteError) {
+      throw deleteError;
+    }
+  }
+
+  if (normalizedCustomers.length > 0) {
+    const now = new Date().toISOString();
+    const rows = normalizedCustomers.map((customer) => addOwnerPayload({
+      customer_code: customer.customerCode,
+      name: customer.name,
+      contact: customer.contact,
+      currency: customer.currency,
+      available_limit: customer.availableLimit,
+      credit_limit: customer.creditLimit,
+      billing_template: customer.billingTemplate,
+      status: customer.status,
+      shops: customer.shops,
+      credit_logs: customer.creditLogs,
+      updated_at: now
+    }, ownerUserId));
+
+    const { error: upsertError } = await supabase
+      .from("customer_accounts")
+      .upsert(rows, { onConflict: "owner_user_id,customer_code" });
+    if (upsertError) {
+      throw upsertError;
+    }
+  }
+
+  return fetchCustomerAccounts(ownerUserId);
+}
+
+const DEFAULT_EXPENSE_CATEGORIES = ["场地租金", "水电动力费", "设备维护费", "物耗杂费", "办公差旅", "行政耗杂", "其他物流开支"];
+
+function normalizeGoodsSku(item) {
+  return {
+    sku: String(item?.sku || "").trim(),
+    qty: Number.isFinite(Number(item?.qty)) ? Number(item.qty) : 0,
+    desc: String(item?.desc || "").trim() || undefined,
+    actualQty: item?.actualQty === undefined || item?.actualQty === null
+      ? undefined
+      : (Number.isFinite(Number(item.actualQty)) ? Number(item.actualQty) : undefined)
+  };
+}
+
+function normalizeGoodsShippingMark(item) {
+  return {
+    mark: String(item?.mark || "").trim(),
+    pieces: Number.isFinite(Number(item?.pieces)) ? Number(item.pieces) : 0,
+    actualPieces: item?.actualPieces === undefined || item?.actualPieces === null
+      ? undefined
+      : (Number.isFinite(Number(item.actualPieces)) ? Number(item.actualPieces) : undefined)
+  };
+}
+
+function normalizeGoodsSnapshotItem(item, index = 0) {
+  const fallbackId = `g-${index + 1}`;
+  const skus = Array.isArray(item?.skus)
+    ? item.skus.map(normalizeGoodsSku).filter((sku) => sku.sku)
+    : [];
+  const shippingMarks = Array.isArray(item?.shippingMarks)
+    ? item.shippingMarks.map(normalizeGoodsShippingMark).filter((mark) => mark.mark)
+    : [];
+
+  return {
+    id: String(item?.id || fallbackId).trim() || fallbackId,
+    customerName: String(item?.customerName || "").trim(),
+    goodsName: String(item?.goodsName || "").trim(),
+    goodsPhoto: String(item?.goodsPhoto || "").trim() || undefined,
+    goodsPhotos: Array.isArray(item?.goodsPhotos) ? item.goodsPhotos.map((url) => String(url || "").trim()).filter(Boolean) : [],
+    arrivalDate: String(item?.arrivalDate || "").trim() || getTodayDateKey(),
+    pieces: Number.isFinite(Number(item?.pieces)) ? Number(item.pieces) : 0,
+    actualPieces: item?.actualPieces === undefined || item?.actualPieces === null
+      ? undefined
+      : (Number.isFinite(Number(item.actualPieces)) ? Number(item.actualPieces) : undefined),
+    signSlipUrl: String(item?.signSlipUrl || "").trim() || undefined,
+    signSlipUrls: Array.isArray(item?.signSlipUrls) ? item.signSlipUrls.map((url) => String(url || "").trim()).filter(Boolean) : [],
+    signSlipName: String(item?.signSlipName || "").trim() || undefined,
+    receiverId: Number.isFinite(Number(item?.receiverId)) && Number(item.receiverId) > 0 ? Number(item.receiverId) : undefined,
+    receiverName: String(item?.receiverName || "").trim() || undefined,
+    entryNo: String(item?.entryNo || "").trim(),
+    status: item?.status === "completed" ? "completed" : item?.status === "arrived" ? "arrived" : "pending",
+    note: String(item?.note || "").trim() || undefined,
+    skus,
+    shippingMark: String(item?.shippingMark || "").trim() || undefined,
+    shippingMarks
+  };
+}
+
+function validateGoodsSnapshot(goods) {
+  if (!Array.isArray(goods)) {
+    return "入库管理快照格式无效";
+  }
+
+  const idSet = new Set();
+  for (let index = 0; index < goods.length; index += 1) {
+    const item = normalizeGoodsSnapshotItem(goods[index], index);
+    if (!item.id) {
+      return `第 ${index + 1} 条入库记录缺少ID`;
+    }
+    if (!item.customerName) {
+      return `第 ${index + 1} 条入库记录缺少客户名称`;
+    }
+    if (!item.entryNo) {
+      return `第 ${index + 1} 条入库记录缺少入库单号`;
+    }
+    if (idSet.has(item.id)) {
+      return `入库记录ID重复：${item.id}`;
+    }
+    idSet.add(item.id);
+  }
+
+  return null;
+}
+
+async function fetchGoodsSnapshot(ownerUserId) {
+  const { data, error } = await supabase
+    .from("admin_goods_snapshots")
+    .select("snapshot")
+    .eq("owner_user_id", ownerUserId)
+    .maybeSingle();
+  if (error) {
+    throw error;
+  }
+
+  const snapshot = Array.isArray(data?.snapshot) ? data.snapshot : [];
+  return snapshot.map((item, index) => normalizeGoodsSnapshotItem(item, index));
+}
+
+async function replaceGoodsSnapshot(ownerUserId, goods) {
+  const normalizedGoods = goods.map((item, index) => normalizeGoodsSnapshotItem(item, index));
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from("admin_goods_snapshots")
+    .upsert([
+      addOwnerPayload({
+        snapshot: normalizedGoods,
+        updated_at: now
+      }, ownerUserId)
+    ], { onConflict: "owner_user_id" });
+  if (error) {
+    throw error;
+  }
+
+  return fetchGoodsSnapshot(ownerUserId);
+}
+
+function normalizeExpenseSnapshotItem(item, index = 0) {
+  const fallbackId = `exp-${index + 1}`;
+  const receiptUrls = Array.isArray(item?.receiptUrls)
+    ? item.receiptUrls.map((url) => String(url || "").trim()).filter(Boolean)
+    : [];
+
+  return {
+    id: String(item?.id || fallbackId).trim() || fallbackId,
+    name: String(item?.name || "").trim(),
+    type: String(item?.type || "").trim(),
+    paymentMethod: String(item?.paymentMethod || "").trim(),
+    amount: Number.isFinite(Number(item?.amount)) ? Number(item.amount) : 0,
+    currency: String(item?.currency || "CNY").trim() || "CNY",
+    receiptUrl: String(item?.receiptUrl || "").trim() || undefined,
+    receiptUrls,
+    receiptName: String(item?.receiptName || "").trim() || undefined,
+    payerId: Number.isFinite(Number(item?.payerId)) && Number(item.payerId) > 0 ? Number(item.payerId) : undefined,
+    payerName: String(item?.payerName || "").trim() || undefined,
+    paymentTime: String(item?.paymentTime || "").trim() || getTodayDateKey(),
+    status: item?.status === "approved" ? "approved" : item?.status === "rejected" ? "rejected" : "pending",
+    approvedBy: String(item?.approvedBy || "").trim() || undefined,
+    approvedTime: String(item?.approvedTime || "").trim() || undefined,
+    approvalNote: String(item?.approvalNote || "").trim() || undefined,
+    note: String(item?.note || "").trim() || undefined,
+    targetApproverId: Number.isFinite(Number(item?.targetApproverId)) && Number(item.targetApproverId) > 0 ? Number(item.targetApproverId) : undefined,
+    targetApproverName: String(item?.targetApproverName || "").trim() || undefined
+  };
+}
+
+function normalizeExpenseCategories(categories) {
+  const normalized = Array.isArray(categories)
+    ? categories.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+  return Array.from(new Set(normalized));
+}
+
+function validateExpenseSnapshot(expenses, categories) {
+  if (!Array.isArray(expenses)) {
+    return "费用模块记录格式无效";
+  }
+  if (!Array.isArray(categories)) {
+    return "费用模块类别格式无效";
+  }
+
+  const idSet = new Set();
+  for (let index = 0; index < expenses.length; index += 1) {
+    const item = normalizeExpenseSnapshotItem(expenses[index], index);
+    if (!item.id) {
+      return `第 ${index + 1} 条费用记录缺少ID`;
+    }
+    if (!item.name) {
+      return `第 ${index + 1} 条费用记录缺少名称`;
+    }
+    if (!item.type) {
+      return `第 ${index + 1} 条费用记录缺少类型`;
+    }
+    if (!item.paymentMethod) {
+      return `第 ${index + 1} 条费用记录缺少支付方式`;
+    }
+    if (idSet.has(item.id)) {
+      return `费用记录ID重复：${item.id}`;
+    }
+    idSet.add(item.id);
+  }
+
+  const normalizedCategories = normalizeExpenseCategories(categories);
+  if (normalizedCategories.length === 0) {
+    return "费用模块至少需要保留一种费用类别";
+  }
+
+  return null;
+}
+
+async function fetchExpenseSnapshot(ownerUserId) {
+  const { data, error } = await supabase
+    .from("admin_expense_snapshots")
+    .select("expenses, categories")
+    .eq("owner_user_id", ownerUserId)
+    .maybeSingle();
+  if (error) {
+    throw error;
+  }
+
+  const expenses = Array.isArray(data?.expenses) ? data.expenses.map((item, index) => normalizeExpenseSnapshotItem(item, index)) : [];
+  const categories = normalizeExpenseCategories(data?.categories);
+  return {
+    expenses,
+    categories: categories.length > 0 ? categories : DEFAULT_EXPENSE_CATEGORIES
+  };
+}
+
+async function replaceExpenseSnapshot(ownerUserId, expenses, categories) {
+  const normalizedExpenses = expenses.map((item, index) => normalizeExpenseSnapshotItem(item, index));
+  const normalizedCategories = normalizeExpenseCategories(categories);
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from("admin_expense_snapshots")
+    .upsert([
+      addOwnerPayload({
+        expenses: normalizedExpenses,
+        categories: normalizedCategories,
+        updated_at: now
+      }, ownerUserId)
+    ], { onConflict: "owner_user_id" });
+  if (error) {
+    throw error;
+  }
+
+  return fetchExpenseSnapshot(ownerUserId);
+}
+
 function normalizeSopPayload(body = {}, authUser) {
   const targetType = body.targetType === "specific" ? "specific" : "all";
   const targetEmployeeIds = Array.isArray(body.targetEmployeeIds)
@@ -6191,6 +6584,79 @@ async function replaceSopRelations(ownerUserId, sopId, payload) {
     if (error) throw error;
   }
 }
+
+app.get("/api/admin/customers", async (req, res) => {
+  try {
+    const rows = await fetchCustomerAccounts(req.authUser.id);
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "客户列表加载失败" });
+  }
+});
+
+app.put("/api/admin/customers", async (req, res) => {
+  try {
+    const customers = Array.isArray(req.body?.customers) ? req.body.customers : [];
+    const validationError = validateCustomerSnapshot(customers);
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
+    }
+
+    const rows = await replaceCustomerAccounts(req.authUser.id, customers);
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "客户快照保存失败" });
+  }
+});
+
+app.get("/api/admin/goods", async (req, res) => {
+  try {
+    const rows = await fetchGoodsSnapshot(req.authUser.id);
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "入库管理数据加载失败" });
+  }
+});
+
+app.put("/api/admin/goods", async (req, res) => {
+  try {
+    const goods = Array.isArray(req.body?.goods) ? req.body.goods : [];
+    const validationError = validateGoodsSnapshot(goods);
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
+    }
+
+    const rows = await replaceGoodsSnapshot(req.authUser.id, goods);
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "入库管理快照保存失败" });
+  }
+});
+
+app.get("/api/admin/expenses", async (req, res) => {
+  try {
+    const snapshot = await fetchExpenseSnapshot(req.authUser.id);
+    res.json(snapshot);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "费用模块数据加载失败" });
+  }
+});
+
+app.put("/api/admin/expenses", async (req, res) => {
+  try {
+    const expenses = Array.isArray(req.body?.expenses) ? req.body.expenses : [];
+    const categories = Array.isArray(req.body?.categories) ? req.body.categories : [];
+    const validationError = validateExpenseSnapshot(expenses, categories);
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
+    }
+
+    const snapshot = await replaceExpenseSnapshot(req.authUser.id, expenses, categories);
+    res.json(snapshot);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "费用模块快照保存失败" });
+  }
+});
 
 app.get("/api/admin/sops", async (req, res) => {
   try {

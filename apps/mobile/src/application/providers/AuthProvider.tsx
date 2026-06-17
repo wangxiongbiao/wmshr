@@ -34,7 +34,9 @@ function getInitialScreenshotState() {
     return null;
   }
 
-  const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
+  // screenshots 模式在 Web 里才依赖 pathname；原生环境虽然也有 window，但没有 location，
+  // 这里必须容忍缺失，避免 release 启动时在 AuthProvider 初始化阶段再次崩溃。
+  const pathname = typeof window !== 'undefined' ? window.location?.pathname ?? '' : '';
   if (pathname === '/login') {
     return {
       session: null,

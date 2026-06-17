@@ -2,12 +2,13 @@ import React, {PropsWithChildren, useCallback, useEffect, useMemo, useState} fro
 import {ActivityIndicator, Platform, StyleSheet, Text, View} from 'react-native';
 import {colors} from '../../../shared/constants/colors';
 import {AppModal} from '../../../shared/components/AppModal';
-import {fetchLatestAppUpdate} from '../services/appUpdateApi';
 import {AppUpdateInfo, AppUpdateStatus} from '../types';
+
+// 更新门禁直接读取 apps/mobile/app.json 的 Expo 版本，避免再维护一份手写常量导致对外版本与包内版本分叉。
+const LOCAL_APP_VERSION = String((require('../../../../app.json') as {expo?: {version?: string}}).expo?.version || '').trim();
 
 const ANDROID_APK_MIME_TYPE = 'application/vnd.android.package-archive';
 const FLAG_GRANT_READ_URI_PERMISSION = 1;
-const LOCAL_APP_VERSION = String((require('../../../../app.json') as {expo?: {version?: string}}).expo?.version || '').trim();
 
 function hasCompleteUpdateInfo(update: Partial<AppUpdateInfo> | null | undefined): update is AppUpdateInfo {
   return Boolean(update?.version && update?.content && update?.url);
@@ -47,6 +48,11 @@ async function downloadAndOpenAndroidInstaller(update: AppUpdateInfo) {
   });
 }
 
+async function loadAndFetchLatestAppUpdate() {
+  const {fetchLatestAppUpdate} = await import('../services/appUpdateApi');
+  return fetchLatestAppUpdate();
+}
+
 export function AppUpdateGate({children}: PropsWithChildren) {
   const [status, setStatus] = useState<AppUpdateStatus>({kind: 'checking'});
   const [actionLoading, setActionLoading] = useState(false);
@@ -67,7 +73,7 @@ export function AppUpdateGate({children}: PropsWithChildren) {
     setStatus({kind: 'checking'});
     setPromptDismissed(false);
     try {
-      const latestUpdate = await fetchLatestAppUpdate();
+      const latestUpdate = await loadAndFetchLatestAppUpdate();
       if (!hasCompleteUpdateInfo(latestUpdate)) {
         // 后台暂未配置版本信息时，按“当前无更新可提示”处理，不再弹出更新异常弹窗。
         setStatus({kind: 'up_to_date'});
@@ -185,7 +191,32 @@ export function AppUpdateGate({children}: PropsWithChildren) {
 }
 
 function localAppVersionNeedsUpdate(remoteVersion: string) {
-  return LOCAL_APP_VERSION !== String(remoteVersion || '').trim();
+  const localParts = normalizeVersionParts(LOCAL_APP_VERSION);
+  const remoteParts = normalizeVersionParts(remoteVersion);
+  const maxLength = Math.max(localParts.length, remoteParts.length);
+
+  // 版本门禁只能在“远端版本高于本地版本”时拦截；
+  // 不能继续用“不相等就更新”，否则 0.1.7 会被误判成比 0.1.21 更新，真机启动会一直被错误弹窗挡住。
+  for (let index = 0; index < maxLength; index += 1) {
+    const localPart = localParts[index] ?? 0;
+    const remotePart = remoteParts[index] ?? 0;
+    if (remotePart > localPart) {
+      return true;
+    }
+    if (remotePart < localPart) {
+      return false;
+    }
+  }
+
+  return false;
+}
+
+function normalizeVersionParts(version: string) {
+  return String(version || '')
+    .trim()
+    .split('.')
+    .map((part) => Number.parseInt(part, 10))
+    .map((part) => (Number.isFinite(part) ? part : 0));
 }
 
 const styles = StyleSheet.create({

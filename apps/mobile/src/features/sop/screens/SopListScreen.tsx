@@ -1,5 +1,5 @@
 import React, {useCallback, useMemo, useRef, useState} from 'react';
-import {NativeScrollEvent, NativeSyntheticEvent, Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
+import {NativeScrollEvent, NativeSyntheticEvent, Pressable, StyleSheet, Text, View} from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
 import {Link, useFocusEffect} from 'expo-router';
 import {useTranslation} from 'react-i18next';
@@ -19,7 +19,6 @@ export function SopListScreen() {
   const {session} = useAuth();
   const {showToast} = useToast();
   const [documents, setDocuments] = useState<SopDocument[]>([]);
-  const [keyword, setKeyword] = useState('');
   const [hasFetchedOnce, setHasFetchedOnce] = useState(false);
   const [isFetchingMore, setIsFetchingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -39,7 +38,7 @@ export function SopListScreen() {
 
     try {
       // SOP 按分页追加，首屏不再单独显示 loading 卡片；详情返回后重新进列表时仍会自动回流最新已读状态。
-      const nextDocuments = await fetchSopDocuments(session.accessToken, {keyword: keyword, limit: PAGE_SIZE, offset});
+      const nextDocuments = await fetchSopDocuments(session.accessToken, {limit: PAGE_SIZE, offset});
       setDocuments(prev => (append ? [...prev, ...nextDocuments] : nextDocuments));
       setHasMore(nextDocuments.length === PAGE_SIZE);
       setHasFetchedOnce(true);
@@ -53,7 +52,7 @@ export function SopListScreen() {
     } finally {
       setIsFetchingMore(false);
     }
-  }, [keyword, session?.accessToken, showToast, t]);
+  }, [session?.accessToken, showToast, t]);
 
   useFocusEffect(
     useCallback(() => {
@@ -96,31 +95,30 @@ export function SopListScreen() {
         <Text style={sharedStyles.title}>{t('SOP 文件')}</Text>
         <Text style={sharedStyles.muted}>{t('仓库作业标准流程')}</Text>
       </View>
-      <TextInput
-        value={keyword}
-        onChangeText={setKeyword}
-        placeholder={t('搜索 SOP 标题或正文')}
-        style={styles.searchInput}
-      />
 
-      {documents.map(item => (
-        <Link key={item.id} href={{pathname: '/sop/[sopId]', params: {sopId: item.id}}} push asChild>
-          <Pressable style={sharedStyles.listCard}>
-            <Ionicons name={item.readStatus === 'read' ? 'checkmark-circle' : 'ellipse-outline'} size={24} color={item.readStatus === 'read' ? colors.success : colors.textMuted} />
-            <View style={sharedStyles.flexOne}>
-              <Text style={sharedStyles.cardTitle}>{item.title}</Text>
-              <Text style={sharedStyles.muted}>{item.version} · {t('更新')} {item.updatedAt}</Text>
-              <Text style={[sharedStyles.muted, item.readStatus === 'read' && styles.readHint]}>{item.readStatus === 'read' ? t('已完成阅读确认') : t('待阅读确认')}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
-          </Pressable>
-        </Link>
-      ))}
+      {documents.map(item => {
+        const isRead = item.readStatus === 'read';
+        return (
+          <Link key={item.id} href={{pathname: '/sop/[sopId]', params: {sopId: item.id}}} push asChild>
+            <Pressable style={({pressed}) => [styles.documentCard, pressed && styles.documentCardPressed]}>
+              <View style={[styles.documentIconWrap, isRead ? styles.documentIconWrapRead : styles.documentIconWrapUnread]}>
+                <Ionicons name="document-text-outline" size={28} color={isRead ? colors.textMuted : colors.primary} />
+              </View>
+              <View style={styles.documentCopy}>
+                <Text style={styles.documentTitle} numberOfLines={2}>{item.title}</Text>
+                <Text style={styles.documentMeta}>{item.version} · {t('更新')} {item.updatedAt}</Text>
+              </View>
+              {/* 参考最新列表稿：未读只保留右侧红点，已读才展示进入箭头，避免状态文案重复占一整行。 */}
+              {isRead ? <Ionicons name="chevron-forward" size={20} color="#cbd5e1" /> : <View style={styles.unreadDot} />}
+            </Pressable>
+          </Link>
+        );
+      })}
 
       {hasFetchedOnce && documents.length === 0 ? (
         <View style={styles.placeholderCard}>
-          <Text style={sharedStyles.cardTitle}>{errorText ? t('SOP 列表暂时加载失败') : keyword.trim() ? t('没有匹配的 SOP') : t('暂无可查看的 SOP')}</Text>
-          <Text style={sharedStyles.muted}>{errorText ?? (keyword.trim() ? t('请尝试更换关键词后重新搜索。') : t('当后台发布并指派 SOP 后，这里会展示你可查看的标准流程。'))}</Text>
+          <Text style={sharedStyles.cardTitle}>{errorText ? t('SOP 列表暂时加载失败') : t('暂无可查看的 SOP')}</Text>
+          <Text style={sharedStyles.muted}>{errorText ?? t('当后台发布并指派 SOP 后，这里会展示你可查看的标准流程。')}</Text>
           {errorText ? (
             <Pressable style={styles.retryButton} onPress={() => void loadDocuments({append: false, offset: 0, showErrorToast: true})}>
               <Text style={styles.retryButtonText}>{t('重新加载')}</Text>
@@ -139,11 +137,18 @@ export function SopListScreen() {
 }
 
 const styles = StyleSheet.create({
-  searchInput: {height: 46, borderRadius: 16, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, color: colors.text, backgroundColor: colors.white, marginBottom: 12},
+  documentCard: {backgroundColor: colors.white, borderRadius: 30, paddingVertical: 22, paddingHorizontal: 18, marginBottom: 18, flexDirection: 'row', alignItems: 'center', gap: 16, shadowColor: colors.text, shadowOpacity: 0.05, shadowRadius: 18, shadowOffset: {width: 0, height: 8}, elevation: 3, borderWidth: 1, borderColor: '#eef2f7'},
+  documentCardPressed: {opacity: 0.84},
+  documentIconWrap: {width: 52, height: 52, borderRadius: 18, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#dbeafe'},
+  documentIconWrapUnread: {backgroundColor: '#eff6ff'},
+  documentIconWrapRead: {backgroundColor: '#f8fafc', borderColor: '#e2e8f0'},
+  documentCopy: {flex: 1},
+  documentTitle: {fontSize: 18, lineHeight: 24, color: colors.text, fontWeight: '900'},
+  documentMeta: {marginTop: 8, fontSize: 14, color: colors.textMuted, fontWeight: '700', letterSpacing: 0.2},
+  unreadDot: {width: 14, height: 14, borderRadius: 999, backgroundColor: '#ff2d55', shadowColor: '#ff2d55', shadowOpacity: 0.28, shadowRadius: 8, shadowOffset: {width: 0, height: 4}, elevation: 2},
   placeholderCard: {backgroundColor: colors.white, borderRadius: 22, padding: 18, alignItems: 'center', gap: 10},
   retryButton: {marginTop: 6, height: 44, minWidth: 120, borderRadius: 16, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16},
   retryButtonText: {color: colors.white, fontSize: 15, fontWeight: '900'},
   autoLoadHint: {marginTop: 6, alignItems: 'center', justifyContent: 'center'},
   autoLoadHintText: {color: colors.textMuted, fontSize: 13, fontWeight: '700'},
-  readHint: {color: colors.success, fontWeight: '800'},
 });

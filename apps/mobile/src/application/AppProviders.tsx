@@ -41,6 +41,11 @@ export function AppProviders({children}: PropsWithChildren) {
         <ToastProvider>
           <StatusBar barStyle="dark-content" />
           <AppUpdateGate>
+            {/*
+              原生启动默认先进入 expo-router 的 /，后续 login / protected 页面都会直接使用
+              useAuth()、useToast() 和 i18n。根层必须一次性挂好这些 Provider，否则会出现
+              首页修好后跳转仍白屏，或在真正进入业务页时抛上下文缺失错误。
+            */}
             {children}
           </AppUpdateGate>
         </ToastProvider>

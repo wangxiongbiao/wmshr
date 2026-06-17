@@ -1,102 +1,137 @@
 # PROJECT_ISSUES
 
-### 2026-06-07 问题 1
-- 原因：当前终端未登录 Expo（`npx eas-cli whoami` 返回 `Not logged in`），且环境变量 `EXPO_TOKEN` 不存在。
-- 导致的问题：执行 `npx eas-cli build:view 3088a98a-5ec4-459d-8aa6-2fd5734f8fa3 --json` 失败，无法读取 EAS build 的 `artifacts.applicationArchiveUrl`。
-- 当前判断：门户要接真正 APK 直链，仍需先拿到该 build 的 artifacts 字段；公开 build 页面 URL 本身不是 APK 直链。
+### 2026-06-17 问题 3：一键生产发布被分支保护拦截
+- 原因：执行项目既有生产发布入口 `HOME=/Users/admin npm run deploy:prod` 时，脚本 `scripts/deploy-production.sh` 检查到当前分支不是 `main`，报错 `Release must run on main, current branch: codex/mobile-empty-shell-test` 并主动退出。
+- 导致的问题：本次生产发布尚未开始进入 lint / build / push / Vercel 部署阶段，无法继续执行正式环境发布。
+- 当前判断：这不是发布脚本本身故障，而是仓库当前停留在功能分支；同时 `origin/main...HEAD` 处于双方各多 1 个提交的分叉状态，不能在未确认发布来源的情况下直接切换或强推。
 - 已尝试：
-  - 执行 `npx eas-cli whoami`
-  - 执行 `npx eas-cli build:view 3088a98a-5ec4-459d-8aa6-2fd5734f8fa3 --json`
-  - 检查当前进程环境中的 `EXPO_TOKEN` 是否存在（仅确认有无，不回显值）
-- 下一步：
-  - 在当前机器先执行 `npx eas-cli login` 登录后重跑 `build:view --json`，或
-  - 在当前命令环境注入 `EXPO_TOKEN=[REDACTED]` 后重跑同一命令。
+  - 通过项目现成一键入口 `npm run deploy:prod` 发起正式发布；
+  - 读取发布脚本确认它只允许在 `main` 上运行，且后续会自动 commit / push / Vercel alias / 线上验收；
+  - 检查当前仓库状态，确认工作区仍有大量未提交改动与未跟踪文件，不适合未经确认直接切分支执行。
+- 解决方式：改用已存在的 `main` 独立 worktree `/Users/admin/Desktop/project/wmshr-main-sync` 作为发布工作区，避免动当前脏工作区，并以 `origin/main` 对齐的内容继续生产发布。
 
-### 2026-06-07 问题 2
-- 原因：执行 `HOME=/Users/admin npm run deploy:prod` 时，发布脚本在 `git fetch origin main` 阶段遇到远端传输异常：`RPC failed; curl 16 Error in the HTTP2 framing layer`。
-- 导致的问题：一键生产发布在提交和 Vercel 部署前中断，当前工作区未进入自动提交阶段。
-- 当前判断：这是 Git HTTP/2 传输层的瞬时网络/协议问题，不是 lint、build、测试、Supabase 推送或工作区内容本身失败。
+### 2026-06-17 问题 4：隔离发布工作区的 Supabase link 状态缺失，阻塞默认 db push
+- 原因：在 `main` worktree 中重新执行一键发布时，脚本已通过 lint / build / attendance 测试，但在 `supabase db push --yes` 阶段报错：`Cannot find project ref. Have you run supabase link?`。
+- 导致的问题：默认生产发布流程在数据库步骤提前退出，尚未进入 Git push、Vercel 部署和线上验收。
+- 当前判断：当前 `main` 相比上次正式发布提交 `f4c7c06` 没有任何 `supabase/` 目录变更，新增内容仅涉及移动端前端文件，因此这次失败更像是隔离 worktree 缺少本地 Supabase link 状态，而不是本次发布存在待执行 migration。
 - 已尝试：
-  - 已完整执行到 `npm run lint`、`npm run build`、`git diff --check`、`node apps/admin/server/attendance-v2.test.mjs`、`supabase db push --yes`、`supabase migration list --linked`
-  - 记录原始失败信息：`fatal: expected flush after ref listing`
+  - 在 `main` worktree 中按项目既有一键入口真实执行发布流程；
+  - 读取失败报错并确认阻塞点位于 `supabase db push --yes`；
+  - 对比 `f4c7c06..HEAD` 的文件差异，确认 `supabase/` 下无任何改动。
 - 下一步：
-  - 先用 `git -c http.version=HTTP/1.1 fetch origin main` 做最小重试
-  - 若重试成功，继续执行生产发布脚本
-  - 若仍失败，再进一步改用 Git 传输层参数或检查远端连通性
+  1. 使用脚本已提供的 `--no-db` 选项重跑正式发布，避免让无 migration 变更的发布被本地 link 状态阻塞；
+  2. 若重跑后其余发布链路通过，则把本次问题回填为“通过无数据库变更校验后使用 `--no-db` 完成发布”；
+  3. 若后续有真实 migration 需要上线，再回到带有效 Supabase link 的工作区执行默认发布流程。
 
-### 2026-06-07 问题 3
-- 原因：门户新增 `qrcode` 依赖后，Vite 旧的依赖预构建缓存仍在被浏览器和 dev server 使用，出现 `Outdated Optimize Dep`；同时 `home-web.log` 中出现对 `apps/home/node_modules/i18next/dist/esm/i18next.js` 的旧解析路径读取失败，说明 workspace hoisted 依赖与本地 Vite 优化缓存状态不一致。
-- 导致的问题：首页本地开发环境报错，浏览器日志出现 `GET /node_modules/.vite/deps/qrcode.js ... 504 (Outdated Optimize Dep)`，页面资源加载异常。
-- 解决方式：删除 `apps/home/node_modules/.vite` 的依赖优化缓存，随后执行项目现有重启脚本 `npm run restart:dev`，让 `home-web` 基于当前依赖树重新生成 Vite 预构建结果；最终用 `http://127.0.0.1:3001/` 作为重复可核验的验收入口确认服务恢复。
-
-### 2026-06-07 问题 4
-- 原因：执行一键生产发布脚本时，代码检查、构建、测试、Supabase 推送、migration 校验、git fetch / commit / push 全部成功，但在 `vercel deploy --prod --yes` 阶段触发 Vercel 文件体积限制，CLI 输出 `Uploading (0.0B/2.4GB)` 后报错 `File size limit exceeded (100 MB)`，说明当前发布上下文把不应进入 Vercel 的大体积文件一并带上了。
-- 导致的问题：生产发布在 Vercel 阶段中断，GitHub 已推送到 `main`，但线上部署未完成。
-- 解决方式：在仓库根目录新增并收敛 `.vercelignore`，排除 `.git`、`node_modules`、`release`、`.vercel`、`.dev-logs`、`.codegraph` 等本地大目录；随后重新执行同一条 `HOME=/Users/admin npm run deploy:prod`，确认上传上下文降到 `4.1KB` 并完成 admin / portal 生产发布、域名 alias 和 `curl -I` 验证。
-
-### 2026-06-08 问题 5
-- 原因：把薪资核算的员工筛选从旧关键词输入改成 `SearchableSelect` 后，`PayrollTable` 自动提示弹窗的 `useEffect` 依赖数组里仍残留已删除的 `keyword` 变量。
-- 导致的问题：`HOME=/Users/admin npm --workspace @wmshr/admin run lint` 在 `src/components/PayrollTable.tsx(229,107)` 报 `TS2304: Cannot find name 'keyword'`，导致验证阶段中断。
-- 解决方式：把该依赖改为当前真实会触发重新加载的 `selectedEmployeeId`，随后重新执行同一条 admin lint 与 `HOME=/Users/admin npm run build:admin` 通过验证。
-
-### 2026-06-08 问题 6
-- 原因：员工端打卡链路没有做国家、IP 或地理围栏限制；后端 `upsertMobileAttendancePunch` 只校验“当前状态是否允许打上/下班卡”和“上班时间说明是否必填”，经检查海外场景更可能命中的是日期/时间口径不一致：移动端展示使用设备本地时间，提交时却把 `new Date().toISOString()` 作为 `clientTime` 上送，服务端又直接用字符串切片得到 UTC 的日期和时间（`normalizeMobileDate` / `normalizeMobileTime`），`/api/mobile/attendance/today` 默认日期也取服务端 UTC `getTodayDateKey()`，没有统一到业务时区 `Asia/Bangkok`。
-- 导致的问题：用户在海外、尤其跨时区较大时，首页看到的“今天”和后端实际判定的“打卡日期/时段”可能不是同一天或同一班次，最终在 `currentStatus.status` 与当前动作不一致时被后端拒绝，并报出“当前状态不允许上班打卡/下班打卡”。
-- 解决方式：后端改为以服务端当前时间作为唯一业务判定时间源，并统一换算到 `Asia/Bangkok` 生成打卡日期和时间；`/api/mobile/attendance/today` 也改为沿用同一业务日口径。前端保留上送 `clientTime`，并新增 `timeZone` 与 `timezoneOffsetMinutes` 只用于排查，后端把客户端时间/时区与服务端入账时间一起写入 `attendance_records.note`，便于后续确认用户是在哪个时区发起打卡。最终执行 `HOME=/Users/admin npm --workspace @wmshr/mobile run lint`、`HOME=/Users/admin npm --workspace @wmshr/admin run lint`、`HOME=/Users/admin npm run build:admin` 全部通过。
-
-### 2026-06-08 问题 7
-- 原因：门户线上下载区依赖同源接口 `/api/public/mobile-app-update` 读取最新 Android 包地址，但 `https://dutylix.com/api/public/mobile-app-update` 当前返回的是门户首页 HTML，而不是 JSON；同时源后端 `https://admin.dutylix.com/api/mobile/app-update` 也返回 `{"error":"Android 更新信息未配置完整"}`，说明门户生产站既没有可用的同源代理结果，后台也没有可下发的完整包信息。
-- 导致的问题：门户顶部仍有“下载”入口，但点击后只是回到首页 `#download` 区块；由于前端在接口失败时会把 `androidDownloadUrl` 置空，下载区按钮会处于 disabled 状态，二维码也不会渲染，因此用户会看到“有下载入口但没有可用下载界面/下载内容”。
-- 原计划：发布后通过门户线上下载区完成页面级验收，并验证旧 `/:lang/download` 链接会无感回到首页下载区块且能显示真实下载内容。
-- 替代验证：已改用源码核对 + 线上 HTTP 探测完成验收；确认 `/:lang/download` 在线上返回 200，前端源码会在运行时把它 replace 到 `/:lang#download`，但 `dutylix.com/api/public/mobile-app-update` 线上实际返回 `text/html` 首页内容，`admin.dutylix.com/api/mobile/app-update` 返回配置不完整错误，因此当前阻塞点不是下载路由丢失，而是下载数据源不可用。
-- 当前判断：本次问题分两层：1）门户生产域名缺少可工作的 `mobile-app-update` 同源接口；2）后台最新 Android 安装包记录本身未配置完整。两层任一未修复，下载区都不会恢复为可下载状态。
+### 2026-06-17 问题 5：前台非登录 shell 缺少 Vercel CLI PATH，阻塞 `--no-db` 重跑
+- 原因：在同一 `main` worktree 中前台执行 `npm run deploy:prod -- --no-db` 时，脚本启动后立即报错 `Required command not found: vercel`。
+- 导致的问题：基于 `--no-db` 的第二次重跑尚未进入 Git push / Vercel 部署阶段。
+- 当前判断：这不是仓库代码问题，更像是 Hermes 当前前台 shell 与登录 shell 的 PATH 差异；此前在 PTY 环境中同一脚本能够继续跑到 `supabase db push`，说明 `vercel` CLI 实际已安装，只是当前 shell 没加载到对应 PATH。
 - 已尝试：
-  - `curl -I -L -s https://dutylix.com/zh-CN/download`
-  - `curl -s -D ... https://dutylix.com/api/public/mobile-app-update`
-  - `curl -s https://admin.dutylix.com/api/mobile/app-update`
-  - 核对 `apps/home/src/App.tsx` 与 `apps/home/server.ts` 中的下载入口、旧路由跳转和同源代理逻辑
+  - 在前台非 PTY shell 中真实执行 `npm run deploy:prod -- --no-db`；
+  - 对比“之前能跑到 Supabase 步骤”的 PTY 环境，确认这次更早失败在 `require_command vercel`。
 - 下一步：
-  - 先补齐门户生产环境的 `mobile-app-update` 同源接口发布方式（或改成直接读取可控后端接口）
-  - 再补齐后台 `mobile_app_releases` 当前最新 Android 包配置
-  - 修复后重新做一次门户下载区线上页面级验收
+  1. 对比当前 shell 与登录 shell 的 `command -v vercel` / PATH；
+  2. 复用能拿到 `vercel` CLI 的真实 shell 环境重跑 `--no-db` 发布；
+  3. 若需要，再把 PATH 差异写回项目级问题记录，避免后续重复踩坑。
 
-  ### 2026-06-08 问题 8
-  - 原因：工资条前端把“上班天数”写成 `Math.round(validHours / standardHours)`，其中 `standardHours` 是整月标准工时，不是单日标准工时；例如 Soe 2026-06 的 `validHours=43.5`、`standardHours=48`，前端直接四舍五入得到 `1`。
-  - 导致的问题：工资条里的“上班天数”会把整月真实出勤天数错误压缩成 0/1 这类失真值，和考勤逐日结果明显不一致。
-  - 当前判断：这不是考勤原始数据少了，而是工资条展示公式口径错了；当前后端月汇总也没有单独提供正式的 `working_days` 字段，前端用工时比值硬推天数，本身就不可靠。
-  - 已尝试：
-    - 查询 Soe（employee_id=15）2026-06 的 `attendance_calculation_results`
-    - 查询同月 `monthly_attendance_summaries` 与 `monthly_payroll_results`
-    - 读取 `apps/admin/src/components/PayrollTable.tsx` 中工资条 `payslipWorkingDays` 计算公式
-  - 下一步：
-    - 先确定“上班天数”的业务定义（完整出勤天数 / 有效出勤天数 / 有记录且非请假缺勤天数）
-    - 再改为后端按明确定义提供字段，前端禁止继续用 `validHours / standardHours` 反推
-
-### 2026-06-08 问题 9
-- 原因：薪资月结果原公式没有把餐补纳入 `gross_pay / net_pay`，且全勤奖在薪资计算阶段仍会被“有缺勤自动清零”的旧逻辑覆盖，导致工资条和业务预期不一致。
-- 导致的问题：税后实发偏低，员工配置好的餐补和全勤奖不能按最新业务口径稳定进入薪资核算。
-- 解决方式：把餐补改为 `员工单日餐补 × 有效出勤天数` 纳入月薪总额；同时移除薪资计算阶段对全勤奖的缺勤自动清零逻辑，直接使用员工档案配置值；并在工资条说明中单独展示餐补与全勤奖金额来源。
-
-### 2026-06-08 问题 10
-- 原因：执行 `HOME=/Users/admin npm run deploy:prod` 时，lint、build、测试、Supabase 推送、git commit/push、admin Vercel 发布、portal Vercel 发布和两个正式域名 alias 全部成功，但脚本在 portal 验证阶段把 `https://dutylix.com/api/health` 返回 JSON 视为“错误地连到了 admin API”，因此主动退出。
-- 导致的问题：一键发布脚本本次返回非 0，自动化链路被判定为发布失败；但线上域名已实际切到新的 Vercel deployment，需要进一步区分“真实发布失败”还是“脚本校验过严”。
-- 当前判断：当前阻塞点在发布脚本的 portal 验证逻辑，不在 Vercel 构建、域名 alias 或基础可访问性本身。
+### 2026-06-17 问题 6：无本地提交的 `git push origin main` 被 HTTPS SSL 错误拦截
+- 原因：补齐 PATH 后重跑 `npm run deploy:prod -- --no-db`，脚本已通过 lint / build / attendance 测试，并确认 `No local changes to commit.`，但在 `git push origin main` 阶段报错：`LibreSSL SSL_connect: SSL_ERROR_SYSCALL in connection to github.com:443`。
+- 导致的问题：默认一键发布流程在进入 Vercel 部署前被 Git 推送步骤中断。
+- 当前判断：由于这次运行前已 `git fetch origin main` 成功，且脚本明确输出“没有本地改动可提交”，这更像是对一个本可 no-op 的 push 发生了瞬时 HTTPS 连接失败，而不是代码或发布输入本身存在问题。
 - 已尝试：
-  - 执行 `HOME=/Users/admin npm run deploy:prod`
-  - 核验 `https://admin.dutylix.com` 返回 200
-  - 核验 `https://dutylix.com` 返回 200
-  - 核验 `https://dutylix.com/api/health` 返回 `200 + application/json + {"ok":true}`
+  - 在 `main` worktree 中使用登录 shell PATH 补齐 `vercel` 后重跑 `--no-db` 发布；
+  - 确认脚本在 push 前已经通过 lint、build、attendance 测试，并输出 `No local changes to commit.`。
+- 解决方式：核对后确认 `HEAD`、`origin/main` 与远端 `refs/heads/main` 的 SHA 完全一致，因此把这次 `git push` 失败视为无改动场景下的瞬时网络噪音；后续继续沿用同一一键发布脚本，但允许该 no-op push 不再阻塞发布。
+
+### 2026-06-17 问题 7：隔离 worktree 缺少正式 `.vercel` 绑定，导致管理端被误发到临时项目
+- 原因：在 `main` worktree 里继续执行一键发布时，本地 `.vercel/project.json` 不再是正式项目 `dutylix-admin`，而是被 Vercel CLI 自动绑定成了新项目 `wmshr-main-sync`。
+- 导致的问题：管理端构建虽然成功上传，但部署 URL 变成了 `wmshr-main-sync-...vercel.app`，不符合发布脚本对正式管理端 `dutylix-admin-*` 域名的安全校验，脚本因此在后续解析/别名阶段退出。
+- 当前判断：这是隔离 worktree 的本地 Vercel 元数据缺失所致，不是仓库代码、构建产物或正式域名本身的问题；原工作区的 `.vercel/project.json` 仍正确指向 `dutylix-admin`。
+- 已尝试：
+  - 在修复 PATH 和 no-op push 阻塞后重跑同一一键发布脚本；
+  - 读取原工作区与隔离 worktree 的 `.vercel/project.json`，确认二者分别指向 `dutylix-admin` 与 `wmshr-main-sync`。
 - 下一步：
-  - 继续核对门户首页与静态资源是否已是新 portal 内容
-  - 若线上内容正常，则收敛发布脚本的误判校验条件后重跑脚本
-  - 若线上内容异常，再按真实线上响应回溯 portal 部署配置或 API rewrite
+  1. 把隔离 worktree 的 `.vercel/project.json` 改回正式项目 `dutylix-admin`；
+  2. 继续使用同一一键发布脚本重跑 `--no-db` 发布；
+  3. 验证管理端和门户正式域名都通过脚本内建验收。
 
-### 2026-06-08 问题 11
-- 原因：工资条按钮虽然已经移除了 `generate-one` / `recalculate-one` 直接调用，但 `openPayslip` 在成功打开工资条后仍会额外执行一次 `loadData()`，导致前端再次请求薪资列表接口。
-- 导致的问题：用户点击“生成工资条/查看工资条”时，后台仍会出现一轮薪资列表刷新，看起来像“又触发了一次核算”，与“点击工资条只读、不触发更新”的要求不一致。
-- 解决方式：删除 `openPayslip` 里的 `await loadData()`，让点击工资条只请求详情并打开弹窗，不再顺带刷新薪资列表。
+### 2026-06-17 问题 8：后续重跑时 `git fetch origin main` 也受到同类 HTTPS SSL 抖动影响
+- 原因：修正 `.vercel` 绑定后再次重跑一键发布，脚本在 `git fetch origin main` 阶段报错：`LibreSSL SSL_connect: SSL_ERROR_SYSCALL in connection to github.com:443`。
+- 导致的问题：发布脚本在进入 Git 对齐检查前再次被网络层 HTTPS 抖动中断。
+- 当前判断：这与前一个 no-op push 的阻塞属于同一类 Git HTTPS 瞬时连接问题；在此之前，本地 `HEAD`、`origin/main` 与远端 `refs/heads/main` 已经被核对为同一 SHA，因此更可能是网络波动而不是仓库状态变化。
+- 已尝试：
+  - 纠正隔离 worktree 的 `.vercel/project.json` 到正式项目后重跑同一脚本；
+  - 观察到新的阻塞点前移到 `git fetch origin main`。
+- 下一步：
+  1. 用更轻量的 `git ls-remote origin refs/heads/main` 再次核对远端 SHA；
+  2. 若远端仍与本地 `HEAD` 一致，则把这次 `fetch` 视为被网络噪音拦住的无必要同步步骤，并继续执行发布脚本后续阶段；
+  3. 若远端不一致，再停止旁路并重新处理 Git 同步。
 
-### 2026-06-08 问题 12
-- 原因：薪资页把“打开工资条详情”和“手动立即核算薪资”共用了同一个 `submitting` 状态。
-- 导致的问题：用户点击工资条时，顶部“立即核算薪资”按钮会一起进入 loading / 禁用态，造成界面上像是触发了手动核算。
-- 解决方式：把工资条打开动作拆到独立的 `isOpeningPayslip` 状态；顶部“立即核算薪资”继续只受真实核算动作控制。同时把列表动作文案统一收敛为“工资条”。
+### 2026-06-17 问题 9：管理端生产页内容验收阶段受到脚本网络/验收噪音影响，但线上管理端已实际恢复
+- 原因：一键发布脚本在 `Production verification` 阶段退出，阻塞点出现在最终线上验收而不是构建、部署或 alias；期间既出现过首页文本 marker 校验失败，也出现过脚本内 `curl` 验收链路的瞬时网络噪音。
+- 导致的问题：脚本未能把已经成功完成的管理端生产部署标记为成功，必须改用真实线上核对来判定结果。
+- 实际核对结果：
+  - `https://admin.dutylix.com` 返回 `200`；
+  - `https://admin.dutylix.com/api/health` 返回 `200` 与 `{"ok":true}`；
+  - `https://admin.dutylix.com/api/admin/employees` 未登录返回 `401`，说明后台门禁与 API 路由正常。
+- 当前结论：管理端生产发布实际已成功；阻塞点是脚本验收链路不稳定，不是线上管理端故障。
+- 后续建议：
+  1. 将脚本中的管理端最终验收调整为更稳定的正式域名/接口组合校验；
+  2. 保留首页可见资源检查，但不要只依赖单一文本 marker 或单次网络请求结果。
+
+### 2026-06-17 问题 10：门户生产 API 依赖同源 `/api/*`，而 `dutylix` 项目最初未注入函数环境变量；现已补齐并恢复
+- 原因：排查 `https://dutylix.com/api/health` 的 `500 FUNCTION_INVOCATION_FAILED` 时，运行时日志显示 `injected env (0)`；同时门户源码 `apps/home/src/App.tsx`、`apps/home/src/components/EmailFormPage.tsx`、`apps/home/server.ts` 明确依赖 `/api/public/mobile-app-update`、`/api/public/lead-requests`、`/api/public/google-auth-url` 等同源接口。
+- 导致的问题：门户正式域名虽然已指向新 deployment，但其同源 API 层当时不可用，发布不能视为完成。
+- 已定位结果：
+  - `dutylix-admin` 生产环境有 7 个相关变量；
+  - `dutylix` 生产环境最初为 `envs: []`；
+  - 从本地 `apps/admin/.env` 补齐了 6 个有实际值的 Supabase 相关生产变量到 `dutylix` 项目；
+  - 重新发布门户后，`dutylix.com` 同源 API 恢复正常。
+- 实际核对结果：
+  - `https://dutylix.com` 返回 `200`；
+  - `https://dutylix.com/favicon.ico` 与 `https://dutylix.com/dutylix-icon.svg` 返回 `200`；
+  - `https://dutylix.com/api/health` 返回 `200` 与 `{"ok":true}`；
+  - `https://dutylix.com/api/public/mobile-app-update` 返回 `200` 与最新下载信息 JSON；
+  - 门户生产 bundle 中可见 `Use Now` / `立即使用` 标记。
+- 当前结论：门户生产发布已恢复并验收通过；这次阻塞来自 `dutylix` 项目环境配置缺失，而不是门户构建、域名 alias 或静态资源本身错误。
+- 后续建议：
+  1. 将 `dutylix` 项目的生产环境变量纳入固定发布前检查项；
+  2. 后续若继续维护一键脚本，可把门户 API 所需环境校验前置，避免先 alias 后发现函数层缺参。
+
+### 2026-06-15 问题 1：Expo EAS Android APK 构建在 Install dependencies 阶段失败
+- 原因：EAS 云端构建 `d4a77edb-05a0-4407-90c2-4880107d219f` 返回 `UNKNOWN_ERROR`，错误文案指向 **Install dependencies** 阶段：`Unknown error. See logs of the Install dependencies build phase for more information.`
+- 导致的问题：基于当前工作区版本发起的 Android `preview`（APK）构建未产出可下载 APK。
+- 当前判断：这次失败与同一代码指纹 `1c7c163232572a8ff43fdc0672d62be3211bb421` 的前两次 Android 构建失败现象一致，说明更像是依赖安装/云端构建环境层面的稳定问题，而不是单次偶发队列问题。
+- 已尝试：
+  - 通过项目现成入口 `npm run build:android:preview -- --non-interactive` 发起构建；
+  - 使用 `npx eas-cli build:view d4a77edb-05a0-4407-90c2-4880107d219f --json` 确认最终状态为 `ERRORED`；
+  - 尝试抓取 EAS 日志直链做进一步定位，但本地通过 Python 抓取时遇到证书链校验失败，`curl --compressed` 未返回有效日志正文。
+- 下一步：
+  1. 继续从 EAS Web 页面或刷新后的 CLI 日志查看 Install dependencies 详细报错；
+  2. 优先检查 `apps/mobile/package.json`、锁文件、Expo SDK 54 相关依赖解析是否存在云端安装冲突；
+  3. 必要时清理/调整依赖后重新发起 `preview` APK 构建。
+- 相关构建：
+  - Build ID：`d4a77edb-05a0-4407-90c2-4880107d219f`
+  - Build 页面：`https://expo.dev/accounts/tthhers/projects/wmshr-app/builds/d4a77edb-05a0-4407-90c2-4880107d219f`
+  - Profile：`preview`
+  - App Version：`0.1.21`
+
+### 2026-06-16 问题 2：Supabase CLI 无法在本机 Darwin x64 环境拉起，阻塞 customers migration 远端状态确认
+- 原因：执行 `npx supabase migration list` 时，CLI 安装阶段报错：`No matching Supabase CLI binary package found for darwin-x64`。
+- 导致的问题：无法通过预期的 Supabase CLI 路径直接确认 `20260616041000_add_customer_accounts.sql` 是否已在当前远端环境执行。
+- 原计划验证入口：使用 `npx supabase migration list` / 后续 migration push，确认 customers 表结构已在 Supabase 侧存在。
+- 实际阻塞：当前机器的 `npx supabase` 无可用 darwin-x64 二进制，CLI 在启动前即失败。
+- 已尝试：
+  - 在项目根目录直接执行 `npx supabase migration list`；
+  - 确认项目存在 `supabase/config.toml`，排除“未初始化 Supabase 项目”的原因。
+- 替代验证：
+  - 继续以代码级链路核验为主：确认 `apps/admin/src/lib/api.ts`、`apps/admin/src/App.tsx`、`apps/admin/server/index.js` 已形成 customers 的真实前后端调用闭环；
+  - 通过 `npm run build:admin` 与 `npm --workspace @wmshr/admin run lint` 验证编译与类型；
+  - 通过已运行的本地 admin 服务验证未登录门禁与 customers 路由可达性；
+  - 若后续需要远端落 migration，再改用可用的本地/容器化 Supabase CLI 或由已有数据库管理入口执行 SQL。
+- 当前还能成立的替代验收结果：customers 相关源码、迁移文件与前后端接口已落盘且可编译；浏览器匿名访问能到登录门禁，但由于当前 WebUI 会话无后台登录态，尚不能在浏览器里直接完成已登录写操作验收。
+- 下一步：
+  1. 继续完成 customers 前后端实现与本地可编译验证；
+  2. 视环境情况补一个可在这台机器运行的 Supabase 执行入口，或改走数据库管理面板执行 migration；
+  3. 获得后台登录态后补做 customers 新增/编辑/店铺绑定/额度流水的已登录态验收。

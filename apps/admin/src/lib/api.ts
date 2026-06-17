@@ -16,6 +16,7 @@ import {
   AttendanceRuleOption,
   AttendanceRuleRelatedEmployee,
   DashboardData,
+  Customer,
   Employee,
   EmployeeAppAccountResponse,
   EmployeeDetail,
@@ -23,6 +24,8 @@ import {
   EmployeeListPage,
   EmployeeAvatarBatchResponse,
   EmployeeStatus,
+  GoodsRecord,
+  ExpenseModuleSnapshot,
   MonthlyAttendanceSummary,
   MonthlyPayrollResult,
   PayrollGenerateBatchResponse,
@@ -87,12 +90,15 @@ export async function fetchEmployees(): Promise<Employee[]> {
   return request<Employee[]>("/api/admin/employees");
 }
 
-export async function searchEmployees(keyword: string, options: { includeInactive?: boolean } = {}): Promise<Employee[]> {
+export async function searchEmployees(keyword: string, options: { includeInactive?: boolean; status?: string } = {}): Promise<Employee[]> {
   const trimmedKeyword = keyword.trim();
   if (!trimmedKeyword) {
     return [];
   }
   const search = new URLSearchParams({ keyword: trimmedKeyword });
+  if (options.status && options.status !== "all") {
+    search.set("status", options.status);
+  }
   if (options.includeInactive) {
     search.set("includeInactive", "true");
   }
@@ -130,6 +136,39 @@ export async function fetchDashboardData(params: { force?: boolean; yearMonth?: 
   }
 
   return requestPromise;
+}
+
+export async function fetchCustomers(): Promise<Customer[]> {
+  return request<Customer[]>("/api/admin/customers");
+}
+
+export async function saveCustomersSnapshot(customers: Customer[]): Promise<Customer[]> {
+  return request<Customer[]>("/api/admin/customers", {
+    method: "PUT",
+    body: JSON.stringify({ customers })
+  });
+}
+
+export async function fetchGoodsSnapshot(): Promise<GoodsRecord[]> {
+  return request<GoodsRecord[]>("/api/admin/goods");
+}
+
+export async function saveGoodsSnapshot(goods: GoodsRecord[]): Promise<GoodsRecord[]> {
+  return request<GoodsRecord[]>("/api/admin/goods", {
+    method: "PUT",
+    body: JSON.stringify({ goods })
+  });
+}
+
+export async function fetchExpenseSnapshot(): Promise<ExpenseModuleSnapshot> {
+  return request<ExpenseModuleSnapshot>("/api/admin/expenses");
+}
+
+export async function saveExpenseSnapshot(snapshot: ExpenseModuleSnapshot): Promise<ExpenseModuleSnapshot> {
+  return request<ExpenseModuleSnapshot>("/api/admin/expenses", {
+    method: "PUT",
+    body: JSON.stringify(snapshot)
+  });
 }
 
 export async function fetchSops(params: { keyword?: string; employeeId?: number | null; publishedOnly?: boolean } = {}): Promise<SopDocument[]> {
@@ -376,6 +415,7 @@ export async function fetchAttendanceCalculations(params: {
   date?: string;
   employeeId?: number | null;
   status?: string;
+  employeeStatus?: string;
   hasException?: string;
   includeInactive?: boolean;
   page: number;
@@ -400,6 +440,9 @@ export async function fetchAttendanceCalculations(params: {
   }
   if (params.status && params.status !== "all") {
     search.set("status", params.status);
+  }
+  if (params.employeeStatus && params.employeeStatus !== "all") {
+    search.set("employeeStatus", params.employeeStatus);
   }
   if (params.hasException && params.hasException !== "all") {
     search.set("hasException", params.hasException);
@@ -457,6 +500,7 @@ export async function fetchPayrollResults(params: {
   keyword?: string;
   yearMonth: string;
   employeeId?: number | null;
+  employeeStatus?: string;
   salaryType?: string;
   calculationStatus?: string;
   reviewStatus?: string;
@@ -475,6 +519,9 @@ export async function fetchPayrollResults(params: {
   }
   if (params.employeeId) {
     search.set("employeeId", String(params.employeeId));
+  }
+  if (params.employeeStatus && params.employeeStatus !== "all") {
+    search.set("employeeStatus", params.employeeStatus);
   }
   if (params.salaryType && params.salaryType !== "all") {
     search.set("salaryType", params.salaryType);

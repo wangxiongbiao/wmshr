@@ -2,7 +2,7 @@
   "expo": {
     "name": "HMSHR",
     "slug": "wmshr-app",
-    "version": "0.1.6",
+    "version": "0.1.24",
     "scheme": "wmshrapp",
     "icon": "./assets/app-icon.png",
     "orientation": "portrait",
@@ -36,9 +36,10 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "39c2194c-2705-4784-8901-a50c4b684744"
-      }
+        "projectId": "5802940e-c19d-4356-9c61-d4431083adb2"
+      },
+      "router": {}
     },
-    "owner": "nonogogo"
+    "owner": "tthhers"
   }
 }

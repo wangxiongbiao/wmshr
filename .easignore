@@ -1,0 +1,27 @@
+# EAS Android 云构建只需要 mobile 工作区和其共享 packages；
+# 其余本地产物、索引、桌面端和无关应用会放大上传上下文，甚至触发 socket / 打包失败。
+.codegraph/
+.codex-tmp/
+.dev-logs/
+release/
+.git/
+.DS_Store
+node_modules/
+apps/*/node_modules/
+apps/admin/
+apps/home/
+app-v2/
+electron/
+一键启动开发环境.command
+apps/mobile/android/app/build/
+apps/mobile/android/build/
+apps/mobile/android/.gradle/
+apps/mobile/dist-web/
+.expo/
+.expo-shared/
+.metro-cache/
+coverage/
+dist/
+build/
+*.log
+*.tmp

@@ -8,7 +8,10 @@ declare global {
 }
 
 const runtimeConfig = globalThis.__WMSHR_RUNTIME_CONFIG__ ?? {};
-const webSearchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+// React Native 原生环境里 `window` 可能存在，但 `window.location` 并不存在；
+// 这里必须先判空 location，避免 release 包在 env 初始化阶段就因读取 `.search` 崩溃。
+const webLocationSearch = typeof window !== 'undefined' ? window.location?.search ?? '' : '';
+const webSearchParams = webLocationSearch ? new URLSearchParams(webLocationSearch) : null;
 const queryAppEnv = webSearchParams?.get('appEnv') || '';
 const queryApiBaseUrl = webSearchParams?.get('apiBaseUrl') || '';
 

@@ -24,6 +24,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 MOBILE_DIR="${REPO_ROOT}/apps/mobile"
 APP_JSON_PATH="${MOBILE_DIR}/app.json"
 MOBILE_PACKAGE_JSON_PATH="${MOBILE_DIR}/package.json"
+ANDROID_BUILD_GRADLE_PATH="${MOBILE_DIR}/android/app/build.gradle"
 DEFAULT_PROFILE="preview_online"
 BUILD_PLATFORM="android"
 
@@ -180,17 +181,25 @@ cleanup_temp_files() {
 
 update_mobile_version_files() {
   local next_version="$1"
-  python3 - "$APP_JSON_PATH" "$MOBILE_PACKAGE_JSON_PATH" "$next_version" <<'PY'
+  python3 - "$APP_JSON_PATH" "$MOBILE_PACKAGE_JSON_PATH" "$ANDROID_BUILD_GRADLE_PATH" "$next_version" <<'PY'
 import json
+import re
 import sys
 from pathlib import Path
 
 app_json_path = Path(sys.argv[1])
 package_json_path = Path(sys.argv[2])
-next_version = sys.argv[3]
+build_gradle_path = Path(sys.argv[3])
+next_version = sys.argv[4]
 
 app_json = json.loads(app_json_path.read_text())
 package_json = json.loads(package_json_path.read_text())
+build_gradle = build_gradle_path.read_text()
+
+major, minor, patch = [int(part) for part in next_version.split('.')]
+# Android 安装升级依赖 versionCode 单调递增；这里固定把 x.y.z 映射为 x*10000 + y*100 + z，
+# 让官网 APK、EAS APK 与本地 release 都能从同一语义版本稳定推导出升级序号，避免再出现内部版本落后于对外版本的情况。
+version_code = major * 10000 + minor * 100 + patch
 
 expo = app_json.get("expo") or {}
 if not isinstance(expo, dict):
@@ -199,8 +208,29 @@ expo["version"] = next_version
 app_json["expo"] = expo
 package_json["version"] = next_version
 
+if not re.search(r'^\s*versionCode\s+\d+\s*$', build_gradle, flags=re.MULTILINE):
+    raise SystemExit("apps/mobile/android/app/build.gradle missing versionCode")
+if not re.search(r'^\s*versionName\s+"[^"]+"\s*$', build_gradle, flags=re.MULTILINE):
+    raise SystemExit("apps/mobile/android/app/build.gradle missing versionName")
+
+build_gradle = re.sub(
+    r'^(\s*versionCode\s+)\d+(\s*)$',
+    rf'\g<1>{version_code}\2',
+    build_gradle,
+    count=1,
+    flags=re.MULTILINE,
+)
+build_gradle = re.sub(
+    r'^(\s*versionName\s+")[^"]+("\s*)$',
+    rf'\g<1>{next_version}\2',
+    build_gradle,
+    count=1,
+    flags=re.MULTILINE,
+)
+
 app_json_path.write_text(json.dumps(app_json, ensure_ascii=False, indent=2) + "\n")
 package_json_path.write_text(json.dumps(package_json, ensure_ascii=False, indent=2) + "\n")
+build_gradle_path.write_text(build_gradle)
 PY
 }
 
@@ -238,6 +268,7 @@ main() {
     echo "[dry-run] message=${BUILD_MESSAGE}"
     echo "[dry-run] would update: ${APP_JSON_PATH}"
     echo "[dry-run] would update: ${MOBILE_PACKAGE_JSON_PATH}"
+    echo "[dry-run] would update: ${ANDROID_BUILD_GRADLE_PATH}"
     echo "[dry-run] would run: HOME=${HOME:-} npm --workspace @wmshr/mobile run lint"
     echo "[dry-run] would run: cd ${MOBILE_DIR} && HOME=${HOME:-} npx eas-cli build -p ${BUILD_PLATFORM} --profile ${PROFILE} --wait --json --non-interactive -m '${BUILD_MESSAGE}'"
     echo "[dry-run] would run: cd ${MOBILE_DIR} && HOME=${HOME:-} npx eas-cli build:view <build-id> --json"

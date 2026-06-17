@@ -16,6 +16,9 @@ import { AttendanceRuleList } from "./components/AttendanceRuleList";
 import { AttendanceTable } from "./components/AttendanceTable";
 import { PayrollTable } from "./components/PayrollTable";
 import { SopManager } from "./components/SopManager";
+import { CustomerManager } from "./components/CustomerManager";
+import { GoodsManager } from "./components/GoodsManager";
+import { ExpenseManager } from "./components/ExpenseManager";
 import {
   EmployeeModal,
   EmployeeAppAccountModal,
@@ -31,7 +34,11 @@ import {
   AttendanceRuleOption,
   AttendanceRuleRelatedEmployee,
   EmployeeAppAccountResponse,
-  EmployeeUpsertPayload
+  EmployeeUpsertPayload,
+  Customer,
+  GoodsRecord,
+  ExpenseRecord,
+  ExpenseModuleSnapshot
 } from "./types";
 import { INITIAL_EMPLOYEES } from "./constants";
 import { motion } from "motion/react";
@@ -41,14 +48,22 @@ import {
   createEmployee,
   disableAttendanceRule,
   enableAttendanceRule,
-  fetchEmployees,
   fetchAttendanceRuleDetail,
+  fetchAttendanceRuleOptions,
   fetchAttendanceRuleRelatedEmployees,
   fetchAttendanceRules,
+  fetchCustomers,
   fetchEmployeeAppAccount,
   fetchEmployeeDetail,
+  fetchEmployees,
+  fetchGoodsSnapshot,
+  fetchExpenseSnapshot,
   initializeWorkspace,
   resetEmployeeAppPassword,
+  saveCustomersSnapshot,
+  saveGoodsSnapshot,
+  saveExpenseSnapshot,
+  searchEmployees,
   updateAttendanceRule,
   updateEmployee,
   updateEmployeeAppAccountStatus,
@@ -133,6 +148,14 @@ export default function App() {
   const [googleSigningIn, setGoogleSigningIn] = useState(false);
   const [authError, setAuthError] = useState("");
   const [employees, setEmployees] = useState<Employee[]>(INITIAL_EMPLOYEES);
+  // customers/goods/expenses 三个 v3 模块现在统一走账号级服务端快照；壳层只保留 keep-alive 与 optimistic 回写，不再依赖浏览器本地存储，避免多设备与多标签页状态漂移。
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [goods, setGoods] = useState<GoodsRecord[]>([]);
+  const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
+  const [expenseCategories, setExpenseCategories] = useState<string[]>([]);
+  const [customersLoading, setCustomersLoading] = useState(false);
+  const [goodsLoading, setGoodsLoading] = useState(false);
+  const [expensesLoading, setExpensesLoading] = useState(false);
   const [attendanceRuleList, setAttendanceRuleList] = useState<AttendanceRule[]>([]);
   const [employeesLoading, setEmployeesLoading] = useState(false);
   const [attendanceRulesLoading, setAttendanceRulesLoading] = useState(false);
@@ -150,6 +173,9 @@ export default function App() {
   const popupPollTimerRef = useRef<number | null>(null);
   const popupWindowRef = useRef<Window | null>(null);
   const popupResolvedRef = useRef(false);
+  const customersLoadedRef = useRef(false);
+  const goodsLoadedRef = useRef(false);
+  const expensesLoadedRef = useRef(false);
 
   // Modal States
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
@@ -210,6 +236,92 @@ export default function App() {
     navigate(buildAdminRoute(currentLanguage, tab));
   };
 
+  const loadCustomersModuleData = async () => {
+    setCustomersLoading(true);
+    try {
+      const customerRows = await fetchCustomers();
+      setCustomers(customerRows);
+      customersLoadedRef.current = true;
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : tAdmin("客户模块数据加载失败"));
+    } finally {
+      setCustomersLoading(false);
+    }
+  };
+
+  const loadGoodsModuleData = async () => {
+    setGoodsLoading(true);
+    try {
+      const goodsRows = await fetchGoodsSnapshot();
+      setGoods(goodsRows);
+      goodsLoadedRef.current = true;
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : tAdmin("入库模块数据加载失败"));
+    } finally {
+      setGoodsLoading(false);
+    }
+  };
+
+  const loadExpensesModuleData = async () => {
+    setExpensesLoading(true);
+    try {
+      const snapshot = await fetchExpenseSnapshot();
+      setExpenses(snapshot.expenses);
+      setExpenseCategories(snapshot.categories);
+      expensesLoadedRef.current = true;
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : tAdmin("费用模块数据加载失败"));
+    } finally {
+      setExpensesLoading(false);
+    }
+  };
+
+  const handleUpdateCustomers = (updatedCustomers: Customer[]) => {
+    // 继续沿用 v3 CustomerManager 的“整表回写”交互，但实际持久化已经切到服务端快照，避免为接入现阶段重写大量页面内部状态机。
+    const previousCustomers = customers;
+    setCustomers(updatedCustomers);
+    void saveCustomersSnapshot(updatedCustomers)
+      .then((savedCustomers) => {
+        setCustomers(savedCustomers);
+        customersLoadedRef.current = true;
+      })
+      .catch((error) => {
+        setCustomers(previousCustomers);
+        addToast(error instanceof Error ? error.message : tAdmin("客户数据保存失败"));
+      });
+  };
+
+  const handleUpdateGoods = (updatedGoods: GoodsRecord[]) => {
+    const previousGoods = goods;
+    setGoods(updatedGoods);
+    void saveGoodsSnapshot(updatedGoods)
+      .then((savedGoods) => {
+        setGoods(savedGoods);
+        goodsLoadedRef.current = true;
+      })
+      .catch((error) => {
+        setGoods(previousGoods);
+        addToast(error instanceof Error ? error.message : tAdmin("入库数据保存失败"));
+      });
+  };
+
+  const handleUpdateExpenseModule = (snapshot: ExpenseModuleSnapshot) => {
+    const previousSnapshot: ExpenseModuleSnapshot = { expenses, categories: expenseCategories };
+    setExpenses(snapshot.expenses);
+    setExpenseCategories(snapshot.categories);
+    void saveExpenseSnapshot(snapshot)
+      .then((savedSnapshot) => {
+        setExpenses(savedSnapshot.expenses);
+        setExpenseCategories(savedSnapshot.categories);
+        expensesLoadedRef.current = true;
+      })
+      .catch((error) => {
+        setExpenses(previousSnapshot.expenses);
+        setExpenseCategories(previousSnapshot.categories);
+        addToast(error instanceof Error ? error.message : tAdmin("费用数据保存失败"));
+      });
+  };
+
   const handleLanguageRouteChange = (language: ReturnType<typeof normalizeLanguage>) => {
     navigate(buildAdminRoute(language, activeTab));
   };
@@ -243,6 +355,33 @@ export default function App() {
         return (
           // SOP 页面需要保留编辑态、检索词和已展开详情，因此切页时必须缓存页面实例，只在重新激活时后台刷新列表数据。
           <SopManager employees={employees} addToast={addToast} isActive={isActive} />
+        );
+      case "customers":
+        return (
+          <CustomerManager
+            customers={customers}
+            onUpdateCustomers={handleUpdateCustomers}
+            addToast={addToast}
+          />
+        );
+      case "goods":
+        return (
+          <GoodsManager
+            employees={employees}
+            goods={goods}
+            onUpdateGoods={handleUpdateGoods}
+            addToast={addToast}
+          />
+        );
+      case "expenses":
+        return (
+          <ExpenseManager
+            employees={employees}
+            expenses={expenses}
+            categories={expenseCategories}
+            onUpdateExpenseModule={handleUpdateExpenseModule}
+            addToast={addToast}
+          />
         );
       default:
         return null;
@@ -415,6 +554,13 @@ export default function App() {
 
     if (!sessionUserId) {
       setEmployees([]);
+      setCustomers([]);
+      setGoods([]);
+      setExpenses([]);
+      setExpenseCategories([]);
+      customersLoadedRef.current = false;
+      goodsLoadedRef.current = false;
+      expensesLoadedRef.current = false;
       setAttendanceRuleList([]);
       setWorkspaceBootstrapChecking(false);
       setWorkspaceBootstrapDismissed(true);
@@ -441,8 +587,24 @@ export default function App() {
       return;
     }
 
-    // 员工主数据只在 SOP 页面预取；员工管理页改走组件内分页请求，避免进入页面先打一遍全量员工列表。
-    if (activeTab === "sop") {
+    if (activeTab === "customers" && !customersLoadedRef.current) {
+      void loadCustomersModuleData();
+    }
+    if (activeTab === "goods" && !goodsLoadedRef.current) {
+      void loadGoodsModuleData();
+    }
+    if (activeTab === "expenses" && !expensesLoadedRef.current) {
+      void loadExpensesModuleData();
+    }
+  }, [activeTab, session?.access_token]);
+
+  useEffect(() => {
+    if (!session?.access_token) {
+      return;
+    }
+
+    // 员工主数据在 SOP、入库管理、费用管理三个入口都会作为下游选择源使用；这些页面首次进入时统一预取，避免 v3 UI 迁入后表单出现空员工下拉。
+    if (activeTab === "sop" || activeTab === "goods" || activeTab === "expenses") {
       void loadEmployeeModuleData();
     }
   }, [activeTab, session?.access_token]);
@@ -680,6 +842,11 @@ export default function App() {
   };
 
   const handleDeleteEmployee = async (employee: Employee) => {
+    if (employee.status === "resigned") {
+      addToast(tAdmin("离职员工不可删除"));
+      return;
+    }
+
     const confirmed = await confirm({
       title: tAdmin("确认删除员工?"),
       message: tAdmin("此操作会将员工 {{name}} 从 v2 员工列表中移除，后续仍可在后台数据中保留离职记录。是否继续？", { name: employee.name }),
@@ -693,7 +860,8 @@ export default function App() {
     }
 
     try {
-      // 当前后端没有物理删除接口；v2 删除入口只负责让员工退出当前员工列表，因此沿用状态接口标记为离职，避免误删历史考勤/薪资记录。
+      // 当前后端没有物理删除接口；这里的“删除”本质是把在职员工标记为离职并从默认员工列表移除。
+      // 已经离职的员工仍需保留给筛选查看，因此禁止再次通过删除入口重复操作，避免误导维护者把它当成真删除。
       await updateEmployeeStatus(employee.id, "resigned");
       setEmployees((prev) => prev.filter((item) => item.id !== employee.id));
       setEmployeeListReloadKey((prev) => prev + 1);
@@ -809,7 +977,10 @@ export default function App() {
       employees: t('员工管理'),
       attendance: t('考勤计算'),
       payroll: t('薪资核算'),
-      sop: t('SOP管理')
+      sop: t('SOP管理'),
+      customers: t('客户管理'),
+      goods: t('入库管理'),
+      expenses: t('费用管理')
     };
     return titles[activeTab];
   }, [activeTab, t]);
