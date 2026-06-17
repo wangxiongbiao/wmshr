@@ -17,3 +17,6 @@ apps/mobile/node_modules
 electron
 docs
 *.log
+tmp
+admin-v3
+apps/mobile/android
