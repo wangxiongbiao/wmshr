@@ -32,6 +32,11 @@ GOOGLE_AUTH_URL="${CUSTOM_ORIGIN}/api/public/google-auth-url?redirectTo=https%3A
 RUN_DB_PUSH=1
 RUN_PROJECT_MANAGER_LOG=1
 COMMIT_MESSAGE="release production $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+# Production verification talks to freshly-updated custom domains over the public
+# internet. Keep a small retry budget here so one transient TLS/connect failure
+# does not force a full re-deploy after the actual release already succeeded.
+HTTP_CHECK_MAX_ATTEMPTS=3
+HTTP_CHECK_RETRY_DELAY_SECONDS=2
 
 usage() {
   cat <<'EOF'
@@ -89,6 +94,26 @@ require_command() {
     echo "Required command not found: $1" >&2
     exit 127
   fi
+}
+
+download_with_retry() {
+  local url="$1"
+  local output_file="$2"
+  local curl_exit=0
+  local attempt
+
+  for ((attempt=1; attempt<=HTTP_CHECK_MAX_ATTEMPTS; attempt++)); do
+    if curl -L -s --connect-timeout 10 --max-time 30 -o "$output_file" "$url"; then
+      return 0
+    fi
+    curl_exit=$?
+    if (( attempt == HTTP_CHECK_MAX_ATTEMPTS )); then
+      echo "curl failed for $url after ${HTTP_CHECK_MAX_ATTEMPTS} attempts (last exit: $curl_exit)." >&2
+      return "$curl_exit"
+    fi
+    echo "Transient curl failure for $url (attempt ${attempt}/${HTTP_CHECK_MAX_ATTEMPTS}, exit $curl_exit); retrying in ${HTTP_CHECK_RETRY_DELAY_SECONDS}s." >&2
+    sleep "$HTTP_CHECK_RETRY_DELAY_SECONDS"
+  done
 }
 
 
@@ -166,13 +191,33 @@ verify_http_status() {
   local url="$1"
   local expected="$2"
   local actual
-  actual="$(curl -L -s -o /tmp/wmshr_deploy_check_body.txt -w '%{http_code}' "$url")"
-  if [[ "$actual" != "$expected" ]]; then
-    echo "Unexpected HTTP status for $url: got $actual, expected $expected" >&2
-    echo "Response body:" >&2
-    sed -n '1,40p' /tmp/wmshr_deploy_check_body.txt >&2
-    exit 1
-  fi
+  local curl_exit=0
+  local attempt
+
+  for ((attempt=1; attempt<=HTTP_CHECK_MAX_ATTEMPTS; attempt++)); do
+    set +e
+    actual="$(curl -L -s --connect-timeout 10 --max-time 30 -o /tmp/wmshr_deploy_check_body.txt -w '%{http_code}' "$url")"
+    curl_exit=$?
+    set -e
+
+    if [[ "$curl_exit" == "0" ]]; then
+      if [[ "$actual" == "$expected" ]]; then
+        return 0
+      fi
+      echo "Unexpected HTTP status for $url: got $actual, expected $expected" >&2
+      echo "Response body:" >&2
+      sed -n '1,40p' /tmp/wmshr_deploy_check_body.txt >&2
+      exit 1
+    fi
+
+    if (( attempt == HTTP_CHECK_MAX_ATTEMPTS )); then
+      echo "curl failed for $url after ${HTTP_CHECK_MAX_ATTEMPTS} attempts (last exit: $curl_exit)." >&2
+      exit "$curl_exit"
+    fi
+
+    echo "Transient curl failure for $url (attempt ${attempt}/${HTTP_CHECK_MAX_ATTEMPTS}, exit $curl_exit); retrying in ${HTTP_CHECK_RETRY_DELAY_SECONDS}s." >&2
+    sleep "$HTTP_CHECK_RETRY_DELAY_SECONDS"
+  done
 }
 
 verify_home_production() {
@@ -188,7 +233,7 @@ verify_home_production() {
   # 真正区分门户/后台仍依赖首页 HTML 和实际静态 bundle 内容，避免把当前部署结构误判为后台站点。
   verify_http_status "${HOME_CUSTOM_ORIGIN}/api/health" "200"
 
-  curl -L -s "$HOME_CUSTOM_ORIGIN" >"$html_file"
+  download_with_retry "$HOME_CUSTOM_ORIGIN" "$html_file"
   # The portal is a SPA; visible CTA text lives in the emitted JS bundle rather than index.html.
   # Keep this verification tied to the real production asset so a stale custom-domain alias fails the release.
   bundle_path="$(python3 - "$html_file" <<'PY'
@@ -203,7 +248,7 @@ if not matches:
 print(matches[-1])
 PY
 )"
-  curl -L -s "${HOME_CUSTOM_ORIGIN}${bundle_path}" >"$bundle_file"
+  download_with_retry "${HOME_CUSTOM_ORIGIN}${bundle_path}" "$bundle_file"
   if ! grep -q 'Use Now' "$bundle_file" || ! grep -q '立即使用' "$bundle_file"; then
     echo "Portal bundle did not contain expected CTA text." >&2
     exit 1
@@ -411,7 +456,10 @@ main() {
 
   echo "== Production verification =="
   verify_http_status "$CUSTOM_ORIGIN" "200"
-  if ! curl -L -s "$CUSTOM_ORIGIN" | grep -Eq 'Dutylix Admin|DUTYLIX考勤与薪资自动运行'; then
+  local admin_html_file
+  admin_html_file="$(mktemp -t wmshr-admin-html.XXXXXX)"
+  download_with_retry "$CUSTOM_ORIGIN" "$admin_html_file"
+  if ! grep -Eq 'Dutylix Admin|DUTYLIX考勤与薪资自动运行' "$admin_html_file"; then
     echo "Production page did not contain expected Dutylix marker." >&2
     exit 1
   fi

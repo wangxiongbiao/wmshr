@@ -1,5 +1,15 @@
 # PROJECT_ISSUES
 
+### 2026-06-17 问题 11：当前正式工作区的一键发布仍会在生产验收阶段被单次 `curl` TLS 抖动打断
+- 原因：在正式工作区 `/Users/admin/Desktop/project/wmshr` 直接执行 `npm run deploy:prod -- --no-db --no-project-log` 时，脚本通过了 lint / build / attendance test / git push / admin Vercel deploy / alias，但在 `== Production verification ==` 阶段再次退出，终止码为 `35`，对应 `curl` 的 TLS/连接层失败。
+- 导致的问题：即使管理端 deployment 与 alias 已成功，项目标准的一键发布入口仍不能稳定跑到成功退出，因此不能视为真正发布完成。
+- 实际复核：
+  - 对 `https://admin.dutylix.com`、`/api/health`、`/api/admin/employees`、`/api/public/google-auth-url?...` 连续手动验收 3 轮，全部返回预期状态；
+  - 说明真实线上管理端正常，阻塞点来自脚本验收对单次公网 `curl` 结果过于脆弱，而不是线上页面/API 持续异常。
+- 解决方式：
+  - 为 `scripts/deploy-production.sh` 的正式域名验收补充有限次 `curl` 重试；
+  - 首页 HTML 与门户 bundle 抓取也统一走重试下载路径，避免“部署已成功、单次 TLS 抖动却让整次发布失败”的情况再次发生。
+
 ### 2026-06-17 问题 3：一键生产发布被分支保护拦截
 - 原因：执行项目既有生产发布入口 `HOME=/Users/admin npm run deploy:prod` 时，脚本 `scripts/deploy-production.sh` 检查到当前分支不是 `main`，报错 `Release must run on main, current branch: codex/mobile-empty-shell-test` 并主动退出。
 - 导致的问题：本次生产发布尚未开始进入 lint / build / push / Vercel 部署阶段，无法继续执行正式环境发布。

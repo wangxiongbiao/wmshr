@@ -1,4 +1,4 @@
-import React, {useState} from 'react';
+import React from 'react';
 import {Ionicons} from '@expo/vector-icons';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {useTranslation} from 'react-i18next';
@@ -96,14 +96,6 @@ export function CheckInCard({status, onCheckIn, phase = 'idle', disabled = false
   const buttonText = getButtonText(status, phase, t);
   const gpsText = formatLocationDisplay(status.locationName, i18n.language, t);
   const isDisabled = disabled || status.status === 'checked_out';
-  const [expandedKey, setExpandedKey] = useState<'check_in' | 'check_out' | null>(null);
-  const isCheckedIn = status.status === 'checked_in' || status.status === 'checked_out';
-  const isCheckedOut = status.status === 'checked_out';
-  const checkInLabel = status.checkInTime ? `${t('上班打卡')} ${status.checkInTime}` : t('上班打卡');
-  const checkOutLabel = status.checkOutTime ? `${t('下班打卡')} ${status.checkOutTime}` : t('下班打卡');
-  const toggleExpanded = (key: 'check_in' | 'check_out') => {
-    setExpandedKey(current => current === key ? null : key);
-  };
 
   return (
     <View style={styles.clockCard}>
@@ -112,31 +104,7 @@ export function CheckInCard({status, onCheckIn, phase = 'idle', disabled = false
         <TimeBox label={t('下班时间')} value={status.checkOutTime ?? '--:--'} active={Boolean(status.checkOutTime)} />
       </View>
 
-      <View style={styles.flowCard}>
-        <FlowStepRow
-          complete={isCheckedIn}
-          expanded={expandedKey === 'check_in'}
-          label={checkInLabel}
-          locationName={gpsText}
-          onPress={() => toggleExpanded('check_in')}
-          showDetails={expandedKey === 'check_in'}
-        />
-        <View style={styles.flowItemStatic}>
-          <View style={[styles.flowIcon, isCheckedIn && !isCheckedOut && styles.flowIconDone]}>
-            <Ionicons name={isCheckedIn && !isCheckedOut ? 'checkmark' : 'ellipse-outline'} size={14} color={isCheckedIn && !isCheckedOut ? colors.white : colors.primary} />
-          </View>
-          <Text style={[styles.flowLabel, isCheckedIn && !isCheckedOut && styles.flowLabelDone]}>{t('工作中')}</Text>
-        </View>
-        <FlowStepRow
-          complete={isCheckedOut}
-          expanded={expandedKey === 'check_out'}
-          label={checkOutLabel}
-          locationName={gpsText}
-          onPress={() => toggleExpanded('check_out')}
-          showDetails={expandedKey === 'check_out'}
-        />
-      </View>
-
+      {/* 首页这里仅移除打卡流程进度条/步骤区；时间、定位和打卡按钮保持原样，避免误改其它首页内容。 */}
       <View style={styles.locationRow}>
         <Ionicons name="location-outline" size={18} color={colors.primary} />
         <Text style={styles.locationText}>{gpsText}</Text>
@@ -159,41 +127,6 @@ function TimeBox({label, value, active}: {label: string; value: string; active: 
   );
 }
 
-function FlowStepRow({
-  complete,
-  expanded,
-  label,
-  locationName,
-  onPress,
-  showDetails,
-}: {
-  complete: boolean;
-  expanded: boolean;
-  label: string;
-  locationName: string;
-  onPress: () => void;
-  showDetails: boolean;
-}) {
-  return (
-    <Pressable style={({pressed}) => [styles.flowRowPressable, pressed && styles.flowRowPressed]} onPress={onPress}>
-      <View style={styles.flowRowHeader}>
-        <View style={styles.flowItemMain}>
-          <View style={[styles.flowIcon, complete && styles.flowIconDone]}>
-            <Ionicons name={complete ? 'checkmark' : 'ellipse-outline'} size={14} color={complete ? colors.white : colors.primary} />
-          </View>
-          <Text style={[styles.flowLabel, complete && styles.flowLabelDone]}>{label}</Text>
-        </View>
-        <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
-      </View>
-      {showDetails ? (
-        <View style={styles.flowDetails}>
-          <Text style={styles.flowDetailText}>{locationName}</Text>
-        </View>
-      ) : null}
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
   clockCard: {backgroundColor: colors.white, borderRadius: 32, padding: 24, shadowColor: colors.text, shadowOpacity: 0.05, shadowRadius: 28, shadowOffset: {width: 0, height: 14}, elevation: 5, borderWidth: 1, borderColor: 'rgba(241,245,249,0.9)'},
   timeGrid: {flexDirection: 'row', gap: 14},
@@ -201,18 +134,6 @@ const styles = StyleSheet.create({
   timeLabel: {fontSize: 11, color: colors.textMuted, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5},
   timeValue: {fontSize: 26, color: colors.text, fontWeight: '900', marginTop: 8, letterSpacing: -0.5},
   inactiveText: {color: '#cbd5e1'},
-  flowCard: {marginTop: 20, padding: 16, borderRadius: 24, backgroundColor: '#fbfdff', gap: 12, borderWidth: 1, borderColor: '#eff6ff'},
-  flowRowPressable: {borderRadius: 18, paddingHorizontal: 4, paddingVertical: 2},
-  flowRowPressed: {opacity: 0.82},
-  flowRowHeader: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12},
-  flowItemMain: {flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12},
-  flowItemStatic: {flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 4},
-  flowIcon: {width: 24, height: 24, borderRadius: 999, borderWidth: 1, borderColor: '#bfdbfe', alignItems: 'center', justifyContent: 'center', backgroundColor: colors.white},
-  flowIconDone: {borderColor: colors.primary, backgroundColor: colors.primary},
-  flowLabel: {fontSize: 14, lineHeight: 20, color: colors.textSubtle, fontWeight: '700'},
-  flowLabelDone: {color: colors.text},
-  flowDetails: {marginLeft: 36, marginTop: 10, gap: 6, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#e2e8f0'},
-  flowDetailText: {fontSize: 12, lineHeight: 18, color: colors.textSubtle, fontWeight: '700'},
   locationRow: {flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 20, padding: 14, backgroundColor: '#eff6ff', borderRadius: 20},
   locationText: {color: '#1d4ed8', fontWeight: '700', flex: 1, fontSize: 13},
   primaryButton: {marginTop: 22, height: 60, borderRadius: 24, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 12, shadowColor: colors.primary, shadowOpacity: 0.25, shadowRadius: 16, shadowOffset: {width: 0, height: 8}, elevation: 4},
