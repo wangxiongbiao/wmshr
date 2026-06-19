@@ -3,7 +3,7 @@ set -euo pipefail
 
 # WMSHR 本地 Android Production 构建脚本。
 # 作用：在当前机器上基于 Expo prebuild 后的原生 Android 工程，生成 release APK，
-#       用于本机验收、侧载分发和与线上 EAS production 构建做结果对照。
+#       用于本机验收、侧载分发，以及作为后续官网静态托管发布的基础产物。
 # 前提：
 #   1. 已在仓库根执行过依赖安装；
 #   2. 本机已安装 JDK 17 与 Android SDK/NDK/cmake；
@@ -13,12 +13,12 @@ set -euo pipefail
 #   1. 若 apps/mobile/android 不存在，会先执行 `npx expo prebuild --platform android` 生成原生工程；
 #   2. 会产出 release APK，路径在 outputs/apk/release；
 #   3. 这里的“production local”只表示本地 release 构建链路，不代表已经切到正式上架签名；
-#   4. Play / 线上正式 production AAB 仍应走 `build:android:production:online` 对应的 EAS 链路。
+#   4. 该入口适合作为侧载验收或调试前置构建；若要同步官网更新，优先改用 `build:android:production:online:local`。
 # 失败优先检查：
 #   - JAVA_HOME 是否指向 /usr/local/opt/openjdk@17；
 #   - ANDROID_SDK_ROOT 下的 cmdline-tools / build-tools / ndk / cmake 是否完整；
 #   - 若报签名/zipalign 问题，检查 release 变体是否仍保留当前 debug keystore 回退配置；
-#   - 若将来切换正式 keystore，记得同步复核线上 EAS production profile 与这里的本地脚本。
+#   - 若将来切换正式 keystore，记得同步复核本地侧载入口与官网静态托管入口的签名来源。
 # 边界：
 #   - 本地 production 入口默认只构建 release APK，避免把本地侧载包和线上 AAB / Play 提交链路继续混在一起；
 #   - 在正式 keystore 接入前，本地产物适合本机验收/侧载，不应误称为 Play 正式签名包。

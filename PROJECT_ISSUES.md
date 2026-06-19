@@ -1,5 +1,51 @@
 # PROJECT_ISSUES
 
+### 2026-06-18 问题 15：本地 APK 已成功构建，但 GitHub Release 不能作为官网公开下载源
+- 原因：本地执行 `npm --workspace @wmshr/mobile run build:android:production:online:local` 已成功产出 `apps/mobile/android/app/build/outputs/apk/release/app-release.apk`，随后尝试把该 APK 上传到 GitHub Release 并把 release asset URL 回写到 `public.mobile_app_releases`。但仓库 `wangxiongbiao/wmshr` 实际是 private，匿名请求 release 页面与 asset 直链都返回 `404`。
+- 导致的问题：GitHub Release 这条链路无法为官网/门户提供匿名可下载 APK；如果直接保留该 URL，官网会指向一个对普通用户不可用的下载地址。
+- 已尝试：
+  - 本地成功构建 `production + https://admin.dutylix.com` 运行时配置的 release APK；
+  - 创建 `mobile-android-v0.1.25` GitHub Release，并上传 `wmshr-android-0.1.25.apk`；
+  - 通过 `curl -I` 验证 release tag 页面和 asset 直链，确认匿名请求返回 `404`；
+  - 为避免线上下载损坏，已将 `public.mobile_app_releases` 回滚到上一条可用的 `0.1.24` Expo artifact URL。
+- 当前判断：当前真正缺的不是 APK 产物，而是一个**匿名可访问的公网文件托管位置**。现有仓库内未发现可直接复用的 R2 / S3 / Blob / OSS 上传脚本或对应环境变量入口。
+- 下一步：
+  1. 选择一个公开托管源（例如独立公开仓库 Release、对象存储 bucket、现有站点静态文件托管）；
+  2. 把已生成的 `release/wmshr-android-0.1.25.apk` 上传到该托管源；
+  3. 再执行 `scripts/update-mobile-android-release.mjs` 把新的匿名可下载 URL 回写到官网。
+
+### 2026-06-18 问题 14：Android 一键发布在 EAS metadata 上传阶段因网络超时退出
+- 原因：执行项目既有一键入口 `HOME=/Users/admin npm run mobile:release:android` 时，脚本已完成版本号更新、TypeScript 校验、EAS 远端凭据选择、项目压缩与主包上传，但在 `Failed to upload metadata to EAS Build` 阶段报错，关键错误为 `read ETIMEDOUT`。
+- 导致的问题：本次 `0.1.25` 的 Android APK 构建未成功落到 EAS 成品阶段，因此也还没有拿到新的 `applicationArchiveUrl`，脚本后续的数据库回写步骤未执行，官网/门户下载区暂时不会切到新 APK。
+- 已尝试：
+  - 按项目现成入口先执行 `--dry-run`，确认默认会发布 `preview_online` APK 并在成功后回写 `public.mobile_app_releases`；
+  - 使用 `HOME=/Users/admin npx eas-cli whoami` 复核 Expo / EAS 登录态有效；
+  - 实际执行正式一键发布，拿到 EAS 原始失败信息；
+  - 复核 `apps/mobile/app.json`、`apps/mobile/package.json`、`apps/mobile/android/app/build.gradle` 已被脚本推进到 `0.1.25`。
+- 当前判断：第一次失败更像是 EAS 上传链路的瞬时网络/存储超时；第二次在保持 `0.1.25` 重试时，虽然同样成功完成压缩、上传与 fingerprint 计算，但在远端建单前再次退出，且日志明确提示当前账号本月 Free plan 的 Android builds 已用完。因此当前主要阻塞已从“单次 ETIMEDOUT 噪音”提升为“EAS 免费额度/远端受理限制”，不是移动端代码编译失败。
+- 下一步：
+  1. 若要继续沿用现有一键脚本直发官网 APK，需先处理 Expo / EAS 当前账号的 Android build 配额（升级或等待额度重置）；
+  2. 配额恢复后，继续使用同一脚本并显式指定 `--version 0.1.25` 重试；
+  3. 若后续仍受上传链路波动影响，再评估通过 `.easignore` 缩小 229 MB 上传包体，降低上传阶段波动风险；
+  4. 只有在拿到真实 APK artifact URL 并成功回写数据库后，才视为官网 APK 已更新。
+
+### 2026-06-17 问题 13：SOP 列表在 Web 预览里看起来“几乎没变化”，根因是 Link asChild 吃掉卡片根样式
+- 原因：SOP 列表项最外层使用 `Link asChild` 包裹 `Pressable`。在 Web 上它会把根节点落成 anchor，实际计算样式显示根元素为 `flex-direction: column`，且没有卡片背景、圆角、阴影和横向三列布局。
+- 导致的问题：即使标题缩小、单行截断、短日期等改动已经生效，用户仍会看到“图标在上、标题在下、红点掉到下一行”的普通竖排列表，视觉上误判为代码完全没生效。
+- 解决方式：改为 `Pressable` 直接作为根节点，并在 `onPress` 中使用 `router.push()` 跳转详情；这样卡片样式真正落在 Web 的根元素上，恢复横向白卡布局。
+
+### 2026-06-17 问题 12：Expo 原生启动流程在 Metro/Babel 解析阶段退出
+- 现象：后台执行 `bash ./script/build_and_run.sh start` 时，进程最终退出，输出包含 `@babel/parser` 调用栈，随后 Metro 仅短暂打印 Android bundle 片段，说明原生 dev server 没有稳定保持运行。
+- 复验结果：当前代码重新执行 `npm --workspace @wmshr/mobile run lint` 已通过；前台再次启动 `bash ./script/build_and_run.sh start` 时，未再命中 Babel 解析错误，新的实际阻塞是 `8081` 已被正在运行的 Expo Web 进程 `pid 15107` 占用，并在非交互模式下无法回答 `Use port 8082 instead?`。
+- 当前结论：原始 Babel 栈更像是旧进程/旧代码状态下的启动噪音；现在需要区分“代码是否可编译”和“当前端口是否被另一个 Expo 模式占用”。若要重新跑原生 `start`，需先停掉当前 Web 服务或改成显式使用其他端口启动。
+
+
+### 2026-06-17 问题 11：首页误把整块打卡区删掉，现已收缩为仅移除进度条
+- 原因：上一轮首页调整时，把“去掉打卡进度条”误实现成“整个首页打卡区下线”，导致首页除了统计和通知外，其余打卡内容也被一并移除。
+- 导致的问题：首页与需求不符；用户明确要求只去掉打卡卡片里的进度条/步骤区，其它首页内容保持不变。
+- 解决方式：恢复 `apps/mobile/src/features/home/screens/HomeScreen.tsx` 的首页打卡卡片接入，只在 `apps/mobile/src/features/home/components/CheckInCard.tsx` 内删除流程进度区，保留时间区、定位区、打卡按钮以及首页其它模块不变。
+
+
 ### 2026-06-17 问题 11：当前正式工作区的一键发布仍会在生产验收阶段被单次 `curl` TLS 抖动打断
 - 原因：在正式工作区 `/Users/admin/Desktop/project/wmshr` 直接执行 `npm run deploy:prod -- --no-db --no-project-log` 时，脚本通过了 lint / build / attendance test / git push / admin Vercel deploy / alias，但在 `== Production verification ==` 阶段再次退出，终止码为 `35`，对应 `curl` 的 TLS/连接层失败。
 - 导致的问题：即使管理端 deployment 与 alias 已成功，项目标准的一键发布入口仍不能稳定跑到成功退出，因此不能视为真正发布完成。

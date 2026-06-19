@@ -94,8 +94,8 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         // Android 原生版本号必须与发布脚本同步维护：EAS/本地 release 产物最终读取这里，
         // 不能只改 app.json/package.json，否则官网记录、App 内更新提示与 APK 内部版本会再次分叉。
-        versionCode 124
-        versionName "0.1.24"
+        versionCode 125
+        versionName "0.1.25"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }

@@ -1,7 +1,7 @@
 import React, {useCallback, useMemo, useRef, useState} from 'react';
 import {NativeScrollEvent, NativeSyntheticEvent, Pressable, StyleSheet, Text, View} from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
-import {Link, useFocusEffect} from 'expo-router';
+import {useFocusEffect, useRouter} from 'expo-router';
 import {useTranslation} from 'react-i18next';
 import {useAuth} from '../../../application/providers/AuthProvider';
 import {useToast} from '../../../application/providers/ToastProvider';
@@ -14,8 +14,15 @@ import {sharedStyles} from '../../../shared/constants/styles';
 const PAGE_SIZE = 10;
 const END_REACHED_THRESHOLD = 120;
 
+function formatSopMeta(version: string, updatedAt: string, t: (value: string) => string) {
+  const normalizedVersion = version.trim().toUpperCase();
+  const compactDate = updatedAt.trim().slice(5, 10);
+  return `${normalizedVersion} · ${t('更新于')} ${compactDate}`;
+}
+
 export function SopListScreen() {
   const { t } = useTranslation('app');
+  const router = useRouter();
   const {session} = useAuth();
   const {showToast} = useToast();
   const [documents, setDocuments] = useState<SopDocument[]>([]);
@@ -91,29 +98,38 @@ export function SopListScreen() {
 
   return (
     <ScreenContainer scrollProps={scrollProps}>
-      <View style={sharedStyles.screenTitle}>
-        <Text style={sharedStyles.title}>{t('SOP 文件')}</Text>
-        <Text style={sharedStyles.muted}>{t('仓库作业标准流程')}</Text>
+      <View style={styles.screenTitle}>
+        <Text style={styles.screenTitleText}>{t('SOP 文档')}</Text>
+        <Text style={styles.screenSubtitleText}>{t('仓库标准操作流程')}</Text>
       </View>
 
-      {documents.map(item => {
-        const isRead = item.readStatus === 'read';
-        return (
-          <Link key={item.id} href={{pathname: '/sop/[sopId]', params: {sopId: item.id}}} push asChild>
-            <Pressable style={({pressed}) => [styles.documentCard, pressed && styles.documentCardPressed]}>
+      <View style={styles.documentList}>
+        {documents.map(item => {
+          const isRead = item.readStatus === 'read';
+          const metaText = formatSopMeta(item.version, item.updatedAt, t);
+          return (
+            <Pressable
+              key={item.id}
+              onPress={() => {
+                router.push({pathname: '/sop/[sopId]', params: {sopId: item.id}});
+              }}
+              style={({pressed}) => [styles.documentCard, pressed && styles.documentCardPressed]}
+            >
               <View style={[styles.documentIconWrap, isRead ? styles.documentIconWrapRead : styles.documentIconWrapUnread]}>
-                <Ionicons name="document-text-outline" size={28} color={isRead ? colors.textMuted : colors.primary} />
+                <Ionicons name="document-text-outline" size={24} color={isRead ? '#97A8C1' : '#2B66F6'} />
               </View>
+              {/* Web 上不要再用 Link asChild 当根节点：它会把根元素变成 anchor，导致卡片根节点丢失 row/fill 样式，视觉上退化成竖排普通列表。 */}
               <View style={styles.documentCopy}>
-                <Text style={styles.documentTitle} numberOfLines={2}>{item.title}</Text>
-                <Text style={styles.documentMeta}>{item.version} · {t('更新')} {item.updatedAt}</Text>
+                <Text style={styles.documentTitle} numberOfLines={1} ellipsizeMode="tail">{item.title}</Text>
+                <Text style={styles.documentMeta} numberOfLines={1}>{metaText}</Text>
               </View>
-              {/* 参考最新列表稿：未读只保留右侧红点，已读才展示进入箭头，避免状态文案重复占一整行。 */}
-              {isRead ? <Ionicons name="chevron-forward" size={20} color="#cbd5e1" /> : <View style={styles.unreadDot} />}
+              <View style={styles.documentStatus}>
+                {isRead ? <Ionicons name="chevron-forward" size={18} color="#CAD8EE" /> : <View style={styles.unreadDot} />}
+              </View>
             </Pressable>
-          </Link>
-        );
-      })}
+          );
+        })}
+      </View>
 
       {hasFetchedOnce && documents.length === 0 ? (
         <View style={styles.placeholderCard}>
@@ -137,15 +153,20 @@ export function SopListScreen() {
 }
 
 const styles = StyleSheet.create({
-  documentCard: {backgroundColor: colors.white, borderRadius: 30, paddingVertical: 22, paddingHorizontal: 18, marginBottom: 18, flexDirection: 'row', alignItems: 'center', gap: 16, shadowColor: colors.text, shadowOpacity: 0.05, shadowRadius: 18, shadowOffset: {width: 0, height: 8}, elevation: 3, borderWidth: 1, borderColor: '#eef2f7'},
-  documentCardPressed: {opacity: 0.84},
-  documentIconWrap: {width: 52, height: 52, borderRadius: 18, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#dbeafe'},
-  documentIconWrapUnread: {backgroundColor: '#eff6ff'},
-  documentIconWrapRead: {backgroundColor: '#f8fafc', borderColor: '#e2e8f0'},
-  documentCopy: {flex: 1},
-  documentTitle: {fontSize: 18, lineHeight: 24, color: colors.text, fontWeight: '900'},
-  documentMeta: {marginTop: 8, fontSize: 14, color: colors.textMuted, fontWeight: '700', letterSpacing: 0.2},
-  unreadDot: {width: 14, height: 14, borderRadius: 999, backgroundColor: '#ff2d55', shadowColor: '#ff2d55', shadowOpacity: 0.28, shadowRadius: 8, shadowOffset: {width: 0, height: 4}, elevation: 2},
+  screenTitle: {marginBottom: 10, paddingTop: 2},
+  screenTitleText: {fontSize: 18, lineHeight: 22, color: '#52627D', fontWeight: '800', letterSpacing: -0.2},
+  screenSubtitleText: {marginTop: 2, fontSize: 11, lineHeight: 14, color: '#9AA8BF', fontWeight: '600'},
+  documentList: {paddingTop: 6},
+  documentCard: {width: '100%', minHeight: 110, backgroundColor: colors.white, borderRadius: 31, paddingVertical: 22, paddingHorizontal: 18, marginBottom: 22, flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch', shadowColor: '#0F172A', shadowOpacity: 0.065, shadowRadius: 16, shadowOffset: {width: 0, height: 6}, elevation: 4, borderWidth: 1, borderColor: '#EEF2F7'},
+  documentCardPressed: {opacity: 0.92},
+  documentIconWrap: {width: 50, height: 50, borderRadius: 17, alignItems: 'center', justifyContent: 'center', borderWidth: 1, marginRight: 18, flexShrink: 0},
+  documentIconWrapUnread: {backgroundColor: '#EEF5FF', borderColor: '#D9E7FF'},
+  documentIconWrapRead: {backgroundColor: '#FAFBFD', borderColor: '#EEF2F7'},
+  documentCopy: {flex: 1, minWidth: 0, paddingRight: 12, justifyContent: 'center'},
+  documentTitle: {fontSize: 18, lineHeight: 24, color: '#23324D', fontWeight: '900', letterSpacing: -0.2},
+  documentMeta: {marginTop: 8, fontSize: 12, lineHeight: 16, color: '#8FA3C0', fontWeight: '800', letterSpacing: 0.35},
+  documentStatus: {width: 28, flexShrink: 0, alignItems: 'center', justifyContent: 'center', marginLeft: 10},
+  unreadDot: {width: 15, height: 15, borderRadius: 999, backgroundColor: '#FF2D55', shadowColor: '#FF2D55', shadowOpacity: 0.2, shadowRadius: 10, shadowOffset: {width: 0, height: 3}, elevation: 2},
   placeholderCard: {backgroundColor: colors.white, borderRadius: 22, padding: 18, alignItems: 'center', gap: 10},
   retryButton: {marginTop: 6, height: 44, minWidth: 120, borderRadius: 16, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16},
   retryButtonText: {color: colors.white, fontSize: 15, fontWeight: '900'},

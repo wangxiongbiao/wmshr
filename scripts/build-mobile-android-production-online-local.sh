@@ -13,15 +13,15 @@ set -euo pipefail
 #   1. 若 apps/mobile/android 不存在，会先执行 `npx expo prebuild --platform android` 生成原生工程；
 #   2. 会产出 release APK，路径在 outputs/apk/release；
 #   3. 该入口只改变 JS 打包阶段注入的运行时环境，不改变当前本地签名策略；
-#   4. Play / 线上正式 production AAB 仍应走 `build:android:production:online` 对应的 EAS 链路。
+#   4. 该入口现在就是 Android 官网更新包的标准构建入口，后续发布默认与官网静态托管脚本配套使用。
 # 失败优先检查：
 #   - JAVA_HOME 是否指向 /usr/local/opt/openjdk@17；
 #   - ANDROID_SDK_ROOT 下的 cmdline-tools / build-tools / ndk / cmake 是否完整；
 #   - 若报签名/zipalign 问题，检查 release 变体是否仍保留当前 debug keystore 回退配置；
 #   - 若运行后仍命中本地接口，优先核对下面两项 env 是否被后续命令覆盖。
 # 边界：
-#   - 这里的“online local”表示“本地构建 + 线上运行时环境”，不是 EAS 线上正式产物；
-#   - 在正式 keystore 接入前，本地产物适合本机验收/侧载，不应误称为 Play 正式签名包。
+#   - 这里的“online local”表示“本地构建 + 线上运行时环境”，不是远端构建产物；
+#   - 在正式 keystore 接入前，本地产物适合本机验收/侧载与官网 APK 分发，不应误称为 Play 正式签名包。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
