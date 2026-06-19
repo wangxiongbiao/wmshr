@@ -3,6 +3,8 @@ import i18next from 'i18next';
 import {ActivityIndicator, Platform, StyleSheet, Text, View} from 'react-native';
 import {colors} from '../../../shared/constants/colors';
 import {AppModal} from '../../../shared/components/AppModal';
+import {mobileDebugLog} from '../../../shared/debug/mobileDebugLogger';
+import {env} from '../../../shared/config/env';
 import {AppUpdateInfo, AppUpdateStatus} from '../types';
 
 // 更新门禁直接读取 apps/mobile/app.json 的 Expo 版本，避免再维护一份手写常量导致对外版本与包内版本分叉。
@@ -81,13 +83,20 @@ export function AppUpdateGate({children}: PropsWithChildren) {
   const [installerReady, setInstallerReady] = useState(false);
 
   const checkForUpdate = useCallback(async () => {
+    mobileDebugLog('app_update_check_start', {
+      platform: Platform.OS,
+      localVersion: LOCAL_APP_VERSION,
+      apiBaseUrl: env.apiBaseUrl,
+    });
     if (Platform.OS !== 'android') {
+      mobileDebugLog('app_update_skip_non_android', {platform: Platform.OS});
       setInstallerReady(false);
       setStatus({kind: 'up_to_date'});
       return;
     }
 
     if (!LOCAL_APP_VERSION) {
+      mobileDebugLog('app_update_skip_missing_local_version');
       // 本地未打入版本号时，不阻断进入 App，也不弹失败/更新提示，避免“暂无版本信息”场景影响正常使用。
       setInstallerReady(false);
       setStatus({kind: 'up_to_date'});
@@ -99,7 +108,9 @@ export function AppUpdateGate({children}: PropsWithChildren) {
     setInstallerReady(false);
     try {
       const latestUpdate = await loadAndFetchLatestAppUpdate();
+      mobileDebugLog('app_update_check_response', latestUpdate);
       if (!hasCompleteUpdateInfo(latestUpdate)) {
+        mobileDebugLog('app_update_no_complete_info', latestUpdate);
         // 后台暂未配置版本信息时，按“当前无更新可提示”处理，不再弹出更新异常弹窗。
         setStatus({kind: 'up_to_date'});
         return;
@@ -108,18 +119,30 @@ export function AppUpdateGate({children}: PropsWithChildren) {
         throw new Error(appT('更新链接无效，请联系管理员检查后台配置。'));
       }
       if (!localAppVersionNeedsUpdate(latestUpdate.version)) {
+        mobileDebugLog('app_update_not_needed', {
+          localVersion: LOCAL_APP_VERSION,
+          remoteVersion: latestUpdate.version,
+        });
         setStatus({kind: 'up_to_date'});
         return;
       }
 
       // 弹窗展示前先探测本地是否已有同版本安装包；命中时把主按钮切成“立即安装”，避免用户误以为还要重新下载。
-      setInstallerReady(await hasCachedAndroidInstaller(latestUpdate));
+      const cachedInstallerReady = await hasCachedAndroidInstaller(latestUpdate);
+      mobileDebugLog('app_update_required', {
+        localVersion: LOCAL_APP_VERSION,
+        remoteVersion: latestUpdate.version,
+        cachedInstallerReady,
+      });
+      setInstallerReady(cachedInstallerReady);
       setStatus({kind: 'required', update: latestUpdate});
     } catch (error) {
       if (shouldIgnoreUpdateCheckError(error)) {
+        mobileDebugLog('app_update_ignore_error', error);
         setStatus({kind: 'up_to_date'});
         return;
       }
+      mobileDebugLog('app_update_check_failed', error);
       setInstallerReady(false);
       setStatus({kind: 'failed', message: error instanceof Error ? error.message : appT('版本检查失败，请重试。')});
     }
@@ -132,13 +155,16 @@ export function AppUpdateGate({children}: PropsWithChildren) {
   const handleInstallUpdate = useCallback(async (update: AppUpdateInfo) => {
     setActionLoading(true);
     try {
+      mobileDebugLog('app_update_install_start', update);
       await downloadAndOpenAndroidInstaller(update);
       // 只要成功拉起过安装器，本地就已经有当前版本 APK；
       // 用户这次若取消安装，下次再弹窗时仍应直接显示“立即安装”。
+      mobileDebugLog('app_update_install_prompt_opened', {version: update.version});
       setInstallerReady(true);
       // 可选择更新场景下，拉起安装器后先放用户继续使用旧版本；下次启动仍会再次根据接口结果提示更新。
       setPromptDismissed(true);
     } catch (error) {
+      mobileDebugLog('app_update_install_failed', error);
       setInstallerReady(false);
       setStatus({kind: 'failed', message: error instanceof Error ? error.message : appT('下载安装失败，请重试。')});
     } finally {

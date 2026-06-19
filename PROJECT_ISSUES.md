@@ -191,3 +191,12 @@
   1. 继续完成 customers 前后端实现与本地可编译验证；
   2. 视环境情况补一个可在这台机器运行的 Supabase 执行入口，或改走数据库管理面板执行 migration；
   3. 获得后台登录态后补做 customers 新增/编辑/店铺绑定/额度流水的已登录态验收。
+
+## 2026-06-19 问题 1：Expo 调试环境未弹出移动端版本更新提醒
+- 原因：`apps/mobile/.env` 中的 `EXPO_PUBLIC_API_BASE_URL` 指向本地开发后端 `http://172.16.11.231:8788`，而该后端当前访问 `/api/public/mobile-app-update` 返回 `HTTP/1.1 502 Bad Gateway`。
+- 导致的问题：Expo Go 真机调试时，`AppUpdateGate` 无法拿到有效更新数据；现有逻辑会把空结果按“当前无更新可提示”处理，所以用户看不到新版本提醒。
+- 原计划验证入口：通过 Expo Go 连接本地 Metro，直接验证线上版本号提升到 `0.1.26` 后是否会出现更新弹窗。
+- 实际阻塞：Expo 运行时默认命中本地开发后端，而不是线上公开更新接口；本地后端更新接口 502，导致版本检查无结果。
+- 诊断补充：项目已有 `mobileDebugLogger`，但启动入口此前未安装该 logger，导致真机启动初期的更新检查日志没有上报，增加了排查成本；现已补装并准备记录更新链路细节。
+- 替代验证：已分别验证线上公开接口 `https://admin.dutylix.com/api/public/mobile-app-update` 返回 `0.1.26`，并确认 Expo 当前 `.env` 实际指向本地 `172.16.11.231:8788`。下一步改为让 Expo 调试环境直接使用线上 API 后再重启验证。
+- 解决方式：进行中 —— 将 Expo 调试环境的 `EXPO_PUBLIC_API_BASE_URL` 切到 `https://admin.dutylix.com`，重启 Metro 后再次验证更新弹窗。

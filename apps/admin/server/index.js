@@ -85,10 +85,205 @@ function getAccessToken(req) {
   return authorization.slice("Bearer ".length).trim();
 }
 
-async function requireGoogleAuth(req, res, next) {
+function normalizeAdminAuthEmail(email) {
+  return String(email || "").trim().toLowerCase();
+}
+
+function getAdminAuthProvider(authUser) {
+  const provider = authUser?.app_metadata?.provider;
+  return typeof provider === "string" && provider ? provider : "email";
+}
+
+function getAdminAuthProviders(authUser) {
+  const providers = authUser?.app_metadata?.providers;
+  if (Array.isArray(providers) && providers.length > 0) {
+    return providers.map((item) => String(item)).filter(Boolean);
+  }
+  return [getAdminAuthProvider(authUser)];
+}
+
+function isMissingAdminOwnerLinkTableError(error) {
+  return error?.code === "42P01" || String(error?.message || "").includes("admin_owner_");
+}
+
+function buildResolvedAdminAuthUser(authUser, ownerUserId) {
+  return {
+    ...authUser,
+    // 后续几百个 admin 业务接口已经统一使用 req.authUser.id 作为 owner_user_id；
+    // 这里把真实登录用户解析成 canonical owner，避免大面积改业务接口。
+    id: ownerUserId,
+    adminAuthUserId: authUser.id,
+    adminOwnerUserId: ownerUserId,
+    adminAuthProvider: getAdminAuthProvider(authUser),
+    adminAuthProviders: getAdminAuthProviders(authUser)
+  };
+}
+
+async function listAuthUserIdsByEmail(email) {
+  const normalizedEmail = normalizeAdminAuthEmail(email);
+  if (!normalizedEmail) {
+    return [];
+  }
+
+  if (directDbPool) {
+    try {
+      const result = await directDbPool.query(
+        "select id from auth.users where lower(email) = $1 order by created_at asc, id asc",
+        [normalizedEmail]
+      );
+      return result.rows.map((row) => String(row.id)).filter(Boolean);
+    } catch (error) {
+      console.warn("[admin/auth] direct auth.users lookup failed", error);
+    }
+  }
+
+  if (typeof supabase.auth.admin?.listUsers !== "function") {
+    return [];
+  }
+
+  const matchedIds = [];
+  for (let page = 1; page <= 5; page += 1) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) {
+      console.warn("[admin/auth] auth admin listUsers lookup failed", error);
+      return matchedIds;
+    }
+
+    const users = data?.users || [];
+    for (const user of users) {
+      if (normalizeAdminAuthEmail(user.email) === normalizedEmail) {
+        matchedIds.push(user.id);
+      }
+    }
+
+    if (users.length < 1000) {
+      break;
+    }
+  }
+
+  return matchedIds;
+}
+
+async function resolveCanonicalOwnerUserIdForEmail(email, fallbackUserId) {
+  const candidateIds = Array.from(new Set([...(await listAuthUserIdsByEmail(email)), fallbackUserId].filter(Boolean)));
+
+  for (const candidateId of candidateIds) {
+    try {
+      const [presence, bootstrapState] = await Promise.all([
+        fetchWorkspaceDataPresence(candidateId),
+        fetchWorkspaceBootstrapState(candidateId)
+      ]);
+
+      if (bootstrapState || presence.hasEmployees || presence.hasRules) {
+        return candidateId;
+      }
+    } catch (error) {
+      console.warn("[admin/auth] owner data presence lookup failed", { candidateId, error });
+    }
+  }
+
+  return candidateIds[0] || fallbackUserId;
+}
+
+async function ensureAdminOwnerIdentity(authUser) {
+  const email = normalizeAdminAuthEmail(authUser.email);
+  if (!email) {
+    return buildResolvedAdminAuthUser(authUser, authUser.id);
+  }
+
+  const nowIso = new Date().toISOString();
+  const provider = getAdminAuthProvider(authUser);
+  const providers = getAdminAuthProviders(authUser);
+
+  const { data: existingIdentity, error: identityError } = await supabase
+    .from("admin_owner_identity_links")
+    .select("owner_user_id, email")
+    .eq("auth_user_id", authUser.id)
+    .maybeSingle();
+
+  if (identityError) {
+    if (isMissingAdminOwnerLinkTableError(identityError)) {
+      console.warn("[admin/auth] admin owner identity migration is not applied; fallback to auth user id owner", identityError.message);
+      return buildResolvedAdminAuthUser(authUser, authUser.id);
+    }
+    throw identityError;
+  }
+
+  if (existingIdentity?.owner_user_id) {
+    const { error: touchError } = await supabase
+      .from("admin_owner_identity_links")
+      .update({
+        provider,
+        providers,
+        last_seen_at: nowIso,
+        updated_at: nowIso
+      })
+      .eq("auth_user_id", authUser.id);
+
+    if (touchError) {
+      throw touchError;
+    }
+
+    return buildResolvedAdminAuthUser(authUser, existingIdentity.owner_user_id);
+  }
+
+  const preferredOwnerUserId = await resolveCanonicalOwnerUserIdForEmail(email, authUser.id);
+  const { error: emailLinkInsertError } = await supabase
+    .from("admin_owner_email_links")
+    .upsert({
+      email,
+      owner_user_id: preferredOwnerUserId,
+      created_by_auth_user_id: authUser.id,
+      updated_at: nowIso
+    }, {
+      onConflict: "email",
+      ignoreDuplicates: true
+    });
+
+  if (emailLinkInsertError) {
+    if (isMissingAdminOwnerLinkTableError(emailLinkInsertError)) {
+      console.warn("[admin/auth] admin owner email migration is not applied; fallback to auth user id owner", emailLinkInsertError.message);
+      return buildResolvedAdminAuthUser(authUser, authUser.id);
+    }
+    throw emailLinkInsertError;
+  }
+
+  const { data: emailLink, error: emailLinkFetchError } = await supabase
+    .from("admin_owner_email_links")
+    .select("owner_user_id")
+    .eq("email", email)
+    .maybeSingle();
+
+  if (emailLinkFetchError) {
+    throw emailLinkFetchError;
+  }
+
+  const ownerUserId = emailLink?.owner_user_id || authUser.id;
+  const { error: linkError } = await supabase
+    .from("admin_owner_identity_links")
+    .upsert({
+      auth_user_id: authUser.id,
+      owner_user_id: ownerUserId,
+      email,
+      provider,
+      providers,
+      last_seen_at: nowIso,
+      updated_at: nowIso
+    }, {
+      onConflict: "auth_user_id"
+    });
+
+  if (linkError) {
+    throw linkError;
+  }
+
+  return buildResolvedAdminAuthUser(authUser, ownerUserId);
+}
+
+async function requireAdminAuth(req, res, next) {
   const accessToken = getAccessToken(req);
   if (!accessToken) {
-    return res.status(401).json({ error: "未登录，请先使用 Google 账号登录" });
+    return res.status(401).json({ error: "未登录，请先登录管理员账号" });
   }
 
   const now = Date.now();
@@ -104,18 +299,16 @@ async function requireGoogleAuth(req, res, next) {
     return res.status(401).json({ error: "登录状态已失效，请重新登录" });
   }
 
-  const providers = data.user.app_metadata?.providers || [];
-  const provider = data.user.app_metadata?.provider;
-  const isGoogleUser = provider === "google" || providers.includes("google");
-
-  if (!isGoogleUser) {
+  try {
+    req.authUser = await ensureAdminOwnerIdentity(data.user);
+  } catch (ownerError) {
+    console.error("Resolve admin owner identity failed", ownerError);
     adminAuthUserCache.delete(accessToken);
-    return res.status(403).json({ error: "当前后台仅允许 Google 登录用户访问" });
+    return res.status(500).json({ error: "管理员账号空间解析失败，请稍后重试" });
   }
 
-  req.authUser = data.user;
   adminAuthUserCache.set(accessToken, {
-    user: data.user,
+    user: req.authUser,
     expiresAt: now + ADMIN_AUTH_CACHE_TTL_MS
   });
   next();
@@ -3015,8 +3208,8 @@ async function bootstrapWorkspaceData(ownerUserId, authUser) {
       employeesCreated: 0,
       rulesCreated: 0,
       message: bootstrapState.created_demo_data
-        ? "当前 Google 账号的业务数据已初始化过"
-        : "当前 Google 账号已有后台数据，已跳过初始化"
+        ? "当前管理员账号的业务数据已初始化过"
+        : "当前管理员账号已有后台数据，已跳过初始化"
     };
   }
 
@@ -4124,7 +4317,7 @@ app.post("/api/mobile/sops/:id/read", requireEmployeeAppAuth, async (req, res) =
   }
 });
 
-app.use("/api/admin", requireGoogleAuth);
+app.use("/api/admin", requireAdminAuth);
 
 app.get("/api/admin/workspace/bootstrap-status", async (req, res) => {
   try {

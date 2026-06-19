@@ -58,6 +58,7 @@ import {
   fetchEmployees,
   fetchGoodsSnapshot,
   fetchExpenseSnapshot,
+  fetchWorkspaceBootstrapStatus,
   initializeWorkspace,
   resetEmployeeAppPassword,
   saveCustomersSnapshot,
@@ -69,7 +70,7 @@ import {
   updateEmployeeAppAccountStatus,
   updateEmployeeStatus
 } from "./lib/api";
-import { AuthScreen } from "./components/AuthScreen";
+import { AuthScreen, type AdminEmailAuthPayload } from "./components/AuthScreen";
 import { useDialog } from "./components/DialogProvider";
 import { ADMIN_TABS, buildAdminRoute, parseAdminRoute } from "./lib/adminRoute";
 import { supabase } from "./lib/supabase";
@@ -110,7 +111,7 @@ function readWorkspaceBootstrapFlag(userId?: string) {
 
   try {
     const storedValue = window.localStorage.getItem(storageKey);
-    return storedValue === null ? true : storedValue === "1";
+    return storedValue === "1";
   } catch {
     return true;
   }
@@ -146,6 +147,7 @@ export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [googleSigningIn, setGoogleSigningIn] = useState(false);
+  const [emailAuthLoading, setEmailAuthLoading] = useState(false);
   const [authError, setAuthError] = useState("");
   const [employees, setEmployees] = useState<Employee[]>(INITIAL_EMPLOYEES);
   // customers/goods/expenses 三个 v3 模块现在统一走账号级服务端快照；壳层只保留 keep-alive 与 optimistic 回写，不再依赖浏览器本地存储，避免多设备与多标签页状态漂移。
@@ -493,6 +495,7 @@ export default function App() {
       setSession(nextSession);
       setAuthError("");
       setGoogleSigningIn(false);
+      setEmailAuthLoading(false);
       setAuthLoading(false);
     });
 
@@ -533,6 +536,7 @@ export default function App() {
           setSession(data.session);
           setAuthError("");
           setGoogleSigningIn(false);
+          setEmailAuthLoading(false);
         });
         return;
       }
@@ -576,6 +580,44 @@ export default function App() {
     setWorkspaceBootstrapDismissed(readWorkspaceBootstrapFlag(sessionUserId));
     setWorkspaceBootstrapChecking(false);
   }, [session?.user?.id]);
+
+  useEffect(() => {
+    const sessionUserId = session?.user?.id;
+    if (!session?.access_token || !sessionUserId) {
+      return;
+    }
+
+    let cancelled = false;
+    setWorkspaceBootstrapChecking(true);
+
+    void fetchWorkspaceBootstrapStatus()
+      .then((status) => {
+        if (cancelled) return;
+
+        if (status.ready) {
+          writeWorkspaceBootstrapFlag(sessionUserId);
+          setWorkspaceBootstrapDismissed(true);
+          return;
+        }
+
+        // 登录后只检查空间是否已初始化，不自动创建默认员工/规则；新账号必须由用户点击“一键初始化”后才写入初始化数据。
+        setWorkspaceBootstrapDismissed(readWorkspaceBootstrapFlag(sessionUserId));
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setWorkspaceBootstrapDismissed(false);
+        addToast(error instanceof Error ? error.message : tAdmin("后台空间初始化检查失败"));
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setWorkspaceBootstrapChecking(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.access_token, session?.user?.id]);
 
   useEffect(() => {
     // 一级模块缓存只保留已经真正访问过的页面实例，避免首次进入后台时把 5 个模块全部冷启动挂载。
@@ -630,6 +672,63 @@ export default function App() {
       addToast(error instanceof Error ? error.message : tAdmin("考勤规则模块数据加载失败"));
     } finally {
       setAttendanceRulesLoading(false);
+    }
+  };
+
+  const handleEmailAuth = async (payload: AdminEmailAuthPayload) => {
+    const email = payload.email.trim().toLowerCase();
+    const password = payload.password;
+    const confirmPassword = payload.confirmPassword;
+
+    setAuthError("");
+
+    if (!/^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(email)) {
+      setAuthError(tAdmin("请输入正确的邮箱"));
+      return;
+    }
+
+    if (!/^(?=.*[A-Za-z])(?=.*\d).{8,}$/.test(password)) {
+      setAuthError(tAdmin("密码至少 8 位，并且需要同时包含字母和数字"));
+      return;
+    }
+
+    if (payload.mode === "register" && password !== confirmPassword) {
+      setAuthError(tAdmin("两次输入的密码不一致"));
+      return;
+    }
+
+    setEmailAuthLoading(true);
+    try {
+      const result = payload.mode === "register"
+        ? await supabase.auth.signUp({
+            email,
+            password,
+            options: {
+              emailRedirectTo: window.location.origin + routeState.canonicalPath
+            }
+          })
+        : await supabase.auth.signInWithPassword({ email, password });
+
+      if (result.error) {
+        throw result.error;
+      }
+
+      if (result.data.session) {
+        setSession(result.data.session);
+        setAuthError("");
+        return;
+      }
+
+      if (payload.mode === "register") {
+        setAuthError(tAdmin("注册成功，请先到邮箱完成验证后再登录。"));
+        return;
+      }
+
+      setAuthError(tAdmin("登录成功但未获取到会话，请刷新后重试。"));
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : tAdmin("邮箱认证失败，请重试。"));
+    } finally {
+      setEmailAuthLoading(false);
     }
   };
 
@@ -701,6 +800,8 @@ export default function App() {
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     setSession(null);
+    setGoogleSigningIn(false);
+    setEmailAuthLoading(false);
     setEmployees([]);
     setAttendanceRuleList([]);
     setWorkspaceBootstrapDismissed(true);
@@ -1007,7 +1108,16 @@ export default function App() {
   }
 
   if (!session) {
-    return <AuthScreen currentLanguage={currentLanguage} loading={googleSigningIn} onGoogleLogin={handleGoogleLogin} error={authError} />;
+    return (
+      <AuthScreen
+        currentLanguage={currentLanguage}
+        loading={googleSigningIn}
+        emailLoading={emailAuthLoading}
+        onGoogleLogin={handleGoogleLogin}
+        onEmailAuth={handleEmailAuth}
+        error={authError}
+      />
+    );
   }
 
   return (
@@ -1032,8 +1142,8 @@ export default function App() {
                     <Sparkles className="w-5 h-5" />
                     <span className="text-sm font-semibold">{tAdmin("首次进入当前账号后台")}</span>
                   </div>
-                  <h3 className="text-xl font-bold text-slate-900">{tAdmin("一键初始化当前 Google 账号的独立后台数据")}</h3>
-                  <p className="mt-2 text-sm text-slate-600 leading-6">{tAdmin("初始化后会为当前账号创建默认考勤规则、员工资料、当月考勤记录和薪酬数据。它们只属于你当前登录的 Google 账号，不会和其他账号共享。")}</p>
+                  <h3 className="text-xl font-bold text-slate-900">{tAdmin("一键初始化当前管理员账号的独立后台数据")}</h3>
+                  <p className="mt-2 text-sm text-slate-600 leading-6">{tAdmin("初始化后会为当前账号创建默认考勤规则、员工资料、当月考勤记录和薪酬数据。它们只属于你当前登录的管理员账号，不会和其他账号共享。")}</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
                   <button

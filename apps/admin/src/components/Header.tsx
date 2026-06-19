@@ -39,7 +39,7 @@ export function Header({ title, currentLanguage, onLanguageChange, userEmail, on
           <div className="hidden sm:flex items-center gap-3">
             <div className="text-right">
               <div className="text-sm font-medium text-slate-700">{userEmail}</div>
-              <div className="text-xs text-slate-500">{t("Google 已登录")}</div>
+              <div className="text-xs text-slate-500">{t("管理员已登录")}</div>
             </div>
             <button
               onClick={onSignOut}

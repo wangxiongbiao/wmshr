@@ -3,24 +3,31 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { SupportedLanguageCode } from "@wmshr/i18n";
+
+export type AdminEmailAuthMode = "login" | "register";
+
+export interface AdminEmailAuthPayload {
+  mode: AdminEmailAuthMode;
+  email: string;
+  password: string;
+  confirmPassword: string;
+}
 
 interface AuthScreenProps {
   currentLanguage: SupportedLanguageCode;
   loading?: boolean;
+  emailLoading?: boolean;
   onGoogleLogin: () => void;
+  onEmailAuth: (payload: AdminEmailAuthPayload) => void | Promise<void>;
   error?: string;
 }
 
 // 登录页“返回官网”必须和门户服务解耦：本地调试回 3001 门户，生产环境回正式官网；如域名调整，优先通过 VITE_HOME_URL 覆盖。
 const HOME_SITE_URL = import.meta.env.VITE_HOME_URL
   || (import.meta.env.DEV ? "http://localhost:3001" : "https://dutylix.com");
-
-function WmshrLogoMark() {
-  // 继续复用 public/dutylix-icon.svg 这个既有路径，避免改动静态资源引用面；图形内容已恢复为蓝底 WMSHR 立方体标识。
-  return <img src="/dutylix-icon.svg" alt="" aria-hidden="true" className="w-12 h-12" />;
-}
 
 function GoogleIcon() {
   return (
@@ -33,10 +40,21 @@ function GoogleIcon() {
   );
 }
 
-export function AuthScreen({ currentLanguage, loading = false, onGoogleLogin, error }: AuthScreenProps) {
+export function AuthScreen({ currentLanguage, loading = false, emailLoading = false, onGoogleLogin, onEmailAuth, error }: AuthScreenProps) {
   const { t } = useTranslation(["auth", "common"]);
+  const [mode, setMode] = useState<AdminEmailAuthMode>("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   // admin 已把语言固定在 `/:lang/:tab`；这里返回官网时必须把当前 lang 回传给门户，避免从后台返回后又掉回裸站默认语言。
   const homeUrl = new URL(`/${currentLanguage}`, `${HOME_SITE_URL.replace(/\/+$/, "")}/`).toString();
+  const isRegister = mode === "register";
+  const emailActionText = isRegister ? t("注册并进入后台") : t("邮箱登录");
+
+  const handleEmailSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    void onEmailAuth({ mode, email, password, confirmPassword });
+  };
 
   return (
     <div className="min-h-screen overflow-hidden bg-[#eef5f2] text-slate-950">
@@ -54,7 +72,7 @@ export function AuthScreen({ currentLanguage, loading = false, onGoogleLogin, er
 
         <div className="mx-auto grid w-full max-w-7xl items-center gap-6 lg:grid-cols-[1.12fr_0.88fr]">
           <section className="relative min-h-[620px] overflow-hidden rounded-[2rem] border border-white/70 bg-white/45 p-6 shadow-[0_30px_100px_rgba(15,23,42,0.12)] backdrop-blur-2xl lg:rounded-[2.5rem] lg:p-8">
-            {/* 视觉面板只负责传达“考勤/薪资被校准”的业务气质；真实认证边界仍在右侧 Google OAuth 卡片，不在门户主站保存登录态。 */}
+            {/* 视觉面板只负责传达“考勤/薪资被校准”的业务气质；真实认证边界仍在右侧认证卡片，不在门户主站保存登录态。 */}
             <div className="absolute left-7 top-8 z-10 hidden h-[82%] w-px bg-slate-900/10 lg:block" />
 
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_20%,rgba(14,165,233,0.12),transparent_34%),radial-gradient(circle_at_70%_80%,rgba(16,185,129,0.12),transparent_28%)]" />
@@ -71,7 +89,7 @@ export function AuthScreen({ currentLanguage, loading = false, onGoogleLogin, er
                     <div className="w-full max-w-44 rounded-[1.35rem] border border-white/70 bg-white/70 p-4 shadow-xl shadow-slate-900/5 backdrop-blur-md">
                       <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">{t("安全登录")}</p>
                       <p className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">08:30</p>
-                      <p className="mt-2 text-xs text-slate-500">{t("Google 账号进入")}</p>
+                      <p className="mt-2 text-xs text-slate-500">{t("Google 或邮箱进入")}</p>
                     </div>
                     <div className="ml-6 w-full max-w-52 rounded-[1.35rem] border border-white/70 bg-slate-950/80 p-4 text-white shadow-2xl shadow-slate-900/20 backdrop-blur-md">
                       <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-cyan-100/70">{t("薪资边界")}</p>
@@ -117,7 +135,7 @@ export function AuthScreen({ currentLanguage, loading = false, onGoogleLogin, er
 
               <div className="mt-6 grid gap-3 sm:grid-cols-3">
                 {[
-                  [t("安全登录"), t("Google 账号进入")],
+                  [t("安全登录"), t("Google 或邮箱进入")],
                   [t("专属工作台"), t("只显示你的团队数据")],
                   [t("薪资边界"), t("工资与考勤独立核对")]
                 ].map(([title, caption]) => (
@@ -133,30 +151,82 @@ export function AuthScreen({ currentLanguage, loading = false, onGoogleLogin, er
           <aside className="relative mx-auto w-full max-w-[480px] rounded-[2rem] border border-white/75 bg-white/80 p-7 shadow-[0_30px_90px_rgba(15,23,42,0.14)] backdrop-blur-2xl lg:-ml-8 lg:p-9">
             <div className="absolute -left-6 top-14 hidden h-24 w-12 rounded-l-full border-y border-l border-white/70 bg-white/50 lg:block" />
             <div className="relative">
-              <div className="mb-8 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white shadow-lg shadow-slate-900/10">
-                    <WmshrLogoMark />
-                  </div>
-                  <div>
-                    <p className="text-sm font-bold tracking-[0.18em] text-slate-400">WMSHR</p>
-                    <p className="text-sm font-semibold text-slate-700">{t("专属工作台")}</p>
-                  </div>
-                </div>
-                <span className="rounded-full bg-emerald-50 px-3 py-1.5 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-100">{t("在线")}</span>
+              <div className="mb-6">
+                <p className="mb-3 text-2xl font-semibold tracking-tight text-slate-950 lg:text-3xl">{t("管理员登录")}</p>
+                <p className="text-base leading-7 text-slate-500">{t("统一管理员入口，登录后即可查看员工、考勤、加班与工资条数据。")}</p>
               </div>
 
-              <div className="mb-8">
-                <p className="mb-3 text-sm font-semibold text-cyan-700">{t("管理员登录")}</p>
-                <h1 className="text-4xl font-semibold leading-[1.08] tracking-[-0.04em] text-slate-950 lg:text-5xl">
-                  {t("考勤与薪资自动运行")}
-                </h1>
-                <p className="mt-5 text-base leading-7 text-slate-500">{t("统一管理员入口，登录后即可查看员工、考勤、加班与工资条数据。")}</p>
+              <div className="mb-4 grid grid-cols-2 rounded-2xl bg-slate-100 p-1 text-sm font-semibold text-slate-500">
+                <button
+                  type="button"
+                  onClick={() => setMode("login")}
+                  className={`rounded-xl px-3 py-2 transition ${!isRegister ? "bg-white text-slate-950 shadow-sm" : "hover:text-slate-800"}`}
+                >
+                  {t("邮箱登录")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMode("register")}
+                  className={`rounded-xl px-3 py-2 transition ${isRegister ? "bg-white text-slate-950 shadow-sm" : "hover:text-slate-800"}`}
+                >
+                  {t("邮箱注册")}
+                </button>
+              </div>
+
+              <form onSubmit={handleEmailSubmit} className="space-y-3">
+                <label className="block">
+                  <span className="mb-1.5 block text-xs font-semibold text-slate-600">{t("邮箱")}</span>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    autoComplete="email"
+                    placeholder="admin@example.com"
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100"
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1.5 block text-xs font-semibold text-slate-600">{t("密码")}</span>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    autoComplete={isRegister ? "new-password" : "current-password"}
+                    placeholder={t("至少 8 位，包含字母和数字")}
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100"
+                  />
+                </label>
+                {isRegister && (
+                  <label className="block">
+                    <span className="mb-1.5 block text-xs font-semibold text-slate-600">{t("确认密码")}</span>
+                    <input
+                      type="password"
+                      value={confirmPassword}
+                      onChange={(event) => setConfirmPassword(event.target.value)}
+                      autoComplete="new-password"
+                      placeholder={t("再次输入密码")}
+                      className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100"
+                    />
+                  </label>
+                )}
+                <button
+                  type="submit"
+                  disabled={emailLoading || loading}
+                  className="flex w-full items-center justify-center rounded-2xl bg-cyan-600 px-5 py-3.5 text-sm font-semibold text-white shadow-xl shadow-cyan-900/10 transition hover:-translate-y-0.5 hover:bg-cyan-700 disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {emailLoading ? t("正在处理...") : emailActionText}
+                </button>
+              </form>
+
+              <div className="my-5 flex items-center gap-3 text-xs font-semibold text-slate-400">
+                <div className="h-px flex-1 bg-slate-200" />
+                <span>{t("或")}</span>
+                <div className="h-px flex-1 bg-slate-200" />
               </div>
 
               <button
                 onClick={onGoogleLogin}
-                disabled={loading}
+                disabled={loading || emailLoading}
                 // 登录按钮是登录页最关键的文案承载位：这里保留图标+主文案结构，但允许文案换行，避免长翻译把主 CTA 裁掉。
                 className="group flex w-full items-center justify-center gap-3 rounded-2xl border border-slate-200 bg-slate-950 px-5 py-4 text-sm font-semibold text-white shadow-xl shadow-slate-900/15 transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
               >
@@ -174,10 +244,6 @@ export function AuthScreen({ currentLanguage, loading = false, onGoogleLogin, er
                 </div>
               )}
 
-              <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50/80 p-4 text-sm leading-6 text-slate-500">
-                <p className="font-semibold text-slate-700">{t("主站进入 · Google 登录 · 数据安全隔离")}</p>
-                <p className="mt-1 text-xs">{t("登录成功后进入你的管理工作台，员工与薪资数据不会展示给未授权访问者。")}</p>
-              </div>
             </div>
           </aside>
         </div>
