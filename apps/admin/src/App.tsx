@@ -68,7 +68,8 @@ import {
   updateAttendanceRule,
   updateEmployee,
   updateEmployeeAppAccountStatus,
-  updateEmployeeStatus
+  updateEmployeeStatus,
+  hideEmployee
 } from "./lib/api";
 import { AuthScreen, type AdminEmailAuthPayload } from "./components/AuthScreen";
 import { useDialog } from "./components/DialogProvider";
@@ -943,32 +944,46 @@ export default function App() {
   };
 
   const handleDeleteEmployee = async (employee: Employee) => {
-    if (employee.status === "resigned") {
-      addToast(tAdmin("离职员工不可删除"));
-      return;
-    }
-
-    const confirmed = await confirm({
-      title: tAdmin("确认删除员工?"),
-      message: tAdmin("此操作会将员工 {{name}} 从 v2 员工列表中移除，后续仍可在后台数据中保留离职记录。是否继续？", { name: employee.name }),
-      confirmText: tAdmin("确认删除"),
-      cancelText: tAdmin("取消"),
-      tone: "danger"
-    });
+    const isResignedEmployee = employee.status === "resigned";
+    const confirmed = await confirm(
+      isResignedEmployee
+        ? {
+            title: tAdmin("确认删除已离职员工?"),
+            message: tAdmin("删除后，员工 {{name}} 的数据库记录会保留，但后台所有列表、筛选和关联选择中都不再显示。是否继续？", { name: employee.name }),
+            confirmText: tAdmin("确认删除"),
+            cancelText: tAdmin("取消"),
+            tone: "danger"
+          }
+        : {
+            title: tAdmin("确认将员工标记为离职?"),
+            message: tAdmin("离职后，员工 {{name}} 不会参与新的考勤和薪资核算，历史考勤和薪资记录仍可查询。是否继续？", { name: employee.name }),
+            confirmText: tAdmin("确认离职"),
+            cancelText: tAdmin("取消"),
+            tone: "warning"
+          }
+    );
 
     if (!confirmed) {
       return;
     }
 
     try {
-      // 当前后端没有物理删除接口；这里的“删除”本质是把在职员工标记为离职并从默认员工列表移除。
-      // 已经离职的员工仍需保留给筛选查看，因此禁止再次通过删除入口重复操作，避免误导维护者把它当成真删除。
+      if (isResignedEmployee) {
+        // 已离职员工执行的是软隐藏删除：数据库保留、业务入口消失；这里本地先移除卡片，再依赖统一 is_deleted 过滤保证其他页面同步不可见。
+        await hideEmployee(employee.id);
+        setEmployees((prev) => prev.filter((item) => item.id !== employee.id));
+        setEmployeeListReloadKey((prev) => prev + 1);
+        addToast(tAdmin("已离职员工已删除隐藏"));
+        return;
+      }
+
+      // 在职员工的按钮语义改为“离职”，不再伪装成物理删除，避免用户误以为会直接删库。
       await updateEmployeeStatus(employee.id, "resigned");
       setEmployees((prev) => prev.filter((item) => item.id !== employee.id));
       setEmployeeListReloadKey((prev) => prev + 1);
-      addToast(tAdmin("员工已从当前列表移除"));
+      addToast(tAdmin("员工已标记为离职"));
     } catch (error) {
-      addToast(error instanceof Error ? error.message : tAdmin("员工删除失败"));
+      addToast(error instanceof Error ? error.message : (isResignedEmployee ? tAdmin("员工删除失败") : tAdmin("员工离职失败")));
     }
   };
 
@@ -1115,6 +1130,7 @@ export default function App() {
         emailLoading={emailAuthLoading}
         onGoogleLogin={handleGoogleLogin}
         onEmailAuth={handleEmailAuth}
+        onLanguageChange={handleLanguageRouteChange}
         error={authError}
       />
     );

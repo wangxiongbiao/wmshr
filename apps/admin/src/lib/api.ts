@@ -793,3 +793,15 @@ export async function updateEmployeeStatus(employeeId: number, targetStatus: Ext
     body: JSON.stringify({ targetStatus, reason: reason || null })
   });
 }
+
+export async function hideEmployee(employeeId: number): Promise<EmployeeDetail> {
+  return request<EmployeeDetail>(`/api/admin/employees/${employeeId}/hide`, {
+    method: "PATCH"
+  });
+}
+
+export async function deleteEmployee(employeeId: number): Promise<EmployeeDetail> {
+  return request<EmployeeDetail>(`/api/admin/employees/${employeeId}`, {
+    method: "DELETE"
+  });
+}

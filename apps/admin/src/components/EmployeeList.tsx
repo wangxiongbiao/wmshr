@@ -5,7 +5,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { tAdmin } from "../lib/i18nText";
-import { Edit, KeyRound, Plus, Search, Trash2 } from "lucide-react";
+import { Edit, KeyRound, Plus, Search, Trash2, UserRoundMinus } from "lucide-react";
 import { Employee } from "../types";
 import { fetchEmployeeAvatars, fetchEmployeesCount, fetchEmployeesPage } from "../lib/api";
 import { cn, COUNTRY_FLAGS, formatCurrency, getCountryName } from "../lib/utils";
@@ -207,7 +207,8 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
             const hourlyRate = getV2HourlyRate(emp);
             const statusLabel = getV2StatusLabel(emp);
             const employeePhoto = avatarMap[emp.id] ?? null;
-            const canDeleteEmployee = emp.status !== "resigned";
+            const isResignedEmployee = emp.status === "resigned";
+            const statusActionLabel = isResignedEmployee ? tAdmin("删除") : tAdmin("离职");
 
             return (
               <div key={emp.id} className="glass-panel rounded-xl p-5 hover:shadow-md transition-all duration-300 flex flex-col relative group">
@@ -227,21 +228,16 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
                     <Edit className="w-4 h-4" />
                   </button>
                   <button
-                    onClick={() => {
-                      if (canDeleteEmployee) {
-                        onDeleteEmployee(emp);
-                      }
-                    }}
-                    disabled={!canDeleteEmployee}
+                    onClick={() => onDeleteEmployee(emp)}
                     className={cn(
-                      "p-1.5 rounded-lg shadow-sm border",
-                      canDeleteEmployee
-                        ? "bg-white border-red-200 hover:bg-red-50 text-red-500"
-                        : "cursor-not-allowed bg-slate-100 border-slate-200 text-slate-300"
+                      "p-1.5 rounded-lg shadow-sm border bg-white text-red-500",
+                      isResignedEmployee
+                        ? "border-red-200 hover:bg-red-50"
+                        : "border-amber-200 hover:bg-amber-50 text-amber-600"
                     )}
-                    title={canDeleteEmployee ? tAdmin("删除") : tAdmin("离职员工不可删除")}
+                    title={statusActionLabel}
                   >
-                    <Trash2 className="w-4 h-4" />
+                    {isResignedEmployee ? <Trash2 className="w-4 h-4" /> : <UserRoundMinus className="w-4 h-4" />}
                   </button>
                 </div>
                 <div className="flex items-start gap-4 mb-4">

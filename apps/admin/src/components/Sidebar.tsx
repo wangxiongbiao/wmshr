@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Clock, FileText, Globe, LayoutDashboard, Package, Users, Wallet } from "lucide-react";
+import { Clock, FileText, Globe, LayoutDashboard, Package, Receipt, Users, Wallet } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { TabId } from "../types";
 import { cn } from "../lib/utils";
@@ -23,6 +23,7 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
   const { t } = useTranslation("admin");
   const navItems = [
     // 数据看板已按 admin-v2 界面和接口契约恢复，继续保持旧模块在前、新并入的 v3 业务域在后，降低老用户迁移时的导航跳变。
+    // 客户/入库/费用三个入口继续沿用用户指定的 v4 顺序与图标，避免当前 admin 和对照版本在同一业务段出现认知跳变。
     { id: 'dashboard' as TabId, label: t('数据看板'), icon: LayoutDashboard },
     { id: 'employees' as TabId, label: t('员工管理'), icon: Users },
     { id: 'attendance' as TabId, label: t('考勤计算'), icon: Clock },
@@ -30,7 +31,7 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
     { id: 'sop' as TabId, label: t('SOP管理'), icon: FileText },
     { id: 'customers' as TabId, label: t('客户管理'), icon: Globe },
     { id: 'goods' as TabId, label: t('入库管理'), icon: Package },
-    { id: 'expenses' as TabId, label: t('费用管理'), icon: Wallet },
+    { id: 'expenses' as TabId, label: t('费用管理'), icon: Receipt },
   ];
 
   return (

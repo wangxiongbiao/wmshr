@@ -942,7 +942,9 @@ function buildEmployeeListSqlFilters({
   salaryType,
   role
 }) {
-  const whereClauses = ["owner_user_id = $1"];
+  // “数据库保留但所有地方不再显示”依赖统一的 is_deleted=false 基线过滤；
+  // 只要员工进入隐藏态，员工列表、搜索、分页计数和其他复用该查询的模块都必须同时消失，避免部分页面还能搜到“已删员工”。
+  const whereClauses = ["owner_user_id = $1", "is_deleted = false"];
   const values = [ownerUserId];
 
   if (!includeInactive && status === "all") {
@@ -1117,6 +1119,7 @@ async function fetchEmployeeAvatarsViaDirectDb(ownerUserId, ids) {
       SELECT id, photo
       FROM employees
       WHERE owner_user_id = $1
+        AND is_deleted = false
         AND id = ANY($2::int[])
     `,
     [ownerUserId, ids]
@@ -1371,6 +1374,8 @@ async function fetchEmployeeDetail(employeeId, ownerUserId) {
     .select("*")
     .eq("owner_user_id", ownerUserId)
     .eq("id", employeeId)
+    // 已执行“删除隐藏”的员工仍保留库内历史数据，但后台详情不再允许继续打开，避免从深链接重新暴露。
+    .eq("is_deleted", false)
     .single();
 
   if (employeeError) {
@@ -3180,6 +3185,41 @@ async function setEmployeeStatusRecord(employeeId, targetStatus, ownerUserId) {
       status: targetStatus,
       is_deleted: false
     })
+    .eq("owner_user_id", ownerUserId)
+    .eq("id", employeeId)
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  clearEmployeeCaches();
+  clearDashboardCache(ownerUserId);
+  clearPayrollResultsCache(ownerUserId);
+  return data;
+}
+
+async function hideEmployeeRecord(employeeId, ownerUserId) {
+  const { data: existingEmployee, error: existingError } = await supabase
+    .from("employees")
+    .select("*")
+    .eq("owner_user_id", ownerUserId)
+    .eq("id", employeeId)
+    .single();
+
+  if (existingError) {
+    throw existingError;
+  }
+
+  // 真正的“删除隐藏”只允许对已离职员工执行：先离职，再隐藏，既保留历史记录，又避免误把仍在职员工直接从所有业务流里抹掉。
+  if (existingEmployee.status !== "resigned") {
+    throw new Error("仅已离职员工可删除隐藏");
+  }
+
+  const { data, error } = await supabase
+    .from("employees")
+    .update({ is_deleted: true })
     .eq("owner_user_id", ownerUserId)
     .eq("id", employeeId)
     .select("*")
@@ -7124,7 +7164,9 @@ app.get("/api/admin/employees", async (req, res) => {
     ].join(",");
 
     const applyEmployeeListFilters = (query) => {
-      let nextQuery = query.eq("owner_user_id", ownerUserId);
+      let nextQuery = query
+        .eq("owner_user_id", ownerUserId)
+        .eq("is_deleted", false);
 
       if (!includeInactive && status === "all") {
         // 默认员工列表只展示可运营状态；显式 IN 比 NOT IN 更容易命中 owner_user_id + status + id 这类复合索引。
@@ -7304,7 +7346,8 @@ app.get("/api/admin/employees/count", async (req, res) => {
     let query = supabase
       .from("employees")
       .select("id", { count: "planned", head: true })
-      .eq("owner_user_id", ownerUserId);
+      .eq("owner_user_id", ownerUserId)
+      .eq("is_deleted", false);
 
     if (!includeInactive && status === "all") {
       query = query.in("status", ["active", "on_leave", "probation"]);
@@ -7386,6 +7429,7 @@ app.get("/api/admin/employees/avatars", async (req, res) => {
       .from("employees")
       .select("id, photo")
       .eq("owner_user_id", ownerUserId)
+      .eq("is_deleted", false)
       .in("id", ids);
 
     if (error) {
@@ -7487,6 +7531,18 @@ app.patch("/api/admin/employees/:id/status", async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: error.message || "更新员工状态失败" });
+  }
+});
+
+app.patch("/api/admin/employees/:id/hide", async (req, res) => {
+  try {
+    const employeeRow = await hideEmployeeRecord(Number(req.params.id), req.authUser.id);
+    res.json({
+      employee: mapEmployeeRow(employeeRow),
+      ruleHistory: []
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "隐藏员工失败" });
   }
 });
 
