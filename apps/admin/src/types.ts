@@ -170,6 +170,7 @@ export interface ExpenseRecord {
   receiptUrl?: string;
   receiptUrls?: string[];
   receiptName?: string;
+  receiptNames?: string[];
   payerId?: number;
   payerName?: string;
   paymentTime: string;

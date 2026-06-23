@@ -1,8 +1,8 @@
-import React, { useState, useMemo } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { ExpenseRecord, ExpenseModuleSnapshot, Employee } from "../types";
-import { 
-  FileText, Plus, Search, Check, X, Eye, Edit, Trash2, CheckCircle, 
-  AlertCircle, Calendar, Wallet, CreditCard, ChevronRight, User, 
+import {
+  FileText, Plus, Search, Check, X, Eye, Edit, Trash2, CheckCircle,
+  AlertCircle, Calendar, Wallet, CreditCard, ChevronRight, User,
   Info, Download, Image as ImageIcon, CheckCircle2, ShieldCheck, RefreshCcw,
   BadgeAlert, BadgeCheck, BadgeHelp, Upload, Settings
 } from "lucide-react";
@@ -15,7 +15,8 @@ interface ExpenseManagerProps {
   addToast: (msg: string) => void;
 }
 
-// Preset receipt images to make creation extremely fun and visual
+// Demo seed data keeps historical example records visually complete, but the
+// create/edit form below now uses real local-file selection instead of mock URLs.
 const RECEIPT_PRESETS = [
   { name: "仓储物流发票凭证", url: "https://images.unsplash.com/photo-1554415707-6e8cfc93fe23?w=500&auto=format&fit=crop&q=60" },
   { name: "设备维修清算收据", url: "https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?w=500&auto=format&fit=crop&q=60" },
@@ -37,6 +38,27 @@ const formatExpenseAmount = (amount: number, currencyCode?: string) => {
   const symbol = found ? found.symbol : "￥";
   return `${symbol}${amount.toLocaleString()}`;
 };
+
+function getExpenseReceiptItems(expense?: ExpenseRecord | null) {
+  if (!expense) return [] as Array<{ url: string; name: string }>;
+
+  const urls = Array.isArray(expense.receiptUrls) && expense.receiptUrls.length > 0
+    ? expense.receiptUrls
+    : expense.receiptUrl
+      ? [expense.receiptUrl]
+      : [];
+
+  const names = Array.isArray(expense.receiptNames) && expense.receiptNames.length > 0
+    ? expense.receiptNames
+    : expense.receiptName
+      ? [expense.receiptName]
+      : [];
+
+  return urls.map((url, index) => ({
+    url,
+    name: names[index] || `receipt_${index + 1}.png`
+  }));
+}
 
 // Initial mock records
 const INITIAL_EXPENSES: ExpenseRecord[] = [
@@ -122,7 +144,7 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isApproveOpen, setIsApproveOpen] = useState(false);
-  
+
   const [editingExpense, setEditingExpense] = useState<ExpenseRecord | null>(null);
   const [activeExpense, setActiveExpense] = useState<ExpenseRecord | null>(null);
 
@@ -133,12 +155,14 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
   const [amount, setAmount] = useState<number>(0);
   const [currency, setCurrency] = useState("CNY");
   const [receiptUrl, setReceiptUrl] = useState("");
+  const [receiptUrls, setReceiptUrls] = useState<string[]>([]);
   const [receiptName, setReceiptName] = useState("");
+  const [receiptNames, setReceiptNames] = useState<string[]>([]);
   const [payerId, setPayerId] = useState<number>(-1);
   const [payerName, setPayerName] = useState("");
   const [paymentTime, setPaymentTime] = useState("");
   const [note, setNote] = useState("");
-  
+
   // Designated approver state
   const [targetApproverId, setTargetApproverId] = useState<number>(-1);
   const [targetApproverName, setTargetApproverName] = useState("");
@@ -151,6 +175,8 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
 
   // Lightbox for image magnifying
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  const receiptFileInputRef = useRef<HTMLInputElement>(null);
+  const [isReceiptDragging, setIsReceiptDragging] = useState(false);
 
   // Expense Categories stateful management
   const saveCategories = (newCats: string[]) => {
@@ -228,7 +254,7 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
     const nameToDelete = categories[index];
     const recordsCount = expenses.filter(exp => exp.type === nameToDelete).length;
 
-    const confirmMsg = recordsCount > 0 
+    const confirmMsg = recordsCount > 0
       ? `此类别当前有 ${recordsCount} 笔核销记录，删除后这些记录的类型仍保留，但新记录将无法选择此类型。确定删除吗？`
       : `确定删除费用类型 "${nameToDelete}" 吗？`;
 
@@ -247,8 +273,10 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
     setPaymentMethod(METHODS[0]);
     setAmount(0);
     setCurrency("CNY");
-    setReceiptUrl(RECEIPT_PRESETS[1].url); // Default mock receipt
-    setReceiptName(RECEIPT_PRESETS[1].name + ".png");
+    setReceiptUrl("");
+    setReceiptUrls([]);
+    setReceiptName("");
+    setReceiptNames([]);
     setPayerId(employees[0]?.id || -1);
     setPayerName(employees[0]?.name || "");
     setPaymentTime(new Date().toISOString().split('T')[0]);
@@ -267,8 +295,11 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
     setPaymentMethod(rec.paymentMethod);
     setAmount(rec.amount);
     setCurrency(rec.currency || "CNY");
-    setReceiptUrl(rec.receiptUrl || RECEIPT_PRESETS[1].url);
-    setReceiptName(rec.receiptName || "receipt.png");
+    const receiptItems = getExpenseReceiptItems(rec);
+    setReceiptUrl(receiptItems[0]?.url || "");
+    setReceiptUrls(receiptItems.map(item => item.url));
+    setReceiptName(receiptItems[0]?.name || "receipt.png");
+    setReceiptNames(receiptItems.map(item => item.name));
     setPayerId(rec.payerId || -1);
     setPayerName(rec.payerName || "");
     setPaymentTime(rec.paymentTime);
@@ -282,6 +313,89 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
   const handleOpenDetail = (rec: ExpenseRecord) => {
     setActiveExpense(rec);
     setIsDetailOpen(true);
+  };
+
+  const handleReceiptFileChange = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+
+    const selectedFiles = Array.from(files);
+    const imageFiles = selectedFiles.filter(file => file.type.startsWith("image/"));
+    const skippedCount = selectedFiles.length - imageFiles.length;
+
+    if (imageFiles.length === 0) {
+      addToast("仅限上传图片格式凭证文件 (jpg, png, webp 等)！");
+      return;
+    }
+
+    Promise.all(imageFiles.map(file => new Promise<{ url: string; name: string }>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target?.result && typeof event.target.result === "string") {
+          resolve({ url: event.target.result, name: file.name });
+          return;
+        }
+        reject(new Error(`无法读取文件：${file.name}`));
+      };
+      reader.onerror = () => reject(new Error(`无法读取文件：${file.name}`));
+      reader.readAsDataURL(file);
+    })))
+      .then((loadedItems) => {
+        // 费用模块已升级为多张凭证数组，但仍同步维护首张 receiptUrl/receiptName，
+        // 这样旧数据和依赖单张字段的界面/接口在过渡期内仍可继续工作。
+        setReceiptUrls(prev => {
+          const updated = [...prev, ...loadedItems.map(item => item.url)];
+          setReceiptUrl(updated[0] || "");
+          return updated;
+        });
+        setReceiptNames(prev => {
+          const updated = [...prev, ...loadedItems.map(item => item.name)];
+          setReceiptName(updated[0] || "");
+          return updated;
+        });
+
+        const loadedLabel = loadedItems.length === 1 ? loadedItems[0].name : `${loadedItems.length} 张支付凭证`;
+        const skippedLabel = skippedCount > 0 ? `，已跳过 ${skippedCount} 个非图片文件` : "";
+        addToast(`已读取本地支付凭证：${loadedLabel}${skippedLabel}`);
+      })
+      .catch((error) => {
+        addToast(error instanceof Error ? error.message : "支付凭证读取失败");
+      });
+  };
+
+  const handleReceiptDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsReceiptDragging(false);
+    handleReceiptFileChange(e.dataTransfer.files);
+  };
+
+  const removeReceiptAt = (index: number) => {
+    setReceiptUrls(prev => {
+      const updated = prev.filter((_, currentIndex) => currentIndex !== index);
+      setReceiptUrl(updated[0] || "");
+      return updated;
+    });
+    setReceiptNames(prev => {
+      const updated = prev.filter((_, currentIndex) => currentIndex !== index);
+      setReceiptName(updated[0] || "");
+      return updated;
+    });
+  };
+
+  const clearAllReceipts = () => {
+    setReceiptUrl("");
+    setReceiptUrls([]);
+    setReceiptName("");
+    setReceiptNames([]);
+  };
+
+  const downloadReceipt = (url: string, name: string) => {
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = name;
+    link.target = "_blank";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   // Open Approval window
@@ -330,7 +444,9 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
             amount: Number(amount),
             currency,
             receiptUrl,
+            receiptUrls,
             receiptName,
+            receiptNames,
             payerId,
             payerName: finalPayerName,
             paymentTime,
@@ -353,7 +469,9 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
         amount: Number(amount),
         currency,
         receiptUrl,
+        receiptUrls,
         receiptName,
+        receiptNames,
         payerId,
         payerName: finalPayerName,
         paymentTime,
@@ -440,11 +558,11 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
   // Filtered list
   const filteredExpenses = useMemo(() => {
     return expenses.filter(item => {
-      const matchesSearch = 
+      const matchesSearch =
         item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         item.payerName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         item.id.toLowerCase().includes(searchQuery.toLowerCase());
-      
+
       const matchesType = typeFilter === "all" || item.type === typeFilter;
       const matchesMethod = methodFilter === "all" || item.paymentMethod === methodFilter;
       const matchesStatus = statusFilter === "all" || item.status === statusFilter;
@@ -455,7 +573,7 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
 
   return (
     <div className="space-y-6">
-      
+
       {/* 顶部指标统计 */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 animate-in fade-in duration-300">
         <div className="bg-white p-4.5 rounded-xl border border-slate-200/80 shadow-3xs flex items-center gap-4 hover:shadow-xs transition duration-200">
@@ -521,7 +639,7 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
 
       {/* 条件过滤与操作主区 */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-3xs overflow-hidden">
-        
+
         {/* 操作首栏：查询及新建 */}
         <div className="p-5 border-b border-slate-100 flex flex-col md:flex-row gap-4 items-center justify-between bg-slate-50/40">
           <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
@@ -535,7 +653,7 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
                 className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10 bg-white transition font-medium"
               />
             </div>
-            
+
             {/* 费用类型过滤 */}
             <select
               value={typeFilter}
@@ -617,8 +735,8 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
                       <FileText className="w-10 h-10 text-slate-300" />
                       <p>未检索到相符的费用核销记录</p>
                       {(searchQuery || typeFilter !== "all" || methodFilter !== "all" || statusFilter !== "all") && (
-                        <button 
-                          onClick={() => { setSearchQuery(""); setTypeFilter("all"); setMethodFilter("all"); setStatusFilter("all"); }} 
+                        <button
+                          onClick={() => { setSearchQuery(""); setTypeFilter("all"); setMethodFilter("all"); setStatusFilter("all"); }}
                           className="text-[11px] text-brand-600 font-bold hover:underline mt-1 flex items-center gap-1 cursor-pointer"
                         >
                           <RefreshCcw className="w-3 h-3" /> 重置所有搜索过滤
@@ -630,7 +748,7 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
               ) : (
                 filteredExpenses.map((rec) => {
                   return (
-                    <tr 
+                    <tr
                       key={rec.id}
                       onClick={() => handleOpenDetail(rec)}
                       className="hover:bg-slate-50/50 transition cursor-pointer group"
@@ -650,9 +768,9 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
                             <span className="text-[9.5px] font-bold text-brand-700 bg-brand-50 px-1.5 py-0.5 rounded">
                               {rec.type}
                             </span>
-                            {rec.receiptUrl && (
+                            {getExpenseReceiptItems(rec).length > 0 && (
                               <span className="text-[9px] font-semibold text-slate-400 flex items-center gap-0.5" title="附带支付凭证发票明细">
-                                <ImageIcon className="w-2.5 h-2.5" /> 有凭证
+                                <ImageIcon className="w-2.5 h-2.5" /> {getExpenseReceiptItems(rec).length > 1 ? `有凭证(${getExpenseReceiptItems(rec).length})` : '有凭证'}
                               </span>
                             )}
                             {rec.targetApproverName && rec.targetApproverId !== -1 && (
@@ -714,7 +832,7 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
                       {/* 操作按钮组 */}
                       <td className="px-5 py-4 text-center" onClick={(e) => e.stopPropagation()}>
                         <div className="flex justify-center items-center gap-1 w-full">
-                          
+
                           <button
                             onClick={() => handleOpenDetail(rec)}
                             className="bg-slate-50 text-slate-700 hover:text-white hover:bg-slate-700 border border-slate-200 font-bold px-2.5 py-1 rounded-md text-[11px] transition duration-150 cursor-pointer flex items-center gap-1 active:scale-95"
@@ -775,7 +893,7 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
                   费用报销单据详情 <span className="font-mono text-slate-400">({activeExpense.id})</span>
                 </h3>
               </div>
-              <button 
+              <button
                 onClick={() => setIsDetailOpen(false)}
                 className="text-slate-450 hover:text-white text-xs px-2 py-1 rounded"
               >
@@ -875,51 +993,52 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
               )}
 
               {/* RECEIPT ATTACHMENT DISPLAY (READ-ONLY PREVIEW) */}
-              {activeExpense.receiptUrl && (
+              {getExpenseReceiptItems(activeExpense).length > 0 && (
                 <div className="bg-slate-50 p-4.5 rounded-xl border border-slate-200">
                   <div className="flex justify-between items-center mb-2">
                     <span className="text-xs font-bold text-slate-600 flex items-center gap-1">
                       <ImageIcon className="w-3.5 h-3.5 text-brand-600" />
                       上传支付凭证凭照 (只读)
                     </span>
-                    <span className="text-[10px] font-mono text-slate-400 truncate max-w-[200px]" title={activeExpense.receiptName}>
-                      {activeExpense.receiptName || "receipt.png"}
+                    <span className="text-[10px] font-mono text-slate-400 truncate max-w-[200px]" title={getExpenseReceiptItems(activeExpense)[0]?.name}>
+                      共 {getExpenseReceiptItems(activeExpense).length} 张
                     </span>
                   </div>
-                  
-                  <div className="relative group rounded-lg overflow-hidden border border-slate-200 bg-white aspect-[4/3] max-h-[180px] flex items-center justify-center">
-                    <img
-                      src={activeExpense.receiptUrl}
-                      alt={activeExpense.receiptName}
-                      className="w-full h-full object-cover group-hover:scale-102 transition duration-200"
-                      referrerPolicy="no-referrer"
-                    />
-                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition duration-150 flex items-center justify-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setPreviewImageUrl(activeExpense.receiptUrl || "")}
-                        className="p-1 px-2 text-[10.5px] bg-white text-slate-805 rounded shadow-sm hover:bg-slate-100 transition cursor-pointer font-semibold flex items-center gap-1"
-                      >
-                        <Eye className="w-3 h-3" />
-                        <span>放大预览</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const link = document.createElement("a");
-                          link.href = activeExpense.receiptUrl || "";
-                          link.download = activeExpense.receiptName || `receipt_${activeExpense.id}.png`;
-                          link.target = "_blank";
-                          document.body.appendChild(link);
-                          link.click();
-                          document.body.removeChild(link);
-                        }}
-                        className="p-1 px-2 text-[10.5px] bg-brand-600 text-white rounded shadow-sm hover:bg-brand-700 transition cursor-pointer font-semibold flex items-center gap-1"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>下载凭证</span>
-                      </button>
-                    </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {getExpenseReceiptItems(activeExpense).map((receipt, index) => (
+                      <div key={`${receipt.name}-${index}`} className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+                        <div className="relative group aspect-[4/3] flex items-center justify-center bg-slate-50">
+                          <img
+                            src={receipt.url}
+                            alt={receipt.name}
+                            className="w-full h-full object-cover group-hover:scale-102 transition duration-200"
+                            referrerPolicy="no-referrer"
+                          />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition duration-150 flex items-center justify-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setPreviewImageUrl(receipt.url)}
+                              className="p-1 px-2 text-[10.5px] bg-white text-slate-805 rounded shadow-sm hover:bg-slate-100 transition cursor-pointer font-semibold flex items-center gap-1"
+                            >
+                              <Eye className="w-3 h-3" />
+                              <span>放大预览</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => downloadReceipt(receipt.url, receipt.name)}
+                              className="p-1 px-2 text-[10.5px] bg-brand-600 text-white rounded shadow-sm hover:bg-brand-700 transition cursor-pointer font-semibold flex items-center gap-1"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              <span>下载凭证</span>
+                            </button>
+                          </div>
+                        </div>
+                        <div className="px-3 py-2 text-[11px] font-mono text-slate-500 truncate" title={receipt.name}>
+                          {receipt.name}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
@@ -963,7 +1082,7 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
       {isFormOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-4xl overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-200">
-            
+
             {/* Header */}
             <div className="bg-brand-600 text-white px-6 py-4.5 flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -972,7 +1091,7 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
                   {editingExpense ? `编辑费用核销单 (${editingExpense.id})` : "新建费用核销报销单"}
                 </h3>
                </div>
-               <button 
+               <button
                  type="button"
                  onClick={() => setIsFormOpen(false)}
                  className="text-brand-200 hover:text-white text-sm px-3 py-1 bg-brand-700/50 hover:bg-brand-800/50 rounded-lg transition"
@@ -980,11 +1099,11 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
                  ✕ 取消
                </button>
              </div>
- 
+
              {/* Form */}
              <form onSubmit={handleSaveExpense} className="flex-1 overflow-y-auto bg-white flex flex-col">
                <div className="p-6 space-y-5 text-sm flex-1">
-                 
+
                  {/* 费用名称 */}
                  <div>
                    <label className="block text-slate-550 font-bold mb-1.5 uppercase tracking-wide text-xs">费用核销名称 <span className="text-rose-500">*</span></label>
@@ -997,7 +1116,7 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
                      className="w-full px-4 py-2.5 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition text-slate-850 font-semibold text-sm"
                    />
                  </div>
- 
+
                  <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                    {/* 费用类别 */}
                    <div>
@@ -1012,7 +1131,7 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
                        ))}
                      </select>
                    </div>
- 
+
                    {/* 支付及支持货币 */}
                    <div>
                      <label className="block text-slate-550 font-bold mb-1.5 uppercase tracking-wide text-xs font-bold text-brand-750">支付货币 (Currency) <span className="text-rose-500">*</span></label>
@@ -1026,7 +1145,7 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
                        ))}
                      </select>
                    </div>
- 
+
                    {/* 核销金额 */}
                    <div>
                      <label className="block text-slate-550 font-bold mb-1.5 uppercase tracking-wide text-xs">支付金额 <span className="text-rose-500">*</span></label>
@@ -1047,7 +1166,7 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
                      </div>
                    </div>
                  </div>
- 
+
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                    {/* 支持方式 */}
                    <div>
@@ -1062,7 +1181,7 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
                        ))}
                      </select>
                    </div>
- 
+
                    {/* 支付日期 */}
                    <div>
                      <label className="block text-slate-550 font-bold mb-1.5 uppercase tracking-wide text-xs">支付款项日期 <span className="text-rose-500">*</span></label>
@@ -1075,7 +1194,7 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
                      />
                    </div>
                  </div>
- 
+
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                    {/* 经报支付人（员工匹配） */}
                    <div>
@@ -1096,7 +1215,7 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
                        ))}
                      </select>
                    </div>
- 
+
                    {/* 指定审核审批人 */}
                    <div>
                      <label className="block text-slate-550 font-bold mb-1.5 uppercase tracking-wide text-xs">指定审核审批人 <span className="text-rose-500">*</span></label>
@@ -1117,7 +1236,7 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
                      </select>
                    </div>
                  </div>
- 
+
                  {/* 如果选择手写支付人 */}
                  {payerId === -1 && (
                    <div>
@@ -1132,7 +1251,7 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
                      />
                    </div>
                  )}
- 
+
                  {/* 备注 */}
                  <div>
                    <label className="block text-slate-550 font-bold mb-1.5 uppercase tracking-wide text-xs">申垫对账备注</label>
@@ -1144,53 +1263,100 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
                      className="w-full px-4 py-2.5 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition text-slate-755 text-sm font-semibold"
                    />
                  </div>
- 
+
                  {/* 上传支付凭证 */}
                  <div className="bg-brand-50/20 border border-dashed border-brand-200 p-5 rounded-xl">
                    <span className="block text-xs font-extrabold text-brand-950 uppercase tracking-widest mb-3">
                      上传支付凭证发票收据
                    </span>
- 
-                   {/* 模拟拖拽上传区 */}
-                   <div 
-                     onClick={() => {
-                       const randomPreset = RECEIPT_PRESETS[Math.floor(Math.random() * RECEIPT_PRESETS.length)];
-                       setReceiptUrl(randomPreset.url);
-                       setReceiptName(randomPreset.name + "_" + Math.floor(Math.random()*100) + ".jpg");
-                       addToast("财务发票凭证导入成功");
+
+                   {/* 本地凭证上传区 */}
+                   <div
+                     onDragEnter={(e) => {
+                       e.preventDefault();
+                       setIsReceiptDragging(true);
                      }}
-                     className="border border-dashed border-slate-300 bg-white hover:bg-brand-50/5 hover:border-brand-500 rounded-xl py-8 text-center transition cursor-pointer select-none"
+                     onDragOver={(e) => {
+                       e.preventDefault();
+                       setIsReceiptDragging(true);
+                     }}
+                     onDragLeave={(e) => {
+                       e.preventDefault();
+                       if (e.currentTarget === e.target) {
+                         setIsReceiptDragging(false);
+                       }
+                     }}
+                     onDrop={handleReceiptDrop}
+                     onClick={() => receiptFileInputRef.current?.click()}
+                     className={`border border-dashed rounded-xl py-8 text-center transition cursor-pointer select-none ${isReceiptDragging ? 'border-brand-500 bg-brand-50/20' : 'border-slate-300 bg-white hover:bg-brand-50/5 hover:border-brand-500'}`}
                    >
+                     <input
+                       ref={receiptFileInputRef}
+                       type="file"
+                       multiple
+                       accept="image/*"
+                       className="hidden"
+                       onChange={(e) => {
+                         handleReceiptFileChange(e.target.files);
+                         e.target.value = "";
+                       }}
+                     />
                      <Upload className="w-9 h-9 text-brand-500 mx-auto" />
                      <p className="text-slate-700 font-bold text-xs mt-3">
-                       拖拽多个收据电子单到这里，或 <span className="text-brand-600 hover:underline">点击选择并上传凭证文件</span>
+                       拖拽本地支付凭证到这里，或点击选择多张本地图片文件
                      </p>
-                     <p className="text-slate-400 text-xs mt-1.5">支持 PNG, JPG, JPEG, WEBP 格式图片发票</p>
+                     <p className="text-slate-400 text-xs mt-1.5">支持 PNG, JPG, JPEG, WEBP 格式图片发票；可多选并按上传顺序保存</p>
                    </div>
- 
+
                    {/* 凭据缩略预览 */}
-                   {receiptUrl && (
-                     <div className="mt-4 flex items-center justify-between bg-white p-2.5 rounded-xl border border-slate-200">
-                       <div className="flex items-center gap-3 max-w-[80%]">
-                         <img 
-                           src={receiptUrl} 
-                           alt="voucher receipt preview" 
-                           className="w-10 h-10 object-cover rounded-lg border shadow-3xs"
-                           referrerPolicy="no-referrer"
-                         />
-                         <div className="truncate text-xs">
-                           <p className="text-slate-700 font-extrabold truncate">{receiptName}</p>
-                           <p className="text-slate-400 text-[11px] mt-0.5">已加载</p>
-                         </div>
+                   {receiptUrls.length > 0 && (
+                     <div className="mt-4 bg-white p-3 rounded-xl border border-slate-200 space-y-3">
+                       <div className="flex items-center justify-between">
+                         <span className="text-[11px] font-extrabold text-slate-700">已加载支付凭证 ({receiptUrls.length} 张)</span>
+                         <button
+                           type="button"
+                           onClick={clearAllReceipts}
+                           className="text-[11px] font-bold text-rose-600 hover:text-rose-700 transition"
+                         >
+                           清空全部
+                         </button>
                        </div>
-                       <button 
-                         type="button"
-                         onClick={() => { setReceiptUrl(""); setReceiptName(""); }}
-                         className="p-1.5 hover:bg-slate-100 text-rose-500 rounded-lg flex items-center transition"
-                         title="清出该凭证"
-                       >
-                         <X className="w-4 h-4" />
-                       </button>
+                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                         {receiptUrls.map((url, index) => (
+                           <div key={`${receiptNames[index] || 'receipt'}-${index}`} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 p-2.5">
+                             <div className="flex items-center gap-3 min-w-0 flex-1">
+                               <img
+                                 src={url}
+                                 alt={receiptNames[index] || `voucher receipt ${index + 1}`}
+                                 className="w-10 h-10 object-cover rounded-lg border shadow-3xs"
+                                 referrerPolicy="no-referrer"
+                               />
+                               <div className="truncate text-xs min-w-0">
+                                 <p className="text-slate-700 font-extrabold truncate">{receiptNames[index] || `receipt_${index + 1}.png`}</p>
+                                 <p className="text-slate-400 text-[11px] mt-0.5">{index === 0 ? '主凭证（兼容旧字段）' : '附加凭证'}</p>
+                               </div>
+                             </div>
+                             <div className="flex items-center gap-1.5">
+                               <button
+                                 type="button"
+                                 onClick={() => setPreviewImageUrl(url)}
+                                 className="p-1.5 hover:bg-slate-100 text-slate-500 rounded-lg flex items-center transition"
+                                 title="放大预览"
+                               >
+                                 <Eye className="w-4 h-4" />
+                               </button>
+                               <button
+                                 type="button"
+                                 onClick={() => removeReceiptAt(index)}
+                                 className="p-1.5 hover:bg-slate-100 text-rose-500 rounded-lg flex items-center transition"
+                                 title="移除该凭证"
+                               >
+                                 <X className="w-4 h-4" />
+                               </button>
+                             </div>
+                           </div>
+                         ))}
+                       </div>
                      </div>
                     )}
                   </div>
@@ -1227,8 +1393,8 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
                 <ShieldCheck className="w-5 h-5 text-brand-200 animate-pulse" />
                 <h4 className="font-bold text-sm tracking-wide">WMS 费用核销综合审批核办</h4>
               </div>
-              <button 
-                type="button" 
+              <button
+                type="button"
                 onClick={() => setIsApproveOpen(false)}
                 className="text-brand-200 hover:text-white text-sm p-1 hover:bg-brand-700/50 rounded-lg transition"
               >
@@ -1259,12 +1425,12 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
                   <label className={`border rounded-lg p-2.5 flex items-center justify-center gap-1.5 cursor-pointer hover:bg-slate-50 transition ${
                     approveStatus === 'approved' ? 'border-emerald-500 bg-emerald-50/15 ring-2 ring-emerald-500/10 font-bold text-emerald-900' : 'border-slate-200 text-slate-650'
                   }`}>
-                    <input 
-                      type="radio" 
-                      name="approve-status" 
+                    <input
+                      type="radio"
+                      name="approve-status"
                       className="accent-emerald-600 cursor-pointer hidden"
-                      checked={approveStatus === 'approved'} 
-                      onChange={() => setApproveStatus('approved')} 
+                      checked={approveStatus === 'approved'}
+                      onChange={() => setApproveStatus('approved')}
                     />
                     <CheckCircle className="w-4 h-4 text-emerald-600" />
                     <span>批准放款</span>
@@ -1273,12 +1439,12 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
                   <label className={`border rounded-lg p-2.5 flex items-center justify-center gap-1.5 cursor-pointer hover:bg-slate-50 transition ${
                     approveStatus === 'rejected' ? 'border-rose-500 bg-rose-50/15 ring-2 ring-rose-500/10 font-bold text-rose-900' : 'border-slate-200 text-slate-655'
                   }`}>
-                    <input 
-                      type="radio" 
-                      name="approve-status" 
+                    <input
+                      type="radio"
+                      name="approve-status"
                       className="accent-rose-600 cursor-pointer hidden"
-                      checked={approveStatus === 'rejected'} 
-                      onChange={() => setApproveStatus('rejected')} 
+                      checked={approveStatus === 'rejected'}
+                      onChange={() => setApproveStatus('rejected')}
                     />
                     <X className="w-4 h-4 text-rose-600" />
                     <span>驳回退回</span>
@@ -1358,8 +1524,8 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
                 <Settings className="w-5 h-5 text-brand-100" />
                 <h3 className="font-bold text-sm tracking-wide">费用核销类型配置管理</h3>
               </div>
-              <button 
-                type="button" 
+              <button
+                type="button"
                 onClick={() => {
                   setIsConfigOpen(false);
                   setEditingCatIndex(null);
@@ -1372,7 +1538,7 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
 
             {/* List and form */}
             <div className="p-6 flex-1 overflow-y-auto space-y-5">
-              
+
               {/* Add category form */}
               <form onSubmit={handleAddCategory} className="bg-slate-50 border border-slate-200/60 rounded-xl p-4">
                 <label className="block text-slate-600 font-extrabold mb-2 text-xs">新增费用核销类型</label>
@@ -1439,7 +1605,7 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
                               </button>
                             </div>
                           ) : (
-                            <div 
+                            <div
                               onClick={() => {
                                 setEditingCatIndex(idx);
                                 setEditingCatName(cat);
@@ -1495,14 +1661,14 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
 
       {/* 图片放大查看灯箱 Modal */}
       {previewImageUrl && (
-        <div 
+        <div
           onClick={() => setPreviewImageUrl(null)}
           className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center z-[100] cursor-zoom-out p-4 animate-in fade-in duration-200"
         >
           <div className="relative max-w-4xl max-h-[90vh] text-center">
-            <img 
-              src={previewImageUrl} 
-              alt="receipt magnified lightbox" 
+            <img
+              src={previewImageUrl}
+              alt="receipt magnified lightbox"
               className="max-w-full max-h-[85vh] rounded-lg shadow-2xl object-contain mx-auto border-3 border-white/20 select-none animate-in zoom-in-95 duration-200"
               referrerPolicy="no-referrer"
             />

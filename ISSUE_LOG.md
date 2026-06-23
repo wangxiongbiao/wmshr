@@ -207,3 +207,15 @@
   3. 用 `curl -I http://127.0.0.1:3003` 验证返回 `HTTP/1.1 200 OK`；
   4. 再用浏览器访问 `http://127.0.0.1:3003/`，确认页面已恢复渲染。
 - 替代验证：原计划是直接复用旧地址；实际阻塞后改为“重启脚本 + 端口监听检查 + HTTP 200 + 浏览器打开页面”四步替代验收，最终确认当前可用地址仍为 `http://127.0.0.1:3003/`。
+
+## 2026-06-23 问题 14：一键生产发布在 git diff --check 阶段被 ExpenseManager 行尾空格拦截
+- 原计划验证入口：直接执行项目现成一键入口 `HOME=/Users/admin npm run deploy:prod`，完成 lint/build/db push/git push/Vercel 生产发布与正式域名校验。
+- 原因：本次费用核销凭证多图/拖拽改动写入 `apps/admin/src/components/ExpenseManager.tsx` 后，文件里残留了多处行尾空格；发布脚本在 `git diff --check` 阶段按预期拦截。
+- 导致的问题：一键发布在真正 push main 和 Vercel 生产部署之前提前退出，真实报错包含 `trailing whitespace`。
+- 解决方式：清理 `ExpenseManager.tsx` 的行尾空格后，重新执行同一条 `HOME=/Users/admin npm run deploy:prod` 发布入口。
+
+## 2026-06-23 问题 15：一键生产发布在 git fetch origin main 阶段遭遇 GitHub HTTPS 瞬时 SSL 连接失败
+- 原计划验证入口：继续执行项目现成一键入口 `HOME=/Users/admin npm run deploy:prod`，让脚本在 push main 前先完成 `git fetch origin main` 祖先校验。
+- 原因：发布脚本第二次实跑到 `git fetch origin main` 时，GitHub HTTPS 连接瞬时失败，真实报错为 `LibreSSL SSL_connect: SSL_ERROR_SYSCALL in connection to github.com:443`。
+- 导致的问题：脚本在正式 push 与 Vercel 生产部署前提前退出，无法继续后半段发布流程。
+- 解决方式：立即做 GitHub 连通性复核；`curl -I https://github.com` 返回 HTTP 200，随后手动重试 `git fetch origin main` 成功，因此判断为瞬时网络抖动，并继续重跑同一条生产发布入口。
