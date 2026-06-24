@@ -37,6 +37,7 @@ COMMIT_MESSAGE="release production $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # does not force a full re-deploy after the actual release already succeeded.
 HTTP_CHECK_MAX_ATTEMPTS=3
 HTTP_CHECK_RETRY_DELAY_SECONDS=2
+VERCEL_BIN=""
 
 usage() {
   cat <<'EOF'
@@ -94,6 +95,53 @@ require_command() {
     echo "Required command not found: $1" >&2
     exit 127
   fi
+}
+
+resolve_vercel_bin() {
+  # Hermes/local shells do not always inherit the user's global npm bin in PATH.
+  # Prefer the machine-verified CLI location first so one-key release keeps working
+  # even when `command -v vercel` would fail in the current session.
+  local candidate
+  for candidate in \
+    "/Users/admin/.npm-global/bin/vercel" \
+    "${HOME:-}/.npm-global/bin/vercel"
+  do
+    if [[ -x "$candidate" ]]; then
+      VERCEL_BIN="$candidate"
+      return 0
+    fi
+  done
+
+  if command -v vercel >/dev/null 2>&1; then
+    VERCEL_BIN="$(command -v vercel)"
+    return 0
+  fi
+
+  echo "Vercel CLI not found. Expected /Users/admin/.npm-global/bin/vercel or a vercel binary on PATH." >&2
+  exit 127
+}
+
+run_vercel() {
+  echo "+ ${VERCEL_BIN} $*"
+  "$VERCEL_BIN" "$@"
+}
+
+assert_vercel_auth() {
+  # Fail early with an actionable auth message before git push / deploy / alias steps.
+  # This avoids half-finished release attempts when the CLI binary exists but the
+  # cached access token has expired and must be refreshed or re-logged.
+  local whoami_output
+  set +e
+  whoami_output="$($VERCEL_BIN whoami 2>&1)"
+  local whoami_status=$?
+  set -e
+  if [[ "$whoami_status" != "0" ]]; then
+    echo "Vercel CLI authentication check failed via ${VERCEL_BIN}." >&2
+    echo "$whoami_output" >&2
+    echo "If the CLI path is correct but auth expired, refresh the local auth file or run '${VERCEL_BIN} login' under HOME=/Users/admin before retrying release." >&2
+    exit "$whoami_status"
+  fi
+  echo "Vercel authenticated as: $whoami_output"
 }
 
 download_with_retry() {
@@ -295,11 +343,11 @@ deploy_home_production() {
 JSON
   assert_vercel_config "${REPO_ROOT}/vercel.json" home
 
-  echo "+ vercel deploy ${REPO_ROOT} --prod --yes --project ${HOME_VERCEL_PROJECT}"
+  echo "+ ${VERCEL_BIN} deploy ${REPO_ROOT} --prod --yes --project ${HOME_VERCEL_PROJECT}"
   # Deploy from the monorepo root so @wmshr/i18n resolves as a workspace package.
   # The temporary root config above forces this deploy to build apps/home, not admin.
   set +e
-  vercel deploy "$REPO_ROOT" --prod --yes --project "$HOME_VERCEL_PROJECT" | tee "$home_deploy_log"
+  "$VERCEL_BIN" deploy "$REPO_ROOT" --prod --yes --project "$HOME_VERCEL_PROJECT" | tee "$home_deploy_log"
   deploy_status=${PIPESTATUS[0]}
   set -e
 
@@ -380,10 +428,12 @@ main() {
   require_command npm
   require_command node
   require_command curl
-  require_command vercel
   if [[ "$RUN_DB_PUSH" == "1" ]]; then
     require_command supabase
   fi
+
+  resolve_vercel_bin
+  assert_vercel_auth
 
   local branch
   branch="$(git branch --show-current)"
@@ -443,8 +493,8 @@ main() {
 
   local deploy_log deployment_url
   deploy_log="$(mktemp -t wmshr-vercel-deploy.XXXXXX.log)"
-  echo "+ vercel deploy --prod --yes"
-  vercel deploy --prod --yes | tee "$deploy_log"
+  echo "+ ${VERCEL_BIN} deploy --prod --yes"
+  "$VERCEL_BIN" deploy --prod --yes | tee "$deploy_log"
   deployment_url="$(extract_deployment_url "$deploy_log")"
   if [[ -z "$deployment_url" ]]; then
     echo "Could not parse Vercel production deployment URL from $deploy_log" >&2
@@ -452,7 +502,7 @@ main() {
   fi
   assert_deployment_url admin "$deployment_url"
 
-  run vercel alias set "$deployment_url" "$CUSTOM_DOMAIN"
+  run_vercel alias set "$deployment_url" "$CUSTOM_DOMAIN"
 
   echo "== Production verification =="
   verify_http_status "$CUSTOM_ORIGIN" "200"
@@ -480,7 +530,7 @@ main() {
     exit 1
   fi
   assert_deployment_url home "$home_deployment_url"
-  run vercel alias set "$home_deployment_url" "$HOME_CUSTOM_DOMAIN"
+  run_vercel alias set "$home_deployment_url" "$HOME_CUSTOM_DOMAIN"
   verify_home_production
 
   if [[ "$RUN_PROJECT_MANAGER_LOG" == "1" ]]; then

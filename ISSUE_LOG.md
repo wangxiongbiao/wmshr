@@ -219,3 +219,24 @@
 - 原因：发布脚本第二次实跑到 `git fetch origin main` 时，GitHub HTTPS 连接瞬时失败，真实报错为 `LibreSSL SSL_connect: SSL_ERROR_SYSCALL in connection to github.com:443`。
 - 导致的问题：脚本在正式 push 与 Vercel 生产部署前提前退出，无法继续后半段发布流程。
 - 解决方式：立即做 GitHub 连通性复核；`curl -I https://github.com` 返回 HTTP 200，随后手动重试 `git fetch origin main` 成功，因此判断为瞬时网络抖动，并继续重跑同一条生产发布入口。
+
+## 2026-06-23 问题 16：Vercel CLI 在本机无法完成生产发布，且本地 access token 已失效
+- 原计划验证入口：在 `HOME=/Users/admin npm run deploy:prod` 成功 push main 后，继续通过同一脚本里的 `vercel deploy --prod --yes` 完成 admin 与门户的正式部署。
+- 原因：`vercel` CLI 在本机 Node/TLS 出站阶段无法稳定请求 `https://vercel.com/.well-known/openid-configuration`，真实报错为 `Client network socket disconnected before secure TLS connection was established`；同时本机 `~/Library/Application Support/com.vercel.cli/auth.json` 中现有 access token 走 Vercel API 直连返回 `{"error":{"code":"forbidden","message":"Not authorized","invalidToken":true}}`，说明本地 token 也已失效。
+- 导致的问题：虽然这次改动已经真实提交并推送到 GitHub `main`（commit `b6d1484df5ebb98da870dcbd411517f1822ee93d`），但 `vercel deploy` 未能跑通，`admin.dutylix.com` 仍停留在旧 bundle，生产站点尚未切到本次代码。
+- 已尝试：
+  1. 复跑项目现成一键入口 `HOME=/Users/admin npm run deploy:prod`；
+  2. 单独验证 `curl -I https://vercel.com/.well-known/openid-configuration` 可返回 HTTP 200，排除“站点完全不可达”；
+  3. 使用 `vercel whoami` / `vercel --debug whoami` 复验，CLI 仍在 OIDC 配置请求阶段失败；
+  4. 分别在带代理与去代理环境下用 Node `https.get` / `fetch` 访问同一地址，均复现 TLS 握手失败；
+  5. 从线上正式域名反查当前 admin bundle，确认仍是旧版本，尚未包含本次“拖拽上传 / 多张支付凭证”新文案；
+  6. 尝试读取本机 Vercel auth 文件并以只读方式调用 API，返回 `invalidToken:true`。
+- 当前判断：阻塞点不在 GitHub 推送，也不在正式域名健康检查，而在“本机 Node/Vercel CLI 的 TLS 出站环境 + 已过期的本地 Vercel access token”组合；若无需重新登录 CLI，可改用浏览器里现成登录态在 Vercel 控制台手动触发 redeploy。
+- 下一步：优先通过桌面浏览器中已有的 Vercel 登录态进入项目后台，手动触发 admin 生产 redeploy；成功后再次用正式域名 bundle 文案与 API 健康接口做线上验收。
+- 最终解决方式：先根据桌面文档 `/Users/admin/Desktop/Vercel-CLI处理流程.md` 和 `/Users/admin/Desktop/Supabase全局登录与一键发布操作文档.md` 复核标准链路，确认本机真实可执行的 Vercel CLI 路径为 `/Users/admin/.npm-global/bin/vercel`；随后从本机安装的 Vercel CLI 源码中定位 OAuth 参数（issuer `https://vercel.com`、内置 client_id `cl_HYyOPBNtFMfHhaUn9L4QPfTZz6TP47bp`、`grant_type=refresh_token`），使用 `curl` 直连 OIDC discovery 与 token endpoint，基于本地 `~/Library/Application Support/com.vercel.cli/auth.json` 中已有 refresh token 换取新的 access token，并写回 auth 文件（同时保留 `auth.json.bak_before_manual_refresh` 备份）。刷新后 `HOME=/Users/admin /Users/admin/.npm-global/bin/vercel whoami` 恢复成功，随后直接执行 `HOME=/Users/admin /Users/admin/.npm-global/bin/vercel deploy --prod --yes --project dutylix-admin` 完成 admin 生产部署，并手动将 `admin.dutylix.com` alias 切到新 deployment `dutylix-admin-i1guohn9z-wang-lins-projects.vercel.app`。最终再次校验：正式域名首页引用的新 bundle 为 `/assets/index-CVY3SbJD.js`，其中已命中本次“拖拽本地支付凭证到这里 / 可多选并按上传顺序保存 / 主凭证（兼容旧字段） / 已加载支付凭证”等新文案；`https://admin.dutylix.com/api/health` 返回 `{"ok":true}`，未登录访问 `https://admin.dutylix.com/api/admin/employees` 返回 `401`，说明生产已真实切到本次版本。
+
+## 2026-06-23 问题 17：补强发布脚本后首次完整复跑被 ISSUE_LOG.md 末尾空白行拦截
+- 原计划验证入口：直接使用已补强 Vercel CLI 路径与鉴权预检查后的 `HOME=/Users/admin npm run deploy:prod`，完成 admin + portal 的完整联动发布。
+- 原因：`ISSUE_LOG.md` 在补记问题 16 最终解决方式后，文件末尾多残留了一个空白行；发布脚本执行到 `git diff --check` 时真实报 `ISSUE_LOG.md:237: new blank line at EOF.`。
+- 导致的问题：完整发布在 git 质量门提前退出，尚未进入本轮的 git push / portal 部署阶段。
+- 解决方式：保留问题内容本身，删除文件末尾多余空白行后，立即重跑同一条 `deploy:prod` 完整发布入口。
