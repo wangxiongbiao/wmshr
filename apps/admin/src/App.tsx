@@ -19,6 +19,7 @@ import { SopManager } from "./components/SopManager";
 import { CustomerManager } from "./components/CustomerManager";
 import { GoodsManager } from "./components/GoodsManager";
 import { ExpenseManager } from "./components/ExpenseManager";
+import { LeaveRequestTable } from "./components/LeaveRequestTable";
 import {
   EmployeeModal,
   EmployeeAppAccountModal,
@@ -71,34 +72,11 @@ import {
   updateEmployeeStatus,
   hideEmployee
 } from "./lib/api";
-import { AuthScreen, type AdminEmailAuthPayload } from "./components/AuthScreen";
+import { AuthScreen } from "./components/AuthScreen";
 import { useDialog } from "./components/DialogProvider";
 import { ADMIN_TABS, buildAdminRoute, parseAdminRoute } from "./lib/adminRoute";
-import { supabase } from "./lib/supabase";
-import type { Session } from "@supabase/supabase-js";
-import {
-  buildGooglePopupCallbackUrl,
-  closePopupWindow,
-  GOOGLE_AUTH_MESSAGE_TYPE,
-  GOOGLE_POPUP_NAME,
-  GOOGLE_POPUP_POLL_MS,
-  GOOGLE_POPUP_QUERY_KEY,
-  GOOGLE_POPUP_QUERY_VALUE,
-  logGoogleAuth,
-  openCenteredPopup,
-  type GoogleAuthPopupMessage
-} from "../../../packages/shared/src/google-auth";
-
-function getOAuthErrorFromCurrentUrl() {
-  const searchParams = new URLSearchParams(window.location.search);
-  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-
-  return searchParams.get("error_description")
-    ?? hashParams.get("error_description")
-    ?? searchParams.get("error")
-    ?? hashParams.get("error")
-    ?? "";
-}
+import { GOOGLE_POPUP_QUERY_KEY, GOOGLE_POPUP_QUERY_VALUE } from "../../../packages/shared/src/google-auth";
+import { useAdminAuth } from "./lib/useAdminAuth";
 
 function getWorkspaceBootstrapStorageKey(userId?: string) {
   return userId ? `wmshr-admin-workspace-bootstrapped:${userId}` : "";
@@ -131,6 +109,34 @@ function writeWorkspaceBootstrapFlag(userId?: string) {
   }
 }
 
+const ADMIN_DEV_LAST_CAUSE_KEY = "wmshr-admin-dev-last-cause";
+const ADMIN_DEV_ROUTE_COUNT_KEY = "wmshr-admin-dev-route-normalize-count";
+
+function writeAdminDevCause(cause: string) {
+  if (!import.meta.env.DEV) {
+    return;
+  }
+
+  try {
+    window.sessionStorage.setItem(ADMIN_DEV_LAST_CAUSE_KEY, cause);
+  } catch {
+    // 调试探针写失败不影响真实登录流程；本地缺少这份辅助信息时最多回退为肉眼观察。
+  }
+}
+
+function bumpAdminDevCounter(storageKey: string) {
+  if (!import.meta.env.DEV) {
+    return;
+  }
+
+  try {
+    const next = Number(window.sessionStorage.getItem(storageKey) || "0") + 1;
+    window.sessionStorage.setItem(storageKey, String(next));
+  } catch {
+    // sessionStorage 不可用时保持静默；不要让排查辅助逻辑反过来制造登录问题。
+  }
+}
+
 export default function App() {
   const { t, i18n } = useTranslation(["admin", "auth"]);
   const { confirm } = useDialog();
@@ -145,11 +151,20 @@ export default function App() {
   const [visitedTabs, setVisitedTabs] = useState<TabId[]>(() => [activeTab]);
 
   // 员工管理、考勤计算、薪资核算按 v2 可见界面顺序恢复；旧后台兼容字段只留在接口层处理。
-  const [session, setSession] = useState<Session | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
-  const [googleSigningIn, setGoogleSigningIn] = useState(false);
-  const [emailAuthLoading, setEmailAuthLoading] = useState(false);
-  const [authError, setAuthError] = useState("");
+  const {
+    session,
+    authLoading,
+    googleSigningIn,
+    emailAuthLoading,
+    authError,
+    handleEmailAuth,
+    handleGoogleLogin,
+    handleSignOut,
+  } = useAdminAuth({
+    canonicalPath: routeState.canonicalPath,
+    isGooglePopupCallback,
+    tAdmin,
+  });
   const [employees, setEmployees] = useState<Employee[]>(INITIAL_EMPLOYEES);
   // customers/goods/expenses 三个 v3 模块现在统一走账号级服务端快照；壳层只保留 keep-alive 与 optimistic 回写，不再依赖浏览器本地存储，避免多设备与多标签页状态漂移。
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -173,9 +188,6 @@ export default function App() {
   const [employeeListReloadKey, setEmployeeListReloadKey] = useState(0);
   const bootstrapCheckedSessionRef = useRef<string | null>(null);
   const employeeDetailRequestIdRef = useRef(0);
-  const popupPollTimerRef = useRef<number | null>(null);
-  const popupWindowRef = useRef<Window | null>(null);
-  const popupResolvedRef = useRef(false);
   const customersLoadedRef = useRef(false);
   const goodsLoadedRef = useRef(false);
   const expensesLoadedRef = useRef(false);
@@ -209,19 +221,28 @@ export default function App() {
 
   useEffect(() => {
     if (isGooglePopupCallback) {
+      writeAdminDevCause("popup-callback-screen");
       return;
     }
 
     if (location.pathname === "/") {
       const detectedLanguage = normalizeLanguage(i18n.resolvedLanguage || i18n.language);
-      navigate(buildAdminRoute(detectedLanguage, activeTab), { replace: true });
+      const targetPath = buildAdminRoute(detectedLanguage, activeTab);
+      bumpAdminDevCounter(ADMIN_DEV_ROUTE_COUNT_KEY);
+      writeAdminDevCause(`route-root-redirect:${location.pathname}->${targetPath}`);
+      navigate(targetPath, { replace: true });
       return;
     }
 
     if (location.pathname !== routeState.canonicalPath) {
       // 所有非法/不完整 admin 路径都统一 replace 到规范 URL，避免页面状态和 URL 分叉。
+      bumpAdminDevCounter(ADMIN_DEV_ROUTE_COUNT_KEY);
+      writeAdminDevCause(`route-canonicalize:${location.pathname}->${routeState.canonicalPath}`);
       navigate({ pathname: routeState.canonicalPath, search: location.search, hash: location.hash }, { replace: true });
+      return;
     }
+
+    writeAdminDevCause(`route-stable:${routeState.canonicalPath}`);
   }, [activeTab, i18n.language, i18n.resolvedLanguage, isGooglePopupCallback, location.hash, location.pathname, location.search, navigate, routeState.canonicalPath]);
 
   useEffect(() => {
@@ -352,6 +373,8 @@ export default function App() {
         );
       case "attendance":
         return <AttendanceTable isActive={isActive} />;
+      case "leave":
+        return <LeaveRequestTable isActive={isActive} />;
       case "payroll":
         return <PayrollTable isActive={isActive} />;
       case "sop":
@@ -390,169 +413,6 @@ export default function App() {
         return null;
     }
   };
-
-  const clearPopupPollTimer = () => {
-    if (popupPollTimerRef.current !== null) {
-      window.clearInterval(popupPollTimerRef.current);
-      popupPollTimerRef.current = null;
-    }
-  };
-
-  const clearPopupWindow = () => {
-    closePopupWindow(popupWindowRef.current);
-    popupWindowRef.current = null;
-  };
-
-  const closeCurrentPopupWindow = () => {
-    window.open("", "_self");
-    window.close();
-  };
-
-  const postPopupResultToOpener = (message: GoogleAuthPopupMessage) => {
-    if (!window.opener) {
-      return;
-    }
-
-    window.opener.postMessage(message, window.location.origin);
-  };
-
-  useEffect(() => {
-    let mounted = true;
-
-    logGoogleAuth("admin", "Bootstrapping admin auth state", {
-      href: window.location.href,
-      isGooglePopupCallback,
-      hasOpener: Boolean(window.opener)
-    });
-
-    void supabase.auth.getSession().then(({ data, error }) => {
-      if (!mounted) return;
-
-      logGoogleAuth("admin", "getSession resolved", {
-        hasSession: Boolean(data.session),
-        isGooglePopupCallback,
-        error: error?.message
-      });
-
-      if (isGooglePopupCallback) {
-        if (data.session) {
-          logGoogleAuth("admin", "Popup callback has session, notifying opener");
-          postPopupResultToOpener({ type: GOOGLE_AUTH_MESSAGE_TYPE, status: "success" });
-          closeCurrentPopupWindow();
-          return;
-        }
-
-        const popupError = getOAuthErrorFromCurrentUrl();
-        if (error || popupError) {
-          const message = error?.message || popupError || tAdmin("Google 登录失败");
-          logGoogleAuth("admin", "Popup callback contains oauth error", { error: message });
-          postPopupResultToOpener({
-            type: GOOGLE_AUTH_MESSAGE_TYPE,
-            status: "error",
-            error: message,
-          });
-          closeCurrentPopupWindow();
-          return;
-        }
-
-        logGoogleAuth("admin", "Popup callback has no session yet, waiting for auth state change");
-        setAuthLoading(false);
-        return;
-      }
-
-      if (error) {
-        logGoogleAuth("admin", "getSession returned error", { error: error.message });
-        setAuthError(error.message);
-      }
-
-      setSession(data.session);
-      setAuthLoading(false);
-    });
-
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      logGoogleAuth("admin", "onAuthStateChange fired", {
-        event: _event,
-        hasSession: Boolean(nextSession),
-        isGooglePopupCallback
-      });
-
-      if (isGooglePopupCallback && nextSession) {
-        logGoogleAuth("admin", "Popup callback received session from auth state change");
-        postPopupResultToOpener({ type: GOOGLE_AUTH_MESSAGE_TYPE, status: "success" });
-        closeCurrentPopupWindow();
-        return;
-      }
-
-      if (isGooglePopupCallback) {
-        return;
-      }
-
-      if (nextSession?.access_token) {
-        popupResolvedRef.current = true;
-        clearPopupPollTimer();
-        clearPopupWindow();
-      }
-
-      setSession(nextSession);
-      setAuthError("");
-      setGoogleSigningIn(false);
-      setEmailAuthLoading(false);
-      setAuthLoading(false);
-    });
-
-    return () => {
-      mounted = false;
-      clearPopupPollTimer();
-      clearPopupWindow();
-      listener.subscription.unsubscribe();
-    };
-  }, [isGooglePopupCallback]);
-
-  useEffect(() => {
-    if (isGooglePopupCallback) {
-      return;
-    }
-
-    const handleMessage = (event: MessageEvent<GoogleAuthPopupMessage>) => {
-      if (event.origin !== window.location.origin) {
-        return;
-      }
-
-      if (event.data?.type !== GOOGLE_AUTH_MESSAGE_TYPE) {
-        return;
-      }
-
-      popupResolvedRef.current = true;
-      clearPopupPollTimer();
-
-      if (event.data.status === "success") {
-        clearPopupWindow();
-        void supabase.auth.getSession().then(({ data, error }) => {
-          if (error) {
-            setGoogleSigningIn(false);
-            setAuthError(error.message);
-            return;
-          }
-
-          setSession(data.session);
-          setAuthError("");
-          setGoogleSigningIn(false);
-          setEmailAuthLoading(false);
-        });
-        return;
-      }
-
-      clearPopupWindow();
-      setGoogleSigningIn(false);
-      setAuthError(event.data.error || tAdmin("Google 登录失败，请重试。"));
-    };
-
-    window.addEventListener("message", handleMessage);
-
-    return () => {
-      window.removeEventListener("message", handleMessage);
-    };
-  }, [isGooglePopupCallback]);
 
   useEffect(() => {
     const sessionUserId = session?.user?.id || null;
@@ -676,138 +536,12 @@ export default function App() {
     }
   };
 
-  const handleEmailAuth = async (payload: AdminEmailAuthPayload) => {
-    const email = payload.email.trim().toLowerCase();
-    const password = payload.password;
-    const confirmPassword = payload.confirmPassword;
-
-    setAuthError("");
-
-    if (!/^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(email)) {
-      setAuthError(tAdmin("请输入正确的邮箱"));
-      return;
-    }
-
-    if (!/^(?=.*[A-Za-z])(?=.*\d).{8,}$/.test(password)) {
-      setAuthError(tAdmin("密码至少 8 位，并且需要同时包含字母和数字"));
-      return;
-    }
-
-    if (payload.mode === "register" && password !== confirmPassword) {
-      setAuthError(tAdmin("两次输入的密码不一致"));
-      return;
-    }
-
-    setEmailAuthLoading(true);
-    try {
-      const result = payload.mode === "register"
-        ? await supabase.auth.signUp({
-            email,
-            password,
-            options: {
-              emailRedirectTo: window.location.origin + routeState.canonicalPath
-            }
-          })
-        : await supabase.auth.signInWithPassword({ email, password });
-
-      if (result.error) {
-        throw result.error;
-      }
-
-      if (result.data.session) {
-        setSession(result.data.session);
-        setAuthError("");
-        return;
-      }
-
-      if (payload.mode === "register") {
-        setAuthError(tAdmin("注册成功，请先到邮箱完成验证后再登录。"));
-        return;
-      }
-
-      setAuthError(tAdmin("登录成功但未获取到会话，请刷新后重试。"));
-    } catch (error) {
-      setAuthError(error instanceof Error ? error.message : tAdmin("邮箱认证失败，请重试。"));
-    } finally {
-      setEmailAuthLoading(false);
-    }
-  };
-
-  const handleGoogleLogin = async () => {
-    setGoogleSigningIn(true);
-    setAuthError("");
-
-    popupResolvedRef.current = false;
-    clearPopupPollTimer();
-
-    const redirectTo = buildGooglePopupCallbackUrl(window.location.origin);
-    logGoogleAuth("admin", "Starting same-origin Google popup login", { redirectTo });
-
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo,
-        skipBrowserRedirect: true,
-      }
-    });
-
-    if (error) {
-      setGoogleSigningIn(false);
-      setAuthError(error.message);
-      return;
-    }
-
-    if (!data?.url) {
-      setGoogleSigningIn(false);
-      setAuthError(tAdmin("未获取到 Google 登录地址，请稍后重试。"));
-      return;
-    }
-
-    const popup = openCenteredPopup(data.url, GOOGLE_POPUP_NAME);
-
-    if (!popup) {
-      setGoogleSigningIn(false);
-      setAuthError(tAdmin("浏览器拦截了登录弹窗，请允许弹窗后重试。"));
-      return;
-    }
-
-    popupWindowRef.current = popup;
-    popup.focus();
-
-    popupPollTimerRef.current = window.setInterval(() => {
-      let popupClosed = false;
-
-      try {
-        popupClosed = popup.closed;
-      } catch {
-        // OAuth middle pages can temporarily block `closed` through COOP.
-        return;
-      }
-
-      if (!popupClosed) {
-        return;
-      }
-
-      clearPopupPollTimer();
-      popupWindowRef.current = null;
-
-      if (!popupResolvedRef.current) {
-        setGoogleSigningIn(false);
-        setAuthError(tAdmin("你已关闭 Google 登录弹窗，请重试。"));
-      }
-    }, GOOGLE_POPUP_POLL_MS);
-  };
-
-  const handleSignOut = async () => {
-    await supabase.auth.signOut();
-    setSession(null);
-    setGoogleSigningIn(false);
-    setEmailAuthLoading(false);
+  const handleSignOutAndResetWorkspace = async () => {
+    await handleSignOut();
     setEmployees([]);
     setAttendanceRuleList([]);
     setWorkspaceBootstrapDismissed(true);
   };
-
   const handleBootstrapWorkspace = async () => {
     setWorkspaceBootstrapping(true);
     try {
@@ -1089,14 +823,16 @@ export default function App() {
 
   const pageTitle = useMemo(() => {
     const titles: Record<TabId, string> = {
-      dashboard: t('数据看板'),
-      employees: t('员工管理'),
-      attendance: t('考勤计算'),
-      payroll: t('薪资核算'),
-      sop: t('SOP管理'),
-      customers: t('客户管理'),
-      goods: t('入库管理'),
-      expenses: t('费用管理')
+      // Header 改成“分组 · 子项”后，页面上下文能和树形导航保持一致；用户从分享链接或刷新直接进入二级页时，也能立刻知道自己位于哪个业务域。
+      dashboard: t('员工管理 · 数据看板'),
+      employees: t('员工管理 · 员工列表'),
+      attendance: t('员工管理 · 考勤计算'),
+      leave: t('员工管理 · 请假管理'),
+      payroll: t('员工管理 · 薪资核算'),
+      sop: t('流程管理 · SOP管理'),
+      customers: t('客户管理 · 客户列表'),
+      goods: t('仓储管理 · 入库管理'),
+      expenses: t('财务管理 · 费用管理')
     };
     return titles[activeTab];
   }, [activeTab, t]);
@@ -1146,7 +882,7 @@ export default function App() {
           currentLanguage={currentLanguage}
           onLanguageChange={handleLanguageRouteChange}
           userEmail={session.user.email}
-          onSignOut={handleSignOut}
+          onSignOut={handleSignOutAndResetWorkspace}
         />
 
         <div className="flex-1 overflow-y-auto p-6 scroll-smooth relative">

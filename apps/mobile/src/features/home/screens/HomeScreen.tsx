@@ -296,16 +296,17 @@ export function HomeScreen() {
 
       <View style={styles.noticeCard}>
         <View style={styles.noticeHeader}>
+          {/* 首页通知头需要兼容英文等更长词条：左侧标题可收缩，右侧入口保持短文案，避免 unread badge 与 action 文案互相挤压。 */}
           <View style={styles.noticeTitleWrap}>
-            <Text style={styles.noticeTitle}>{t('系统通知')}</Text>
+            <Text style={styles.noticeTitle} numberOfLines={1}>{t('系统通知')}</Text>
             {homeSummary?.unreadNotificationCount ? (
               <View style={styles.noticeBadge}>
                 <Text style={styles.noticeBadgeText}>{homeSummary.unreadNotificationCount}</Text>
               </View>
             ) : null}
           </View>
-          <Pressable onPress={() => router.push('/notifications')}>
-            <Text style={styles.noticeAction}>{t('查看全部')}</Text>
+          <Pressable onPress={() => router.push('/notifications')} style={styles.noticeActionWrap}>
+            <Text style={styles.noticeAction} numberOfLines={1}>{t('查看全部')}</Text>
           </Pressable>
         </View>
 
@@ -342,7 +343,7 @@ export function HomeScreen() {
 function StatCard({label, value, unit}: {label: string; value: string; unit: string}) {
   return (
     <View style={styles.statCard}>
-      <Text style={styles.statLabel}>{label}</Text>
+      <Text style={styles.statLabel} numberOfLines={2}>{label}</Text>
       <Text style={styles.statValue}>
         {value}
         <Text style={styles.statUnit}>{unit}</Text>
@@ -375,7 +376,7 @@ function NoticeRow({
       </View>
       <View style={styles.noticeCopy}>
         <View style={styles.noticeRowTitleWrap}>
-          <Text style={styles.noticeRowTitle}>{title}</Text>
+          <Text style={styles.noticeRowTitle} numberOfLines={1}>{title}</Text>
           {unread ? <View style={styles.noticeUnreadDot} /> : null}
         </View>
         <Text style={styles.noticeRowDetail} numberOfLines={2}>{detail}</Text>
@@ -387,23 +388,25 @@ function NoticeRow({
 
 const styles = StyleSheet.create({
   statsGrid: {marginTop: 16, flexDirection: 'row', gap: 12},
+  // 首页统计卡在中英文切换时都保持三列，因此标题默认允许两行并取消全大写/大字距，优先保证小屏上的可读性。
   statCard: {flex: 1, minHeight: 94, paddingHorizontal: 14, paddingVertical: 18, borderRadius: 24, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center', shadowColor: colors.text, shadowOpacity: 0.03, shadowRadius: 16, shadowOffset: {width: 0, height: 6}, elevation: 2, borderWidth: 1, borderColor: '#f8fafc'},
-  statLabel: {fontSize: 10, color: colors.textMuted, fontWeight: '900', letterSpacing: 1.2, textTransform: 'uppercase'},
+  statLabel: {fontSize: 10, lineHeight: 13, color: colors.textMuted, fontWeight: '900', textAlign: 'center', flexShrink: 1},
   statValue: {marginTop: 8, fontSize: 24, lineHeight: 28, color: colors.text, fontWeight: '900'},
   statUnit: {fontSize: 11, color: colors.textMuted, fontWeight: '800'},
   noticeCard: {marginTop: 16, padding: 20, borderRadius: 28, backgroundColor: colors.white, shadowColor: colors.text, shadowOpacity: 0.03, shadowRadius: 20, shadowOffset: {width: 0, height: 8}, elevation: 3, borderWidth: 1, borderColor: '#f1f5f9'},
-  noticeHeader: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10},
-  noticeTitleWrap: {flexDirection: 'row', alignItems: 'center', gap: 8},
-  noticeTitle: {fontSize: 13, color: colors.text, fontWeight: '900', letterSpacing: 1.4, textTransform: 'uppercase'},
-  noticeAction: {fontSize: 11, color: colors.primary, fontWeight: '900', letterSpacing: 1},
-  noticeBadge: {minWidth: 20, height: 20, borderRadius: 999, paddingHorizontal: 6, backgroundColor: '#dbeafe', alignItems: 'center', justifyContent: 'center'},
+  noticeHeader: {flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 10},
+  noticeTitleWrap: {flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, minWidth: 0},
+  noticeTitle: {fontSize: 13, lineHeight: 17, color: colors.text, fontWeight: '900', flexShrink: 1},
+  noticeActionWrap: {flexShrink: 0, maxWidth: 88},
+  noticeAction: {fontSize: 11, color: colors.primary, fontWeight: '900', textAlign: 'right'},
+  noticeBadge: {minWidth: 20, height: 20, borderRadius: 999, paddingHorizontal: 6, backgroundColor: '#dbeafe', alignItems: 'center', justifyContent: 'center', flexShrink: 0},
   noticeBadgeText: {fontSize: 11, color: colors.primary, fontWeight: '900'},
   noticeRow: {flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 12},
   noticeRowPressed: {opacity: 0.72},
-  noticeIconWrap: {width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center'},
-  noticeCopy: {flex: 1},
-  noticeRowTitleWrap: {flexDirection: 'row', alignItems: 'center', gap: 8},
-  noticeRowTitle: {fontSize: 14, color: colors.text, fontWeight: '800'},
+  noticeIconWrap: {width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center', flexShrink: 0},
+  noticeCopy: {flex: 1, minWidth: 0},
+  noticeRowTitleWrap: {flexDirection: 'row', alignItems: 'center', gap: 8, minWidth: 0},
+  noticeRowTitle: {fontSize: 14, lineHeight: 18, color: colors.text, fontWeight: '800', flexShrink: 1},
   noticeRowDetail: {marginTop: 2, fontSize: 12, lineHeight: 18, color: colors.textSubtle, fontWeight: '600'},
-  noticeUnreadDot: {width: 8, height: 8, borderRadius: 999, backgroundColor: colors.primary},
+  noticeUnreadDot: {width: 8, height: 8, borderRadius: 999, backgroundColor: colors.primary, flexShrink: 0},
 });

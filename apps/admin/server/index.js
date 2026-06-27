@@ -324,6 +324,17 @@ function pushMobileDebugLog(entry) {
   }
 }
 
+function isPrivateIpv4Host(hostname) {
+  const parts = String(hostname || "").split(".").map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return false;
+  }
+
+  return parts[0] === 10
+    || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31)
+    || (parts[0] === 192 && parts[1] === 168);
+}
+
 function isAllowedCorsOrigin(origin) {
   if (!origin) {
     return false;
@@ -335,7 +346,11 @@ function isAllowedCorsOrigin(origin) {
 
   try {
     const url = new URL(origin);
-    return ["localhost", "127.0.0.1"].includes(url.hostname);
+    // Mobile web 调试经常通过局域网 IP 或 Tailscale MagicDNS 从别的设备访问本机页面；
+    // 这里放行私网 IPv4 和 `*.ts.net` 源，仅扩大浏览器可读响应范围，不会绕过现有员工端鉴权。
+    return ["localhost", "127.0.0.1"].includes(url.hostname)
+      || isPrivateIpv4Host(url.hostname)
+      || url.hostname.endsWith(".ts.net");
   } catch {
     return false;
   }
@@ -4038,6 +4053,446 @@ async function fetchMobileHomeSummary(ownerUserId, employeeId) {
   };
 }
 
+const MOBILE_LEAVE_TYPES = new Set(["personal", "sick", "annual", "special"]);
+const MOBILE_LEAVE_APPROVAL_STATUSES = new Set(["pending", "approved", "rejected"]);
+
+function normalizeLeaveType(value) {
+  const normalized = String(value || "").trim();
+  return MOBILE_LEAVE_TYPES.has(normalized) ? normalized : null;
+}
+
+function normalizeLeaveApprovalStatus(value) {
+  const normalized = String(value || "").trim();
+  return MOBILE_LEAVE_APPROVAL_STATUSES.has(normalized) ? normalized : null;
+}
+
+function isValidDateKey(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
+}
+
+function enumerateDateRange(startDate, endDate) {
+  const dates = [];
+  let cursor = startDate;
+  while (cursor <= endDate) {
+    dates.push(cursor);
+    cursor = addDaysToDateKey(cursor, 1);
+  }
+  return dates;
+}
+
+function countDateRangeDays(startDate, endDate) {
+  return enumerateDateRange(startDate, endDate).length;
+}
+
+function countOverlappingDateRangeDays(startDate, endDate, windowStartDate, windowEndDate) {
+  const overlapStart = startDate > windowStartDate ? startDate : windowStartDate;
+  const overlapEnd = endDate < windowEndDate ? endDate : windowEndDate;
+  if (overlapStart > overlapEnd) {
+    return 0;
+  }
+  return countDateRangeDays(overlapStart, overlapEnd);
+}
+
+function mapLeaveTypeToAttendanceType(type) {
+  return type === "sick" ? "sick_leave" : "leave";
+}
+
+function mapMobileLeaveRequestRow(row) {
+  return {
+    id: String(row.id),
+    type: normalizeLeaveType(row.type) || "personal",
+    durationDays: Number(row.duration_days || 0),
+    startDate: toDateKey(row.start_date),
+    endDate: toDateKey(row.end_date),
+    reason: String(row.reason || ""),
+    status: normalizeLeaveApprovalStatus(row.status) || "pending"
+  };
+}
+
+function mapAdminLeaveRequestRow(row) {
+  return {
+    ...mapMobileLeaveRequestRow(row),
+    // mobile 端沿用字符串 id 兼容旧存储键；admin 列表/审批状态与分页选择都按 number 建模，
+    // 必须在这里最后覆盖回数字 id，避免审批接口返回后把前端的 number 状态 silently 变成 string。
+    // 请假列表的“员工”列也要直接复用接口返回的展示字段，和薪资核算一致显示头像/工号/职位，避免前端再拼旧员工列表造成样式与信息口径不一致。
+    id: Number(row.id),
+    employeeId: Number(row.employee_id),
+    employeeNo: String(row.employees?.employee_no || ""),
+    employeeName: String(row.employees?.name || ""),
+    employeeDept: String(row.employees?.dept || ""),
+    employeeRole: String(row.employees?.role || ""),
+    employeePhoto: row.employees?.photo || null,
+    submittedAt: row.submitted_at || row.created_at || null,
+    approvedAt: row.approved_at || null,
+    rejectedAt: row.rejected_at || null,
+    approvalNote: row.approval_note || ""
+  };
+}
+
+async function fetchEmployeeBasicProfile(ownerUserId, employeeId) {
+  const { data, error } = await supabase
+    .from("employees")
+    .select("id, name, dept, join_date, status")
+    .eq("owner_user_id", ownerUserId)
+    .eq("id", Number(employeeId))
+    .maybeSingle();
+  if (error) {
+    throw error;
+  }
+  if (!data) {
+    throw new Error("员工不存在");
+  }
+  if (String(data.status || "") === "resigned") {
+    throw new Error("离职员工不能提交请假申请");
+  }
+  return data;
+}
+
+function validateLeaveDateRange({ startDate, endDate, joinDate = null }) {
+  if (!isValidDateKey(startDate) || !isValidDateKey(endDate)) {
+    throw new Error("请假日期格式不正确");
+  }
+  if (endDate < startDate) {
+    throw new Error("结束日期不能早于开始日期");
+  }
+  if (joinDate && startDate < joinDate) {
+    throw new Error("请假开始日期不能早于员工入职日期");
+  }
+}
+
+async function listOverlappingLeaveRequests({ ownerUserId, employeeId, startDate, endDate, statuses = ["pending", "approved"], excludeRequestId = null }) {
+  const { data, error } = await supabase
+    .from("leave_requests")
+    .select("id, start_date, end_date, status")
+    .eq("owner_user_id", ownerUserId)
+    .eq("employee_id", Number(employeeId))
+    .lte("start_date", endDate)
+    .gte("end_date", startDate)
+    .in("status", statuses);
+  if (error) {
+    throw error;
+  }
+  return (data || []).filter((row) => excludeRequestId == null || Number(row.id) != Number(excludeRequestId));
+}
+
+async function listAttendanceConflictRecords({ ownerUserId, employeeId, startDate, endDate, excludeLeaveRequestId = null }) {
+  const { data, error } = await supabase
+    .from("attendance_records")
+    .select("id, date, type, in_time, out_time, leave_request_id")
+    .eq("owner_user_id", ownerUserId)
+    .eq("employee_id", Number(employeeId))
+    .gte("date", startDate)
+    .lte("date", endDate)
+    .order("date", { ascending: true })
+    .order("id", { ascending: true });
+  if (error) {
+    throw error;
+  }
+  return (data || []).filter((row) => excludeLeaveRequestId == null || Number(row.leave_request_id || 0) != Number(excludeLeaveRequestId));
+}
+
+async function assertNoLeaveRequestConflicts({ ownerUserId, employeeId, startDate, endDate, excludeRequestId = null }) {
+  const conflicts = await listOverlappingLeaveRequests({ ownerUserId, employeeId, startDate, endDate, excludeRequestId });
+  if (conflicts.length > 0) {
+    throw new Error("该日期范围已存在待审批或已批准的请假申请");
+  }
+}
+
+async function assertNoAttendanceRecordConflicts({ ownerUserId, employeeId, startDate, endDate, excludeLeaveRequestId = null }) {
+  const conflicts = await listAttendanceConflictRecords({ ownerUserId, employeeId, startDate, endDate, excludeLeaveRequestId });
+  if (conflicts.length === 0) {
+    return;
+  }
+  const conflictDates = Array.from(new Set(conflicts.map((row) => toDateKey(row.date)).filter(Boolean)));
+  throw new Error(`该日期范围已存在考勤记录：${conflictDates.join(", ")}`);
+}
+
+async function fetchMobileLeaveSummary(ownerUserId, employeeId) {
+  const yearMonth = getBangkokDateKey().slice(0, 7);
+  const { periodStartDate, periodEndDate } = getMonthRange(yearMonth);
+  const [approvedResult, pendingResult] = await Promise.all([
+    supabase
+      .from("leave_requests")
+      .select("start_date, end_date")
+      .eq("owner_user_id", ownerUserId)
+      .eq("employee_id", Number(employeeId))
+      .eq("status", "approved")
+      .lte("start_date", periodEndDate)
+      .gte("end_date", periodStartDate),
+    supabase
+      .from("leave_requests")
+      .select("id", { count: "exact", head: true })
+      .eq("owner_user_id", ownerUserId)
+      .eq("employee_id", Number(employeeId))
+      .eq("status", "pending")
+  ]);
+
+  if (approvedResult.error) {
+    throw approvedResult.error;
+  }
+  if (pendingResult.error) {
+    throw pendingResult.error;
+  }
+
+  const monthUsedDays = (approvedResult.data || []).reduce((sum, row) => sum + countOverlappingDateRangeDays(toDateKey(row.start_date), toDateKey(row.end_date), periodStartDate, periodEndDate), 0);
+
+  return {
+    monthUsedDays,
+    pendingCount: Number(pendingResult.count || 0)
+  };
+}
+
+async function fetchMobileLeaveHistory(ownerUserId, employeeId) {
+  const { data, error } = await supabase
+    .from("leave_requests")
+    .select("*")
+    .eq("owner_user_id", ownerUserId)
+    .eq("employee_id", Number(employeeId))
+    .order("created_at", { ascending: false })
+    .limit(100);
+  if (error) {
+    throw error;
+  }
+  return (data || []).map(mapMobileLeaveRequestRow);
+}
+
+async function createMobileLeaveRequest({ ownerUserId, employeeId, body }) {
+  const type = normalizeLeaveType(body?.type);
+  if (!type) {
+    throw new Error("请假类型不正确");
+  }
+  const startDate = String(body?.startDate || "").trim();
+  const endDate = String(body?.endDate || "").trim();
+  const reason = String(body?.reason || "").trim();
+  if (!reason) {
+    throw new Error("请填写请假原因");
+  }
+
+  const employee = await fetchEmployeeBasicProfile(ownerUserId, employeeId);
+  validateLeaveDateRange({ startDate, endDate, joinDate: employee.join_date ? toDateKey(employee.join_date) : null });
+  await assertNoLeaveRequestConflicts({ ownerUserId, employeeId, startDate, endDate });
+  await assertNoAttendanceRecordConflicts({ ownerUserId, employeeId, startDate, endDate });
+
+  const now = new Date().toISOString();
+  const payload = {
+    owner_user_id: ownerUserId,
+    employee_id: Number(employeeId),
+    type,
+    start_date: startDate,
+    end_date: endDate,
+    duration_days: countDateRangeDays(startDate, endDate),
+    reason,
+    // pending 只代表“申请中”，不能提前写 attendance_records；正式考勤结果必须等待后台批准后再回写。
+    status: "pending",
+    submitted_at: now,
+    created_at: now,
+    updated_at: now
+  };
+
+  const { data, error } = await supabase
+    .from("leave_requests")
+    .insert(payload)
+    .select("*")
+    .single();
+  if (error) {
+    throw error;
+  }
+  return mapMobileLeaveRequestRow(data);
+}
+
+async function fetchLeaveRequestWithEmployee(ownerUserId, requestId) {
+  const { data, error } = await supabase
+    .from("leave_requests")
+    .select("*, employees(id, name, dept, join_date, status)")
+    .eq("owner_user_id", ownerUserId)
+    .eq("id", Number(requestId))
+    .maybeSingle();
+  if (error) {
+    throw error;
+  }
+  if (!data) {
+    throw new Error("请假申请不存在");
+  }
+  return data;
+}
+
+async function syncApprovedLeaveToAttendance(ownerUserId, leaveRequest) {
+  const startDate = toDateKey(leaveRequest.start_date);
+  const endDate = toDateKey(leaveRequest.end_date);
+  await assertNoLeaveRequestConflicts({
+    ownerUserId,
+    employeeId: Number(leaveRequest.employee_id),
+    startDate,
+    endDate,
+    excludeRequestId: Number(leaveRequest.id)
+  });
+  await assertNoAttendanceRecordConflicts({
+    ownerUserId,
+    employeeId: Number(leaveRequest.employee_id),
+    startDate,
+    endDate,
+    excludeLeaveRequestId: Number(leaveRequest.id)
+  });
+
+  const now = new Date().toISOString();
+  const dates = enumerateDateRange(startDate, endDate);
+  const attendanceType = mapLeaveTypeToAttendanceType(leaveRequest.type);
+  const rows = dates.map((date) => ({
+    owner_user_id: ownerUserId,
+    employee_id: Number(leaveRequest.employee_id),
+    date,
+    type: attendanceType,
+    in_time: null,
+    out_time: null,
+    note: `员工端请假审批通过：${leaveRequest.type}`,
+    source: "mobile",
+    leave_request_id: Number(leaveRequest.id),
+    created_at: now,
+    updated_at: now
+  }));
+
+  const { error } = await supabase.from("attendance_records").insert(rows);
+  if (error) {
+    throw error;
+  }
+
+  const attendanceConfig = await resolveAttendanceConfig(ownerUserId);
+  const todayDate = getBangkokDateKey();
+  for (const date of dates) {
+    if (date > todayDate) {
+      continue;
+    }
+    const record = await fetchMobileAttendanceRecord(ownerUserId, leaveRequest.employee_id, date);
+    const dailyContext = await fetchScopedDailyCalculationContext({
+      ownerUserId,
+      employeeId: leaveRequest.employee_id,
+      date,
+      attendanceConfig,
+      record
+    });
+    scheduleDailyAttendanceRecalculation({
+      ownerUserId,
+      employeeId: leaveRequest.employee_id,
+      date,
+      context: dailyContext,
+      options: {
+        pendingIfNoRecord: date == getBangkokDateKey(),
+        inProgressIfMissingOut: date == getBangkokDateKey(),
+        generatedBy: date == getBangkokDateKey() ? "draft_job" : "manual_recalculate"
+      }
+    });
+  }
+
+  const impactedMonths = Array.from(new Set(dates.map((date) => date.slice(0, 7)).filter((yearMonth) => yearMonth <= todayDate.slice(0, 7))));
+  impactedMonths.forEach((yearMonth) => scheduleMonthlyAttendanceRecalculation(yearMonth, ownerUserId, leaveRequest.employee_id));
+}
+
+async function listAdminLeaveRequests({ ownerUserId, status, employeeId, page, pageSize }) {
+  const safePage = Math.max(1, Number(page || 1));
+  const safePageSize = Math.min(100, Math.max(1, Number(pageSize || 20)));
+  const from = (safePage - 1) * safePageSize;
+  const to = from + safePageSize - 1;
+  let query = supabase
+    .from("leave_requests")
+    .select("*, employees(id, employee_no, name, dept, role, photo)", { count: "exact" })
+    .eq("owner_user_id", ownerUserId)
+    .order("created_at", { ascending: false })
+    .range(from, to);
+
+  const normalizedStatus = normalizeLeaveApprovalStatus(status);
+  if (normalizedStatus) {
+    query = query.eq("status", normalizedStatus);
+  }
+  if (Number(employeeId)) {
+    query = query.eq("employee_id", Number(employeeId));
+  }
+
+  const { data, error, count } = await query;
+  if (error) {
+    throw error;
+  }
+
+  return {
+    items: (data || []).map(mapAdminLeaveRequestRow),
+    total: Number(count || 0),
+    page: safePage,
+    pageSize: safePageSize
+  };
+}
+
+async function approveLeaveRequest({ ownerUserId, requestId, approverUserId, approvalNote }) {
+  const existing = await fetchLeaveRequestWithEmployee(ownerUserId, requestId);
+  if (existing.status !== "pending") {
+    throw new Error("只有待审批的请假申请才能批准");
+  }
+
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("leave_requests")
+    .update({
+      status: "approved",
+      approver_user_id: approverUserId,
+      approval_note: approvalNote || null,
+      approved_at: now,
+      rejected_at: null,
+      updated_at: now
+    })
+    .eq("owner_user_id", ownerUserId)
+    .eq("id", Number(requestId))
+    .select("*, employees(id, employee_no, name, dept, role, photo)")
+    .single();
+  if (error) {
+    throw error;
+  }
+
+  try {
+    // 批准后才允许把请假展开成正式考勤记录；pending/rejected 不得污染 attendance_records 与月汇总。
+    await syncApprovedLeaveToAttendance(ownerUserId, data);
+  } catch (error) {
+    await supabase
+      .from("leave_requests")
+      .update({
+        status: "pending",
+        approver_user_id: null,
+        approval_note: null,
+        approved_at: null,
+        updated_at: new Date().toISOString()
+      })
+      .eq("owner_user_id", ownerUserId)
+      .eq("id", Number(requestId));
+    throw error;
+  }
+
+  return mapAdminLeaveRequestRow(data);
+}
+
+async function rejectLeaveRequest({ ownerUserId, requestId, approverUserId, approvalNote }) {
+  const existing = await fetchLeaveRequestWithEmployee(ownerUserId, requestId);
+  if (existing.status !== "pending") {
+    throw new Error("只有待审批的请假申请才能驳回");
+  }
+
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("leave_requests")
+    .update({
+      status: "rejected",
+      approver_user_id: approverUserId,
+      approval_note: approvalNote || null,
+      approved_at: null,
+      rejected_at: now,
+      updated_at: now
+    })
+    .eq("owner_user_id", ownerUserId)
+    .eq("id", Number(requestId))
+    .select("*, employees(id, employee_no, name, dept, role, photo)")
+    .single();
+  if (error) {
+    throw error;
+  }
+  return mapAdminLeaveRequestRow(data);
+}
+
 function mapEmployeeNotificationRow(row) {
   return {
     id: Number(row.id),
@@ -4165,6 +4620,37 @@ app.get("/api/mobile/attendance/records", requireEmployeeAppAuth, async (req, re
     res.json(records.map((row) => mapMobileAttendanceRecordWithCalculation(row, calculationMap.get(Number(row.id)))));
   } catch (error) {
     res.status(500).json({ error: error.message || "员工端考勤记录加载失败" });
+  }
+});
+
+app.get("/api/mobile/attendance/leave/summary", requireEmployeeAppAuth, async (req, res) => {
+  try {
+    const result = await fetchMobileLeaveSummary(req.employeeApp.ownerUserId, req.employeeApp.employeeId);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "员工端请假汇总加载失败" });
+  }
+});
+
+app.get("/api/mobile/attendance/leave/history", requireEmployeeAppAuth, async (req, res) => {
+  try {
+    const result = await fetchMobileLeaveHistory(req.employeeApp.ownerUserId, req.employeeApp.employeeId);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "员工端请假历史加载失败" });
+  }
+});
+
+app.post("/api/mobile/attendance/leave/request", requireEmployeeAppAuth, async (req, res) => {
+  try {
+    const result = await createMobileLeaveRequest({
+      ownerUserId: req.employeeApp.ownerUserId,
+      employeeId: req.employeeApp.employeeId,
+      body: req.body || {}
+    });
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "提交请假申请失败" });
   }
 });
 
@@ -6074,6 +6560,54 @@ app.delete("/api/admin/salary-adjustment-items/:id", async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message || "删除一次性薪资项失败" });
+  }
+});
+
+app.get("/api/admin/leave-requests", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const result = await listAdminLeaveRequests({
+      ownerUserId,
+      status: req.query.status,
+      employeeId: req.query.employeeId,
+      page: req.query.page,
+      pageSize: req.query.pageSize
+    });
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "请假申请列表加载失败" });
+  }
+});
+
+app.patch("/api/admin/leave-requests/:id/approve", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const approverUserId = req.authUser.adminAuthUserId || req.authUser.id;
+    const result = await approveLeaveRequest({
+      ownerUserId,
+      requestId: req.params.id,
+      approverUserId,
+      approvalNote: String(req.body?.approvalNote || "").trim()
+    });
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "批准请假申请失败" });
+  }
+});
+
+app.patch("/api/admin/leave-requests/:id/reject", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser.id;
+    const approverUserId = req.authUser.adminAuthUserId || req.authUser.id;
+    const result = await rejectLeaveRequest({
+      ownerUserId,
+      requestId: req.params.id,
+      approverUserId,
+      approvalNote: String(req.body?.approvalNote || "").trim()
+    });
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "驳回请假申请失败" });
   }
 });
 

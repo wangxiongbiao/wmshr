@@ -761,7 +761,11 @@ export function ExpenseManager({ employees, expenses, categories, onUpdateExpens
                       {/* 费用名称与类型 */}
                       <td className="px-5 py-4">
                         <div>
-                          <div className="font-semibold text-slate-800 line-clamp-1 group-hover:text-brand-700 transition">
+                          {/* 费用名称里经常包含月份、用途和规格；这里保留两行并提供 title，避免列表里把长名称误看成数据写错。 */}
+                          <div
+                            className="font-semibold text-slate-800 line-clamp-2 break-words leading-5 group-hover:text-brand-700 transition"
+                            title={rec.name}
+                          >
                             {rec.name}
                           </div>
                           <div className="flex items-center gap-1.5 mt-1">

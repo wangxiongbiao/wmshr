@@ -1,5 +1,8 @@
 import { supabase } from "./supabase";
 import {
+  AdminLeaveRequestApprovalPayload,
+  AdminLeaveRequestItem,
+  AdminLeaveRequestPage,
   AppConfig,
   AttendanceCalculationDetail,
   AttendanceCalculationPage,
@@ -66,6 +69,7 @@ async function request<T>(input: string, init?: RequestInit): Promise<T> {
 const employeePageRequestCache = new Map<string, Promise<EmployeeListPage>>();
 const employeeCountRequestCache = new Map<string, Promise<number>>();
 const attendanceCalculationPageRequestCache = new Map<string, Promise<AttendanceCalculationPage>>();
+const leaveRequestPageRequestInFlight = new Map<string, Promise<AdminLeaveRequestPage>>();
 const PAYROLL_RESULTS_CACHE_TTL_MS = 1000 * 15;
 const PAYROLL_RESULT_DETAIL_CACHE_TTL_MS = 1000 * 30;
 const payrollResultsCache = new Map<string, { data: PayrollResultPage; expiresAt: number }>();
@@ -409,7 +413,7 @@ export async function updateAttendanceConfig(payload: AppConfig): Promise<AppCon
   return data;
 }
 
-export async function fetchAttendanceCalculations(params: {
+export interface AttendanceCalculationQueryParams {
   keyword?: string;
   yearMonth?: string;
   date?: string;
@@ -420,7 +424,9 @@ export async function fetchAttendanceCalculations(params: {
   includeInactive?: boolean;
   page: number;
   pageSize: number;
-}): Promise<AttendanceCalculationPage> {
+}
+
+export async function fetchAttendanceCalculations(params: AttendanceCalculationQueryParams): Promise<AttendanceCalculationPage> {
   // v2 原型有“全部时间/按天/按月”三种筛选；yearMonth 只在按月或按天辅助查询时传，全部时间不能被前端硬塞当前月份。
   const search = new URLSearchParams({
     page: String(params.page),
@@ -468,6 +474,26 @@ export async function fetchAttendanceCalculationDetail(resultId: number): Promis
   return request<AttendanceCalculationDetail>(`/api/admin/attendance-calculations/${resultId}`);
 }
 
+export async function fetchAllAttendanceCalculations(params: Omit<AttendanceCalculationQueryParams, "page" | "pageSize">): Promise<AttendanceCalculationResult[]> {
+  // 导出等全量场景必须沿用列表接口的同一套筛选/映射口径，但不能复用当前分页结果，否则会误把“当前页”当成“当前筛选全部”。
+  const items: AttendanceCalculationResult[] = [];
+  let page = 1;
+  const pageSize = 100;
+
+  while (true) {
+    const currentPage = await fetchAttendanceCalculations({
+      ...params,
+      page,
+      pageSize
+    });
+    items.push(...currentPage.items);
+    if (!currentPage.hasMore || currentPage.items.length === 0) {
+      return items;
+    }
+    page += 1;
+  }
+}
+
 export async function createAttendanceRecord(payload: AttendanceRecordCreatePayload): Promise<AttendanceRecordAsyncResponse> {
   // 新增考勤记录改为快速写入 attendance_records，日/月重算在后台继续执行，避免管理员等待整月刷新。
   return request<AttendanceRecordAsyncResponse>("/api/admin/attendance-records", {
@@ -494,6 +520,54 @@ export async function fetchAttendanceSummaries(params: {
   }
 
   return request<MonthlyAttendanceSummary[]>(`/api/admin/attendance-summaries?${search.toString()}`);
+}
+
+export async function fetchAdminLeaveRequests(params: {
+  status?: string;
+  employeeId?: number | null;
+  page: number;
+  pageSize: number;
+}): Promise<AdminLeaveRequestPage> {
+  const search = new URLSearchParams({
+    page: String(params.page),
+    pageSize: String(params.pageSize)
+  });
+  if (params.status && params.status !== "all") {
+    search.set("status", params.status);
+  }
+  if (params.employeeId) {
+    search.set("employeeId", String(params.employeeId));
+  }
+
+  const requestPath = `/api/admin/leave-requests?${search.toString()}`;
+  const inFlight = leaveRequestPageRequestInFlight.get(requestPath);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const requestPromise = request<AdminLeaveRequestPage>(requestPath).finally(() => {
+    leaveRequestPageRequestInFlight.delete(requestPath);
+  });
+  leaveRequestPageRequestInFlight.set(requestPath, requestPromise);
+  return requestPromise;
+}
+
+export async function approveAdminLeaveRequest(requestId: number, payload: AdminLeaveRequestApprovalPayload = {}): Promise<AdminLeaveRequestItem> {
+  const data = await request<AdminLeaveRequestItem>(`/api/admin/leave-requests/${requestId}/approve`, {
+    method: "PATCH",
+    body: JSON.stringify({ approvalNote: payload.approvalNote || "" })
+  });
+  leaveRequestPageRequestInFlight.clear();
+  return data;
+}
+
+export async function rejectAdminLeaveRequest(requestId: number, payload: AdminLeaveRequestApprovalPayload = {}): Promise<AdminLeaveRequestItem> {
+  const data = await request<AdminLeaveRequestItem>(`/api/admin/leave-requests/${requestId}/reject`, {
+    method: "PATCH",
+    body: JSON.stringify({ approvalNote: payload.approvalNote || "" })
+  });
+  leaveRequestPageRequestInFlight.clear();
+  return data;
 }
 
 export async function fetchPayrollResults(params: {

@@ -5,6 +5,9 @@ export type LocalizedLocationName = Partial<Record<'zh' | 'en' | 'zht' | 'th' | 
   label?: string;
 };
 
+export type LeaveType = 'personal' | 'sick' | 'annual' | 'special';
+export type LeaveApprovalStatus = 'pending' | 'approved' | 'rejected';
+
 export interface TodayAttendanceStatus {
   date: string;
   status: AttendanceStatus;
@@ -43,6 +46,28 @@ export interface AttendanceRecord {
   type: 'normal' | 'overtime';
   hours: string;
   workedHours?: number | null;
+}
+
+export interface LeaveSummary {
+  monthUsedDays: number;
+  pendingCount: number;
+}
+
+export interface LeaveRecord {
+  id: string;
+  type: LeaveType;
+  durationDays: number;
+  startDate: string;
+  endDate: string;
+  reason: string;
+  status: LeaveApprovalStatus;
+}
+
+export interface LeaveRequestPayload {
+  type: LeaveType;
+  startDate: string;
+  endDate: string;
+  reason: string;
 }
 
 export interface EmployeeNotification {

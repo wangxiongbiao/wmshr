@@ -17,6 +17,7 @@ import {
   createAttendanceRecord,
   fetchAttendanceCalculationDetail,
   fetchAttendanceCalculations,
+  fetchAllAttendanceCalculations,
   fetchAttendanceConfig,
   fetchEmployeeAvatars,
   generateMonthlyPayroll,
@@ -228,6 +229,7 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
   const [adjustmentLoading, setAdjustmentLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
+  const [isExporting, setIsExporting] = useState(false);
   const [maintenanceMessage, setMaintenanceMessage] = useState("");
   const [error, setError] = useState("");
   const [lastLoadedAt, setLastLoadedAt] = useState(0);
@@ -259,16 +261,15 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
   };
   const employeeFilterOptions = useMemo(() => {
     const optionEmployees = mergeUniqueEmployees([selectedFilterEmployee, ...employeeFilterSearchResults]);
+    // 员工筛选统一只显示主文案；员工编号/岗位等信息继续保留在关键词里供搜索命中。
     return [
       {
         value: "all",
-        label: tAdmin("所有员工 (全部)"),
-        description: tAdmin("不过滤员工")
+        label: tAdmin("所有员工 (全部)")
       },
       ...optionEmployees.map((employee) => ({
         value: String(employee.id),
         label: formatEmployeeDisplayName(employee),
-        description: [employee.employeeNo, employee.role].filter(Boolean).join(" · "),
         keywords: [employee.name, employee.nickname, employee.employeeNo, employee.role, employee.dept]
       }))
     ];
@@ -570,86 +571,103 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
     }
   };
 
-  const handleExportCSV = () => {
-    const headers = [
-      tAdmin("日期"), tAdmin("员工姓名"), tAdmin("来源国家"), tAdmin("性别"), tAdmin("职位"), tAdmin("所属区域"),
-      tAdmin("时薪"), tAdmin("基本日薪"), tAdmin("上班时间"), tAdmin("下班时间"), tAdmin("有效工时"), tAdmin("加班工时"),
-      tAdmin("今天上班费用"), tAdmin("餐补费用"), tAdmin("加班费"), tAdmin("服务费"), tAdmin("合计费用"), tAdmin("考勤状态"), tAdmin("备注")
-    ];
-    const countryNames: Record<string, string> = { MM: tAdmin("缅甸"), TH: tAdmin("泰国"), CN: tAdmin("中国"), VN: tAdmin("越南"), KH: tAdmin("柬埔寨") };
-    const totals = calculations.reduce(
-      (acc, item) => {
-        acc.validHours += Number(item.validHours || 0);
-        acc.overtimeHours += Number(item.overtimePayHours || 0);
-        acc.workPay += Number(item.workPay || 0);
-        acc.mealAllowance += Number(item.mealAllowanceAmount || 0);
-        acc.overtimePay += Number(item.overtimePay || 0);
-        acc.serviceFee += Number(item.serviceFeeAmount || 0);
-        acc.totalPay += getAttendanceTotalPayWithService(item);
-        return acc;
-      },
-      { validHours: 0, overtimeHours: 0, workPay: 0, mealAllowance: 0, overtimePay: 0, serviceFee: 0, totalPay: 0 }
-    );
-    const rows = calculations.map((item) => {
-      const baseDailyWage = item.fixedSalary && item.fixedSalary > 0 ? item.fixedSalary / 30 : item.standardHours * (item.hourlyRate || 0);
-      const displayHourlyRate = item.fixedSalary && item.fixedSalary > 0 ? baseDailyWage / Math.max(1, item.standardHours) : item.hourlyRate || 0;
-      const isFixedSalaryEmployee = item.salaryType === "fixed";
-      return [
-        item.date,
-        item.employeeName,
-        countryNames[item.employeeCountry || ""] || item.employeeCountry || "-",
-        item.employeeGender === "female" ? tAdmin("女") : item.employeeGender === "male" ? tAdmin("男") : "-",
-        item.employeeRole || "-",
-        item.employeeDept || "-",
-        formatMoneyNumber(displayHourlyRate),
-        formatMoneyNumber(baseDailyWage),
-        item.rawInTime || "-",
-        item.rawOutTime || "-",
-        `${item.validHours.toFixed(2)}h`,
-        `${item.overtimePayHours.toFixed(2)}h`,
-        isFixedSalaryEmployee ? "-" : formatMoneyNumber(item.workPay),
-        formatMoneyNumber(item.mealAllowanceAmount),
-        formatMoneyNumber(item.overtimePay),
-        isFixedSalaryEmployee ? "-" : formatMoneyNumber(item.serviceFeeAmount),
-        isFixedSalaryEmployee ? "-" : formatCurrency(getAttendanceTotalPayWithService(item), item.currency),
-        getStatusMeta(item).label,
-        item.note || ""
+  const handleExportCSV = async () => {
+    setIsExporting(true);
+    setError("");
+    try {
+      const effectiveDate = selectedDate || undefined;
+      const effectiveMonth = selectedMonth || effectiveDate?.slice(0, 7);
+      const exportCalculations = await fetchAllAttendanceCalculations({
+        yearMonth: effectiveMonth,
+        date: effectiveDate,
+        employeeId: selectedEmployeeId === "all" ? null : selectedEmployeeId,
+        employeeStatus: resignedOnly ? "resigned" : "all",
+        includeInactive: resignedOnly
+      });
+      const headers = [
+        tAdmin("日期"), tAdmin("员工姓名"), tAdmin("来源国家"), tAdmin("性别"), tAdmin("职位"), tAdmin("所属区域"),
+        tAdmin("时薪"), tAdmin("基本日薪"), tAdmin("上班时间"), tAdmin("下班时间"), tAdmin("有效工时"), tAdmin("加班工时"),
+        tAdmin("今天上班费用"), tAdmin("餐补费用"), tAdmin("加班费"), tAdmin("服务费"), tAdmin("合计费用"), tAdmin("考勤状态"), tAdmin("备注")
       ];
-    });
-    // 导出底部合计必须和当前筛选结果同口径：只汇总工时/金额列，不伪造单价、时间点或状态字段。
-    const summaryRow = [
-      tAdmin("合计"),
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      `${totals.validHours.toFixed(2)}h`,
-      `${totals.overtimeHours.toFixed(2)}h`,
-      formatMoneyNumber(totals.workPay),
-      formatMoneyNumber(totals.mealAllowance),
-      formatMoneyNumber(totals.overtimePay),
-      formatMoneyNumber(totals.serviceFee),
-      formatMoneyNumber(totals.totalPay),
-      "",
-      ""
-    ];
-    // v2 导出严格使用当前表格接口返回值；这里只做 CSV 转义和 BOM，不再按旧规则在浏览器重算费用。
-    const csvContent = "\ufeff" + [headers, ...rows, summaryRow]
-      .map((row) => row.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(","))
-      .join("\n");
-    const url = URL.createObjectURL(new Blob([csvContent], { type: "text/csv;charset=utf-8;" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = tAdmin("海外仓考勤报表_{{date}}.csv", { date: getDefaultDate() });
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+      const countryNames: Record<string, string> = { MM: tAdmin("缅甸"), TH: tAdmin("泰国"), CN: tAdmin("中国"), VN: tAdmin("越南"), KH: tAdmin("柬埔寨") };
+      const totals = exportCalculations.reduce(
+        (acc, item) => {
+          acc.validHours += Number(item.validHours || 0);
+          acc.overtimeHours += Number(item.overtimePayHours || 0);
+          acc.workPay += Number(item.workPay || 0);
+          acc.mealAllowance += Number(item.mealAllowanceAmount || 0);
+          acc.overtimePay += Number(item.overtimePay || 0);
+          acc.serviceFee += Number(item.serviceFeeAmount || 0);
+          acc.totalPay += getAttendanceTotalPayWithService(item);
+          return acc;
+        },
+        { validHours: 0, overtimeHours: 0, workPay: 0, mealAllowance: 0, overtimePay: 0, serviceFee: 0, totalPay: 0 }
+      );
+      const rows = exportCalculations.map((item) => {
+        const baseDailyWage = item.fixedSalary && item.fixedSalary > 0 ? item.fixedSalary / 30 : item.standardHours * (item.hourlyRate || 0);
+        const displayHourlyRate = item.fixedSalary && item.fixedSalary > 0 ? baseDailyWage / Math.max(1, item.standardHours) : item.hourlyRate || 0;
+        const isFixedSalaryEmployee = item.salaryType === "fixed";
+        return [
+          item.date,
+          item.employeeName,
+          countryNames[item.employeeCountry || ""] || item.employeeCountry || "-",
+          item.employeeGender === "female" ? tAdmin("女") : item.employeeGender === "male" ? tAdmin("男") : "-",
+          item.employeeRole || "-",
+          item.employeeDept || "-",
+          formatMoneyNumber(displayHourlyRate),
+          formatMoneyNumber(baseDailyWage),
+          item.rawInTime || "-",
+          item.rawOutTime || "-",
+          `${item.validHours.toFixed(2)}h`,
+          `${item.overtimePayHours.toFixed(2)}h`,
+          isFixedSalaryEmployee ? "-" : formatMoneyNumber(item.workPay),
+          formatMoneyNumber(item.mealAllowanceAmount),
+          formatMoneyNumber(item.overtimePay),
+          isFixedSalaryEmployee ? "-" : formatMoneyNumber(item.serviceFeeAmount),
+          isFixedSalaryEmployee ? "-" : formatCurrency(getAttendanceTotalPayWithService(item), item.currency),
+          getStatusMeta(item).label,
+          item.note || ""
+        ];
+      });
+      // 导出底部合计必须和当前筛选结果同口径：只汇总工时/金额列，不伪造单价、时间点或状态字段。
+      const summaryRow = [
+        tAdmin("合计"),
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        `${totals.validHours.toFixed(2)}h`,
+        `${totals.overtimeHours.toFixed(2)}h`,
+        formatMoneyNumber(totals.workPay),
+        formatMoneyNumber(totals.mealAllowance),
+        formatMoneyNumber(totals.overtimePay),
+        formatMoneyNumber(totals.serviceFee),
+        formatMoneyNumber(totals.totalPay),
+        "",
+        ""
+      ];
+      // 导出必须按“当前筛选全部数据”单独拉全量结果；表格当前页只负责屏幕展示，不能再被当成导出数据源。
+      const csvContent = "\ufeff" + [headers, ...rows, summaryRow]
+        .map((row) => row.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(","))
+        .join("\n");
+      const url = URL.createObjectURL(new Blob([csvContent], { type: "text/csv;charset=utf-8;" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = tAdmin("海外仓考勤报表_{{date}}.csv", { date: getDefaultDate() });
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : tAdmin("考勤报表导出失败"));
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const handleOpenAdjustment = async (result: AttendanceCalculationResult) => {
@@ -854,13 +872,13 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
   };
 
   return (
-    <div className="h-full min-h-0 flex flex-col gap-4 animate-fade-in">
-      <div className="shrink-0">
-        {/* 考勤明细按固定 Header + 滚动 Content 组织：员工/时间筛选不随长表格滚走，表格区域独立滚动。 */}
-        <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col md:flex-row gap-4 items-end md:items-center text-sm">
-        <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4 w-full">
-          <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">{tAdmin("筛选员工")}</label>
+    <div className="h-full min-h-0 flex flex-col gap-6 animate-fade-in">
+      <section className="shrink-0 space-y-4">
+        {/* 考勤页头部改成紧凑工具栏：去掉标题与表单式 label，保留最小必要的占位符/按钮文案来表达筛选语义。 */}
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200/80 p-4 flex flex-col gap-3 text-sm">
+          <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
+          <div className="w-full sm:w-72">
             {/* 员工筛选改为远程搜索：默认不预取员工列表，只有输入关键词后才请求无分页搜索接口，真正生效的仍是选中的 employeeId。 */}
             <SearchableSelect
               key={filterSelectResetKey}
@@ -879,16 +897,14 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
               }}
               onQueryChange={(query) => void runEmployeeSearch(query, "filter")}
               loading={employeeFilterLoading}
-              placeholder={tAdmin("请选择员工")}
-              searchPlaceholder={tAdmin("输入姓名、昵称、工号后搜索")}
+              placeholder={tAdmin("员工")}
+              searchPlaceholder={tAdmin("搜索员工")}
               emptyText={tAdmin("没有匹配的员工")}
               className="w-full sm:w-72"
             />
           </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">{tAdmin("筛选年月")}</label>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <YearMonthPicker
                 value={selectedMonth}
                 onChange={(value) => {
@@ -907,7 +923,7 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
                   setSelectedDate(nextDay ? `${selectedMonth}-${nextDay}` : "");
                 }}
                 aria-label={tAdmin("日期")}
-                className="h-[38px] w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-brand-500 sm:max-w-[120px]"
+                className="h-[38px] w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-brand-500 sm:max-w-[120px]"
               >
                 <option value="">{tAdmin("日期")}</option>
                 {selectedMonthDayOptions.map((option) => (
@@ -918,36 +934,129 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
                 type="button"
                 onClick={() => setSelectedDate("")}
                 disabled={!selectedDate}
-                className="inline-flex h-[38px] items-center justify-center whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 sm:self-stretch"
+                className="inline-flex h-[34px] items-center justify-center whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 sm:self-stretch"
               >
                 {tAdmin("清除")}
               </button>
+          </div>
+
+            <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600 select-none">
+                <input
+                  type="checkbox"
+                  checked={resignedOnly}
+                  onChange={(event) => setResignedOnly(event.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                />
+                <span>{tAdmin("只看离职人员")}</span>
+            </label>
             </div>
+              <div className="flex w-full flex-wrap gap-2 xl:justify-end">
+                {showRefreshing ? (
+                  <span className="inline-flex h-[38px] items-center rounded-lg border border-brand-100 bg-brand-50 px-3 text-xs font-semibold text-brand-700">
+                    {tAdmin("刷新中")}
+                  </span>
+                ) : null}
+                {isFiltered ? (
+                  <button
+                    type="button"
+                    onClick={resetFilters}
+                    className="inline-flex h-[34px] items-center justify-center rounded-lg border border-red-200 bg-red-50 px-3 text-xs font-semibold text-red-600 transition hover:bg-red-100"
+                  >
+                    {tAdmin("清除")}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLastLoadedAt(0);
+                    void loadData();
+                  }}
+                  disabled={loading}
+                  className="inline-flex h-[34px] items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-60"
+                  title={tAdmin("按当前筛选条件刷新列表")}
+                >
+                  <RefreshCw className="w-4 h-4" />{loading ? tAdmin("刷新中") : tAdmin("刷新")}
+                </button>
+              </div>
           </div>
         </div>
 
-        <div className="flex flex-col items-start gap-2 md:items-end">
-          <label className="inline-flex items-center gap-2 text-xs text-slate-600 select-none">
-            <input
-              type="checkbox"
-              checked={resignedOnly}
-              onChange={(event) => setResignedOnly(event.target.checked)}
-              className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-            />
-            <span>{tAdmin("只看离职人员")}</span>
-          </label>
-        <div className="flex gap-2 flex-shrink-0">
-          {isFiltered && (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{tAdmin("当前结果")}</div>
+            <div className="mt-2 text-2xl font-bold text-slate-900">{displayedCalculations.length}</div>
+            <div className="mt-1 text-xs text-slate-500">{tAdmin("当前页已加载记录")}</div>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{tAdmin("已选记录")}</div>
+            <div className="mt-2 text-2xl font-bold text-slate-900">{selectedIds.size}</div>
+            <div className="mt-1 text-xs text-slate-500">{tAdmin("用于批量查看与后续操作")}</div>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{tAdmin("筛选月份")}</div>
+            <div className="mt-2 text-2xl font-bold text-slate-900">{selectedMonth}</div>
+            <div className="mt-1 text-xs text-slate-500">{selectedDate ? tAdmin("已定位到 {{date}}", { date: selectedDate }) : tAdmin("当前查看整月结果")}</div>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{tAdmin("全部记录")}</div>
+            <div className="mt-2 text-2xl font-bold text-slate-900">{total}</div>
+            <div className="mt-1 text-xs text-slate-500">{isFiltered ? tAdmin("当前处于筛选视图") : tAdmin("当前未启用筛选")}</div>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div className="text-xs text-slate-400">{tAdmin("当前月份：{{month}} · 共 {{total}} 条记录", { month: selectedMonth, total })}</div>
+          <div className="flex flex-wrap gap-2 xl:justify-end">
             <button
               type="button"
-              onClick={resetFilters}
-              className="px-3.5 py-2 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition border border-red-200"
-            >{tAdmin("清除筛选条件")}</button>
-          )}
+              onClick={() => setIsMaintenanceConfirmOpen(true)}
+              disabled={submitting}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-60"
+              title={tAdmin("结算前一天考勤，并生成今天考勤底稿")}
+            >
+              <RefreshCw className="w-4 h-4" />{submitting ? tAdmin("更新考勤中...") : tAdmin("更新考勤")}
+            </button>
+            <button
+              type="button"
+              onClick={handleOpenCreate}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-brand-700"
+              title={tAdmin("选择日期、员工、上下班时间新增一条考勤记录")}
+            >
+              <Plus className="w-4 h-4" />{tAdmin("新增考勤")}
+            </button>
+            <button
+              type="button"
+              onClick={() => { void handleExportCSV(); }}
+              disabled={isExporting}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-700 transition hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-60"
+              title={tAdmin("按当前筛选条件导出全部数据为 CSV 文件")}
+            >
+              <Download className="w-4 h-4" />{isExporting ? tAdmin("导出中...") : tAdmin("导出")}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!configForm) {
+                  return;
+                }
+                setHolidayDatesText(formatHolidayDatesInput(configForm.holidayDates));
+                setIsHolidaySettingsOpen(true);
+              }}
+              disabled={!configForm}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-60"
+            >
+              <Settings className="w-4 h-4" />{tAdmin("节假日")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsSettingsOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+            >
+              <Settings className="w-4 h-4" />{tAdmin("设置规则")}
+            </button>
+          </div>
         </div>
-        </div>
-        </div>
-      </div>
+      </section>
 
       {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
       {maintenanceMessage && <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{maintenanceMessage}</div>}
@@ -963,62 +1072,7 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
               <span className="text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded-full font-normal border border-brand-100 animate-pulse">{tAdmin("已启用筛选")}</span>
             )}
           </h3>
-          <div className="flex gap-2 flex-wrap justify-end">
-            {/* 后台只保留一个业务化维护入口；先确认再执行，避免管理员在筛选状态下误以为只会更新当前筛选范围。 */}
-            <button
-              type="button"
-              onClick={() => setIsMaintenanceConfirmOpen(true)}
-              disabled={submitting}
-              className="bg-emerald-50 border border-emerald-200 text-emerald-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-emerald-100 transition disabled:opacity-60 flex items-center gap-1.5"
-              title={tAdmin("结算前一天考勤，并生成今天考勤底稿")}
-            >
-              <RefreshCw className="w-4 h-4" />{submitting ? tAdmin("更新考勤中...") : tAdmin("更新考勤")}</button>
-            <button
-              type="button"
-              onClick={() => {
-                setLastLoadedAt(0);
-                void loadData();
-              }}
-              disabled={loading}
-              className="bg-white border border-slate-300 text-slate-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-slate-50 transition disabled:opacity-60 flex items-center gap-1.5"
-              title={tAdmin("按当前筛选条件刷新列表")}
-            >
-              <RefreshCw className="w-4 h-4" />{loading ? tAdmin("刷新中...") : tAdmin("刷新")}
-            </button>
-            <button
-              type="button"
-              onClick={handleOpenCreate}
-              className="bg-brand-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-brand-700 transition flex items-center gap-1.5"
-              title={tAdmin("选择日期、员工、上下班时间新增一条考勤记录")}
-            >
-              <Plus className="w-4 h-4" />{tAdmin("新增考勤记录")}</button>
-            <button
-              type="button"
-              onClick={handleExportCSV}
-              className="bg-brand-50 border border-brand-200 text-brand-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-brand-100 transition flex items-center gap-1.5"
-              title={tAdmin("导出当前表格显示的数据为 CSV 文件")}
-            >
-              <Download className="w-4 h-4" />{tAdmin("导出当前数据")}</button>
-            <button
-              type="button"
-              onClick={() => {
-                if (!configForm) {
-                  return;
-                }
-                setHolidayDatesText(formatHolidayDatesInput(configForm.holidayDates));
-                setIsHolidaySettingsOpen(true);
-              }}
-              disabled={!configForm}
-              className="bg-white border border-slate-300 text-slate-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-slate-50 transition flex items-center gap-1.5 disabled:opacity-60"
-            >
-              <Settings className="w-4 h-4" />{tAdmin("节假日")}</button>
-            <button
-              type="button"
-              onClick={() => setIsSettingsOpen(true)}
-              className="bg-white border border-slate-300 text-slate-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-slate-50 transition flex items-center gap-1.5"
-            >
-              <Settings className="w-4 h-4" />{tAdmin("设置规则")}</button>
-          </div>
+          <div className="text-xs text-slate-400">{tAdmin("明细区只保留列表状态提示，实际操作入口已上移到业务动作层")}</div>
         </div>
 
         <div className="min-h-0 flex-1 overflow-x-auto overflow-y-auto relative">

@@ -90,6 +90,16 @@ run() {
   "$@"
 }
 
+run_warn() {
+  echo "+ $*"
+  if "$@"; then
+    return 0
+  fi
+  local status=$?
+  echo "Warning: command failed but release will continue: $* (exit ${status})" >&2
+  return 0
+}
+
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "Required command not found: $1" >&2
@@ -463,7 +473,11 @@ main() {
     # closes stdin successfully, which must not abort an otherwise successful release.
     echo "+ supabase db push --yes"
     supabase db push --yes
-    run supabase migration list --linked
+    # `migration list --linked` is only a best-effort post-push visibility check.
+    # Production release must not abort here once the real schema-write step above
+    # already succeeded, because Supabase's login-role helper can return transient
+    # EOF / auth-edge errors even while the database is confirmed up to date.
+    run_warn supabase migration list --linked
   else
     echo "Skip Supabase db push (--no-db)."
   fi

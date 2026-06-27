@@ -36,16 +36,18 @@ export function Header({ title, currentLanguage, onLanguageChange, userEmail, on
           </select>
         </label>
         {userEmail && onSignOut && (
-          <div className="hidden sm:flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             <div className="text-right">
-              <div className="text-sm font-medium text-slate-700">{userEmail}</div>
+              <div className="max-w-[140px] truncate text-sm font-medium text-slate-700 sm:max-w-none">{userEmail}</div>
               <div className="text-xs text-slate-500">{t("管理员已登录")}</div>
             </div>
+            {/* 备用登录模块实际仍在 AuthScreen；移动端若把退出入口完全 hidden，就永远退不回登录页。这里保留一个始终可见的“切换登录”按钮，让调试/预览环境也能直接回到登录模块。 */}
             <button
               onClick={onSignOut}
-              className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-sm text-slate-600 transition"
+              className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-sm text-slate-600 transition whitespace-nowrap"
             >
-              {t("退出登录")}
+              <span className="sm:hidden">{t("切换登录")}</span>
+              <span className="hidden sm:inline">{t("退出登录")}</span>
             </button>
           </div>
         )}

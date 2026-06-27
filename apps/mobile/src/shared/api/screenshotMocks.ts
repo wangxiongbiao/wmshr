@@ -2,6 +2,9 @@ import type {EmployeeProfile, MobileLoginResponse} from '../../features/auth/typ
 import type {
   EmployeeNotification,
   EmployeeNotificationListResult,
+  LeaveRecord,
+  LeaveRequestPayload,
+  LeaveSummary,
   MobileHomeSummary,
   TodayAttendanceStatus,
 } from '../../features/attendance/types';
@@ -214,6 +217,30 @@ const SCREENSHOT_SOPS: SopDocument[] = [
   },
 ];
 
+const SCREENSHOT_LEAVE_HISTORY_SEED: LeaveRecord[] = [
+  {
+    id: 'leave-20260601-annual',
+    type: 'annual',
+    durationDays: 3,
+    startDate: '2026-06-01',
+    endDate: '2026-06-03',
+    reason: '家庭年假出游 / Family annual trip',
+    status: 'approved',
+  },
+  {
+    id: 'leave-20260512-sick',
+    type: 'sick',
+    durationDays: 1,
+    startDate: '2026-05-12',
+    endDate: '2026-05-12',
+    reason: '身体不适感冒就医 / Fever and hospital checkup',
+    status: 'approved',
+  },
+];
+
+// screenshot 模式下请假模块需要支持“提交后立即反映到历史与统计”，因此这里使用会话内可变副本来模拟接口落库后的结果。
+let screenshotLeaveHistory: LeaveRecord[] = [...SCREENSHOT_LEAVE_HISTORY_SEED];
+
 function createLoginResponse(account: string): MobileLoginResponse {
   return {
     token: SCREENSHOT_TOKEN,
@@ -231,6 +258,33 @@ function parsePath(input: string) {
   return {
     pathname: url.pathname,
     searchParams: url.searchParams,
+  };
+}
+
+function parseDateValue(value: string) {
+  const normalized = value.trim().replace(/\//g, '-');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    return null;
+  }
+  const parsed = new Date(`${normalized}T00:00:00Z`);
+  return Number.isNaN(parsed.getTime()) ? null : {normalized, parsed};
+}
+
+function calculateInclusiveDays(startDate: string, endDate: string) {
+  const start = parseDateValue(startDate);
+  const end = parseDateValue(endDate);
+  if (!start || !end) {
+    return 1;
+  }
+  const ms = end.parsed.getTime() - start.parsed.getTime();
+  const diff = Math.floor(ms / 86400000) + 1;
+  return diff > 0 ? diff : 1;
+}
+
+function getCurrentLeaveSummary(): LeaveSummary {
+  return {
+    monthUsedDays: screenshotLeaveHistory.reduce((sum, item) => sum + item.durationDays, 0),
+    pendingCount: screenshotLeaveHistory.filter((item) => item.status === 'pending').length,
   };
 }
 
@@ -290,6 +344,40 @@ export async function handleScreenshotRequest<T>(path: string, init?: RequestIni
 
   if (pathname === '/api/mobile/home/summary' && method === 'GET') {
     return SCREENSHOT_HOME_SUMMARY as T;
+  }
+
+  if (pathname === '/api/mobile/attendance/leave/summary' && method === 'GET') {
+    return getCurrentLeaveSummary() as T;
+  }
+
+  if (pathname === '/api/mobile/attendance/leave/history' && method === 'GET') {
+    return screenshotLeaveHistory as T;
+  }
+
+  if (pathname === '/api/mobile/attendance/leave/request' && method === 'POST') {
+    const payload = JSON.parse(String(init?.body || '{}')) as LeaveRequestPayload;
+    if (!payload.reason?.trim()) {
+      throw new Error('Please enter the leave reason');
+    }
+    const start = parseDateValue(payload.startDate);
+    const end = parseDateValue(payload.endDate);
+    if (!start || !end) {
+      throw new Error('Please enter the date in YYYY-MM-DD format');
+    }
+    if (end.parsed.getTime() < start.parsed.getTime()) {
+      throw new Error('End date cannot be earlier than start date');
+    }
+    const nextRecord: LeaveRecord = {
+      id: `leave-${Date.now()}`,
+      type: payload.type,
+      startDate: start.normalized,
+      endDate: end.normalized,
+      durationDays: calculateInclusiveDays(start.normalized, end.normalized),
+      reason: payload.reason.trim(),
+      status: 'pending',
+    };
+    screenshotLeaveHistory = [nextRecord, ...screenshotLeaveHistory];
+    return nextRecord as T;
   }
 
   if (pathname === '/api/mobile/notifications' && method === 'GET') {

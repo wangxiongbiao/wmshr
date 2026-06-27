@@ -43,9 +43,10 @@ import founderAvatarImage from "./assets/images/founder-avatar.jpg";
 const ADMIN_PORTAL_URL = import.meta.env.VITE_ADMIN_PORTAL_URL
   || (import.meta.env.DEV ? "http://localhost:3000" : "https://admin.dutylix.com");
 
-// 门户下载区现在统一从数据库里的最新 Android 包记录读取地址；不要再把 APK 直链硬编码回组件或环境变量。
-// 如果后续出新包，更新数据库中的 `public.mobile_app_releases` 即可，门户按钮和二维码会自动切到新地址。
+// 门户下载区仍通过更新接口确认“当前是否已配置可用 Android 包”，但真正触发下载时必须走本站同源代理。
+// 不要再把数据库里的第三方/静态直链直接暴露给按钮或二维码，否则一旦上游回源到 HTML 页面，官网会表现成“按钮能点但下载不到 APK”。
 const DOWNLOAD_SECTION_HASH = "#download";
+const MOBILE_APP_DOWNLOAD_PATH = "/api/public/mobile-app-download";
 const PRIVACY_CONTACT_EMAIL = "dutylix@163.com";
 type LegalRoute = Extract<HomePageRoute, "privacy" | "terms" | "compliance">;
 
@@ -590,17 +591,17 @@ export default function App() {
   const isLegalPage = routeState.page !== "home";
   const legalPage: LegalRoute | null = isLegalPage ? (routeState.page as LegalRoute) : null;
   const [showEmailForm, setShowEmailForm] = useState(false);
-  // 门户下载区固定读取数据库里当前“最新 Android 安装包”记录；不要再回退到组件内硬编码 URL，否则出新包后门户会和后台配置再次脱节。
+  // 门户下载区只把“是否存在当前最新 Android 包”作为展示/可点击前提；真正的下载目标统一切到本站同源代理，避免暴露会漂移的上游直链。
   const [androidDownloadUrl, setAndroidDownloadUrl] = useState("");
   // 下载链接一旦触发，就先锁住按钮并给出等待提醒，避免同一个会话里重复点击同一安装包造成重复下载。
   const [hasTriggeredAndroidDownload, setHasTriggeredAndroidDownload] = useState(false);
-  // 二维码固定编码当前 Android 下载直链，保证桌面点击下载和手机扫码下载始终指向同一个包地址。
+  // 二维码必须和桌面按钮共用同一个同源下载入口，保证扫码下载和按钮下载命中的是同一条受控链路。
   const [androidDownloadQrCodeDataUrl, setAndroidDownloadQrCodeDataUrl] = useState("");
 
   useEffect(() => {
     let cancelled = false;
 
-    // 下载区只需要当前最新包地址；这里保持最小读取面，只拿 `/api/public/mobile-app-update` 返回的唯一对象。
+    // 下载区只用更新接口判断“后台是否已配置最新 Android 包”；真正下载时再统一跳到本站 `/api/public/mobile-app-download`。
     void fetch("/api/public/mobile-app-update")
       .then(async (response) => {
         if (!response.ok) {
@@ -612,7 +613,10 @@ export default function App() {
       })
       .then((payload) => {
         if (!cancelled) {
-          setAndroidDownloadUrl(String(payload.url || "").trim());
+          const hasConfiguredRelease = Boolean(String(payload.url || "").trim());
+          setAndroidDownloadUrl(
+            hasConfiguredRelease ? new URL(MOBILE_APP_DOWNLOAD_PATH, window.location.origin).toString() : ""
+          );
         }
       })
       .catch(() => {

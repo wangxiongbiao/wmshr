@@ -109,30 +109,40 @@ export function Dashboard({ isActive, onOpenSettings, onNav }: DashboardProps) {
       ) : null}
 
       {/* v2 看板由后端一次性返回最后一次考勤周期、KPI 和员工统计；前端只负责展示与模块跳转。 */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 px-1 text-xs">
-        <div className="flex items-center gap-2 text-slate-600">
-          <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
-          <span>{tAdmin("当前看板时间：")}<span className="font-bold text-slate-800 font-mono text-sm">{data?.dashboardDate || "-"}</span></span>
+      <section className="space-y-4">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200/80 p-4 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex flex-wrap items-center gap-3">
+            <YearMonthPicker
+              value={yearMonth}
+              onChange={(nextYearMonth) => {
+                setYearMonth(nextYearMonth > currentYearMonth ? currentYearMonth : nextYearMonth);
+                setLastLoadedAt(0);
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => void loadData(true)}
+              disabled={loading}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:border-indigo-200 hover:text-indigo-600 disabled:opacity-60"
+            >
+              <Clock className={cn("h-4 w-4", loading && "animate-spin")} />
+              <span>{loading ? tAdmin("正在刷新") : tAdmin("刷新")}</span>
+            </button>
+            <div className="text-xs text-slate-400">{tAdmin("看板时间：{{date}}", { date: data?.dashboardDate || "-" })}</div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <GuideButton icon={<Clock className="w-4 h-4" />} label={tAdmin("进入考勤计算")} onClick={() => onNav("attendance")} />
+            <GuideButton icon={<Zap className="w-4 h-4" />} label={tAdmin("生成薪资条")} onClick={() => onNav("payroll")} />
+            <button
+              onClick={onOpenSettings}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700"
+            >
+              <Settings className="w-4 h-4 flex-shrink-0" />
+              <span className="whitespace-normal">{tAdmin("调整系统考勤核算规则")}</span>
+            </button>
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <YearMonthPicker
-            value={yearMonth}
-            onChange={(nextYearMonth) => {
-              setYearMonth(nextYearMonth > currentYearMonth ? currentYearMonth : nextYearMonth);
-              setLastLoadedAt(0);
-            }}
-          />
-          <button
-            type="button"
-            onClick={() => void loadData(true)}
-            disabled={loading}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:border-indigo-200 hover:text-indigo-600 disabled:opacity-60"
-          >
-            <Clock className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
-            <span>{loading ? tAdmin("正在刷新") : tAdmin("刷新")}</span>
-          </button>
-        </div>
-      </div>
+      </section>
 
       {/* KPI 区要优先保证多语言文案完整可读；允许标题/辅助说明换行，比为了维持单行而把卡片内容裁掉更稳定。 */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 xl:gap-5">
@@ -214,19 +224,10 @@ export function Dashboard({ isActive, onOpenSettings, onNav }: DashboardProps) {
               <span className="mt-0.5 h-3.5 w-1.5 flex-shrink-0 rounded bg-indigo-600" />
               <span className="leading-tight break-words">{tAdmin("快捷向导")}</span>
             </h3>
-            <div className="grid grid-cols-2 gap-3">
-              <GuideButton icon={<Clock className="w-4 h-4" />} label={tAdmin("进入考勤计算")} onClick={() => onNav("attendance")} />
-              <GuideButton icon={<Zap className="w-4 h-4" />} label={tAdmin("生成薪资条")} onClick={() => onNav("payroll")} />
+            <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-3 text-xs leading-5 text-slate-500">
+              {tAdmin("快捷跳转和规则设置已上移到顶部工具栏，这里保留说明位，避免同一入口在头部与侧栏卡片重复出现。")}
             </div>
           </div>
-
-          <button
-            onClick={onOpenSettings}
-            className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-extrabold shadow-md shadow-indigo-600/10 hover:shadow-indigo-600/20 transition flex items-center justify-center gap-2 cursor-pointer border border-indigo-700 text-center leading-tight"
-          >
-            <Settings className="w-4 h-4 flex-shrink-0" />
-            <span className="whitespace-normal">{tAdmin("调整系统考勤核算规则")}</span>
-          </button>
         </div>
       </div>
     </div>

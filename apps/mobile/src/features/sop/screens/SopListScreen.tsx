@@ -17,7 +17,7 @@ const END_REACHED_THRESHOLD = 120;
 function formatSopMeta(version: string, updatedAt: string, t: (value: string) => string) {
   const normalizedVersion = version.trim().toUpperCase();
   const compactDate = updatedAt.trim().slice(5, 10);
-  return `${normalizedVersion} · ${t('更新于')} ${compactDate}`;
+  return `${normalizedVersion} · ${t('更新')} ${compactDate}`;
 }
 
 export function SopListScreen() {
@@ -99,8 +99,8 @@ export function SopListScreen() {
   return (
     <ScreenContainer scrollProps={scrollProps}>
       <View style={styles.screenTitle}>
-        <Text style={styles.screenTitleText}>{t('SOP 文档')}</Text>
-        <Text style={styles.screenSubtitleText}>{t('仓库标准操作流程')}</Text>
+        <Text style={styles.screenTitleText}>{t('SOP 文件')}</Text>
+        <Text style={styles.screenSubtitleText}>{t('仓库作业标准流程')}</Text>
       </View>
 
       <View style={styles.documentList}>

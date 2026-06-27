@@ -18,10 +18,10 @@ export default defineConfig(() => {
           changeOrigin: true,
         },
       },
-      // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
+      // 移动端本地验收时，admin 登录页“放着不动也像刷新”很容易被 Vite HMR 的热替换/重连噪音放大；标准 dev 入口因此默认带 DISABLE_HMR=true。
+      // 只有显式走 package.json 的 `dev:hmr` 时才重新启用热更新；不要把移动端稳定性回归默认建立在 HMR 长连之上。
       hmr: process.env.DISABLE_HMR !== 'true',
-      // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
+      // DISABLE_HMR=true 时同时关掉 watch，避免文件波动触发整页热替换，让“像刷新”的排查只剩页面自身链路。
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
     },
   };

@@ -4,7 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --port=3000 --host=0.0.0.0",
+    "dev": "DISABLE_HMR=true vite --port=3000 --host=0.0.0.0",
+    "dev:hmr": "vite --port=3000 --host=0.0.0.0",
     "dev:api": "node --watch server/index.js",
     "build": "node ../../scripts/build-admin-preserve-dev.mjs",
     "build:raw": "vite build",

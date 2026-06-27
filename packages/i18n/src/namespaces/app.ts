@@ -254,6 +254,41 @@ export const appTranslations = {
     ,"点击切换": "点击切换"
     ,"暂未开放的设置": "暂未开放的设置"
     ,"通知提醒、账号安全等功能还未开放；当前页面不会跳转到不可用的空入口。": "通知提醒、账号安全等功能还未开放；当前页面不会跳转到不可用的空入口。"
+
+    ,"考勤请假": "考勤请假"
+    ,"请假管理": "请假管理"
+    ,"提交请假申请": "提交请假申请"
+    ,"请假记录加载失败": "请假记录加载失败"
+    ,"请按 YYYY-MM-DD 输入开始和结束日期": "请按 YYYY-MM-DD 输入开始和结束日期"
+    ,"结束日期不能早于开始日期": "结束日期不能早于开始日期"
+    ,"请输入请假原因": "请输入请假原因"
+    ,"请假申请已提交": "请假申请已提交"
+    ,"请假申请提交失败": "请假申请提交失败"
+    ,"本月已请假": "本月已请假"
+    ,"审批状态": "审批状态"
+    ,"请假类别": "请假类别"
+    ,"开始日期": "开始日期"
+    ,"结束日期": "结束日期"
+    ,"请假时长：": "请假时长："
+    ,"天": "天"
+    ,"请输入具体的请假事由（例如：突发感冒就医、家中有事处理等）...": "请输入具体的请假事由（例如：突发感冒就医、家中有事处理等）..."
+    ,"请假原因": "请假原因"
+    ,"提交中...": "提交中..."
+    ,"提交申请": "提交申请"
+    ,"请假历史记录": "请假历史记录"
+    ,"暂无请假记录": "暂无请假记录"
+    ,"提交请假申请后，这里会展示历史记录和审批状态。": "提交请假申请后，这里会展示历史记录和审批状态。"
+    ,"事假": "事假"
+    ,"病假": "病假"
+    ,"年假": "年假"
+    ,"特殊假/其它": "特殊假/其它"
+    ,"请假": "请假"
+    ,"已批准": "已批准"
+    ,"单待审": "单待审"
+    ,"已拒绝": "已拒绝"
+    ,"处理中": "处理中"
+    ,"选择日期": "选择日期"
+    ,"至": "至"
   },
   en: {
     "首页": "front page",
@@ -336,7 +371,7 @@ export const appTranslations = {
     "第一阶段先保留详情页骨架，后续接正文、图片、附件和已读确认。": "In the first stage, the skeleton of the details page is retained, and then the main text, pictures, attachments and read confirmation are added.",
     "第一阶段先保留设置页骨架，后续接语言、通知和账号安全。": "In the first stage, the skeleton of the settings page will be retained, followed by language, notifications and account security.",
     "下午好": "good afternoon",
-    "今日任务": "Today's task",
+    "今日任务": "Today",
     "拣货任务": "Picking tasks",
     "安全提醒": "Safety reminder",
     "请完成叉车作业前检查": "Please complete the inspection before forklift operation",
@@ -348,12 +383,12 @@ export const appTranslations = {
     "在勤中": "In the work",
     "已完成": "Completed",
     "未打卡": "Not clocked in",
-    "上班打卡": "Clock in at work",
+    "上班打卡": "Clock in",
     "下班打卡": "Clock in after get off work",
     "重置演示": "reset demo",
     "系统时间": "system time",
-    "上班时间": "Working hours",
-    "下班时间": "Off work time",
+    "上班时间": "In",
+    "下班时间": "Out",
     "未知地点": "unknown location",
     "位置：{{location}}": "Location: {{location}}",
     "精度 {{value}}m": "Accuracy {{value}}m",
@@ -363,11 +398,11 @@ export const appTranslations = {
     "当前还未打卡；确认定位成功后即可开始上班打卡。": "You have not checked in yet. Once location is confirmed, you can start your work check-in.",
     "你已完成上班打卡；下班前请返回此页完成下班打卡。": "You have completed the work check-in. Please return to this page before leaving to check out.",
     "今天的上下班打卡都已完成。": "Today's check-in and check-out are both complete.",
-    "准备同步打卡状态": "Preparing to sync attendance status",
-    "先完成上班打卡": "Complete the work check-in first",
-    "当前进度": "Current progress",
-    "今天已开始工作": "Work has started today",
-    "今天的打卡已完成": "Today's attendance is complete",
+    "准备同步打卡状态": "Syncing status",
+    "先完成上班打卡": "Clock in first",
+    "当前进度": "Progress",
+    "今天已开始工作": "Work started",
+    "今天的打卡已完成": "Done for today",
     "今日打卡状态加载失败": "Failed to load today's attendance status",
     "打卡界面已准备好，今日状态同步后会自动刷新。": "The attendance screen is ready and will refresh automatically after today's status syncs.",
     "正在同步今日打卡状态，请稍候。": "Syncing today's attendance status. Please wait.",
@@ -380,26 +415,26 @@ export const appTranslations = {
     "打卡失败": "Attendance submission failed",
     "通知状态更新失败": "Failed to update notification status",
     "返回": "Back",
-    "本月工时": "Hours this month",
-    "出勤天数": "Attendance days",
-    "待办SOP": "Pending SOPs",
-    "系统通知": "System notifications",
-    "查看全部": "View all",
-    "全部通知": "All notifications",
-    "工资条通知标题": "Payroll confirmed for {{month}}",
-    "工资条通知内容": "Your {{month}} payroll result has been reviewed and confirmed. Tap to view the full payslip details.",
+    "本月工时": "Hours",
+    "出勤天数": "Days",
+    "待办SOP": "SOPs",
+    "系统通知": "Notifications",
+    "查看全部": "All",
+    "全部通知": "Notifications",
+    "工资条通知标题": "{{month}} payroll ready",
+    "工资条通知内容": "Your {{month}} payslip is ready. Tap to view details.",
     "暂无通知": "No notifications",
-    "当前还没有新的系统通知。": "There are no new system notifications right now.",
+    "当前还没有新的系统通知。": "No new system notifications yet.",
     "通知列表加载失败": "Failed to load notifications",
-    "通知列表暂时加载失败": "Notifications are temporarily unavailable",
+    "通知列表暂时加载失败": "Notifications unavailable",
     "正在加载通知...": "Loading notifications...",
-    "加载更多": "Load more",
-    "请求定位权限...": "Requesting location permission...",
+    "加载更多": "More",
+    "请求定位权限...": "Permissions...",
     "正在定位...": "Locating...",
     "正在获取地址...": "Fetching address...",
     "正在提交...": "Submitting...",
-    "重试打卡": "Retry attendance",
-    "今日已完成": "Completed today",
+    "重试打卡": "Retry",
+    "今日已完成": "Done",
     "正在确认定位权限": "Confirming location permission",
     "请允许 App 使用定位，随后会自动继续。": "Please allow the app to use location, then it will continue automatically.",
     "正在获取当前位置": "Getting current location",
@@ -510,6 +545,41 @@ export const appTranslations = {
     "点击切换": "Tap to switch",
     "暂未开放的设置": "Settings not yet available",
     "通知提醒、账号安全等功能还未开放；当前页面不会跳转到不可用的空入口。": "Notification alerts, account security, and similar features are not available yet. This page will not open unusable empty entries."
+
+    ,"考勤请假": "Attendance & leave"
+    ,"请假管理": "Leave management"
+    ,"提交请假申请": "Submit leave request"
+    ,"请假记录加载失败": "Failed to load leave records"
+    ,"请按 YYYY-MM-DD 输入开始和结束日期": "Enter the start and end dates in YYYY-MM-DD format"
+    ,"结束日期不能早于开始日期": "End date cannot be earlier than the start date"
+    ,"请输入请假原因": "Please enter a leave reason"
+    ,"请假申请已提交": "Leave request submitted"
+    ,"请假申请提交失败": "Failed to submit leave request"
+    ,"本月已请假": "Leave taken this month"
+    ,"审批状态": "Approval status"
+    ,"请假类别": "Leave type"
+    ,"开始日期": "Start date"
+    ,"结束日期": "End date"
+    ,"请假时长：": "Leave duration: "
+    ,"天": "days"
+    ,"请输入具体的请假事由（例如：突发感冒就医、家中有事处理等）...": "Enter the specific reason for leave (for example: sudden illness, medical treatment, or family matters)..."
+    ,"请假原因": "Leave reason"
+    ,"提交中...": "Submitting..."
+    ,"提交申请": "Submit request"
+    ,"请假历史记录": "Leave history"
+    ,"暂无请假记录": "No leave records yet"
+    ,"提交请假申请后，这里会展示历史记录和审批状态。": "After you submit a leave request, the history and approval status will appear here."
+    ,"事假": "Personal leave"
+    ,"病假": "Sick leave"
+    ,"年假": "Annual leave"
+    ,"特殊假/其它": "Special leave / Other"
+    ,"请假": "Leave"
+    ,"已批准": "Approved"
+    ,"单待审": "Pending"
+    ,"已拒绝": "Rejected"
+    ,"处理中": "Processing"
+    ,"选择日期": "Select date"
+    ,"至": "to"
   },
   zht: {
     "首页": "首頁",
@@ -766,6 +836,41 @@ export const appTranslations = {
     "点击切换": "點擊切換",
     "暂未开放的设置": "暫未開放的設定",
     "通知提醒、账号安全等功能还未开放；当前页面不会跳转到不可用的空入口。": "通知提醒、帳號安全等功能尚未開放；目前頁面不會跳轉到不可用的空入口。"
+
+    ,"考勤请假": "考勤請假"
+    ,"请假管理": "請假管理"
+    ,"提交请假申请": "提交請假申請"
+    ,"请假记录加载失败": "請假記錄載入失敗"
+    ,"请按 YYYY-MM-DD 输入开始和结束日期": "請按 YYYY-MM-DD 輸入開始和結束日期"
+    ,"结束日期不能早于开始日期": "結束日期不能早於開始日期"
+    ,"请输入请假原因": "請輸入請假原因"
+    ,"请假申请已提交": "請假申請已提交"
+    ,"请假申请提交失败": "請假申請提交失敗"
+    ,"本月已请假": "本月已請假"
+    ,"审批状态": "審批狀態"
+    ,"请假类别": "請假類別"
+    ,"开始日期": "開始日期"
+    ,"结束日期": "結束日期"
+    ,"请假时长：": "請假時長："
+    ,"天": "天"
+    ,"请输入具体的请假事由（例如：突发感冒就医、家中有事处理等）...": "請輸入具體的請假事由（例如：突發感冒就醫、家中有事處理等）..."
+    ,"请假原因": "請假原因"
+    ,"提交中...": "提交中..."
+    ,"提交申请": "提交申請"
+    ,"请假历史记录": "請假歷史記錄"
+    ,"暂无请假记录": "暫無請假記錄"
+    ,"提交请假申请后，这里会展示历史记录和审批状态。": "提交請假申請後，這裡會展示歷史記錄和審批狀態。"
+    ,"事假": "事假"
+    ,"病假": "病假"
+    ,"年假": "年假"
+    ,"特殊假/其它": "特殊假／其他"
+    ,"请假": "請假"
+    ,"已批准": "已批准"
+    ,"单待审": "單待審"
+    ,"已拒绝": "已拒絕"
+    ,"处理中": "處理中"
+    ,"选择日期": "選擇日期"
+    ,"至": "至"
   },
   th: {
     "首页": "หน้าแรก",
@@ -1022,6 +1127,41 @@ export const appTranslations = {
     "点击切换": "แตะเพื่อเปลี่ยน",
     "暂未开放的设置": "การตั้งค่าที่ยังไม่เปิดใช้งาน",
     "通知提醒、账号安全等功能还未开放；当前页面不会跳转到不可用的空入口。": "ฟังก์ชันการแจ้งเตือน ความปลอดภัยของบัญชี และอื่น ๆ ยังไม่เปิดใช้งาน หน้านี้จะไม่พาไปยังหน้าว่างที่ใช้ไม่ได้"
+
+    ,"考勤请假": "การลงเวลาและการลา"
+    ,"请假管理": "จัดการการลา"
+    ,"提交请假申请": "ส่งคำขอลา"
+    ,"请假记录加载失败": "โหลดบันทึกการลาไม่สำเร็จ"
+    ,"请按 YYYY-MM-DD 输入开始和结束日期": "กรุณากรอกวันเริ่มต้นและวันสิ้นสุดในรูปแบบ YYYY-MM-DD"
+    ,"结束日期不能早于开始日期": "วันสิ้นสุดต้องไม่เร็วกว่าวันเริ่มต้น"
+    ,"请输入请假原因": "กรุณากรอกเหตุผลการลา"
+    ,"请假申请已提交": "ส่งคำขอลาแล้ว"
+    ,"请假申请提交失败": "ส่งคำขอลาไม่สำเร็จ"
+    ,"本月已请假": "ลาที่ใช้ในเดือนนี้"
+    ,"审批状态": "สถานะการอนุมัติ"
+    ,"请假类别": "ประเภทการลา"
+    ,"开始日期": "วันเริ่มต้น"
+    ,"结束日期": "วันสิ้นสุด"
+    ,"请假时长：": "ระยะเวลาการลา: "
+    ,"天": "วัน"
+    ,"请输入具体的请假事由（例如：突发感冒就医、家中有事处理等）...": "กรุณากรอกรายละเอียดเหตุผลการลา (เช่น ป่วยกะทันหัน ไปพบแพทย์ หรือมีธุระที่บ้าน)..."
+    ,"请假原因": "เหตุผลการลา"
+    ,"提交中...": "กำลังส่ง..."
+    ,"提交申请": "ส่งคำขอ"
+    ,"请假历史记录": "ประวัติการลา"
+    ,"暂无请假记录": "ยังไม่มีบันทึกการลา"
+    ,"提交请假申请后，这里会展示历史记录和审批状态。": "หลังส่งคำขอลา ที่นี่จะแสดงประวัติและสถานะการอนุมัติ"
+    ,"事假": "ลากิจ"
+    ,"病假": "ลาป่วย"
+    ,"年假": "ลาพักร้อน"
+    ,"特殊假/其它": "ลาพิเศษ / อื่น ๆ"
+    ,"请假": "ลา"
+    ,"已批准": "อนุมัติแล้ว"
+    ,"单待审": "รออนุมัติ"
+    ,"已拒绝": "ถูกปฏิเสธ"
+    ,"处理中": "กำลังดำเนินการ"
+    ,"选择日期": "เลือกวันที่"
+    ,"至": "ถึง"
   },
   id: {
     "首页": "halaman depan",
@@ -1278,6 +1418,41 @@ export const appTranslations = {
     "点击切换": "Ketuk untuk ganti",
     "暂未开放的设置": "Pengaturan yang belum tersedia",
     "通知提醒、账号安全等功能还未开放；当前页面不会跳转到不可用的空入口。": "Pengingat notifikasi, keamanan akun, dan fitur serupa belum tersedia. Halaman ini tidak akan membuka pintu masuk kosong yang tidak bisa dipakai."
+
+    ,"考勤请假": "Absensi & cuti"
+    ,"请假管理": "Kelola cuti"
+    ,"提交请假申请": "Ajukan cuti"
+    ,"请假记录加载失败": "Gagal memuat catatan cuti"
+    ,"请按 YYYY-MM-DD 输入开始和结束日期": "Masukkan tanggal mulai dan selesai dalam format YYYY-MM-DD"
+    ,"结束日期不能早于开始日期": "Tanggal selesai tidak boleh lebih awal dari tanggal mulai"
+    ,"请输入请假原因": "Masukkan alasan cuti"
+    ,"请假申请已提交": "Permohonan cuti telah diajukan"
+    ,"请假申请提交失败": "Gagal mengajukan cuti"
+    ,"本月已请假": "Cuti bulan ini"
+    ,"审批状态": "Status persetujuan"
+    ,"请假类别": "Jenis cuti"
+    ,"开始日期": "Tanggal mulai"
+    ,"结束日期": "Tanggal selesai"
+    ,"请假时长：": "Durasi cuti: "
+    ,"天": "hari"
+    ,"请输入具体的请假事由（例如：突发感冒就医、家中有事处理等）...": "Masukkan alasan cuti secara rinci (misalnya: sakit mendadak, berobat, atau urusan keluarga)..."
+    ,"请假原因": "Alasan cuti"
+    ,"提交中...": "Mengirim..."
+    ,"提交申请": "Kirim permohonan"
+    ,"请假历史记录": "Riwayat cuti"
+    ,"暂无请假记录": "Belum ada catatan cuti"
+    ,"提交请假申请后，这里会展示历史记录和审批状态。": "Setelah Anda mengajukan cuti, riwayat dan status persetujuan akan ditampilkan di sini."
+    ,"事假": "Cuti pribadi"
+    ,"病假": "Cuti sakit"
+    ,"年假": "Cuti tahunan"
+    ,"特殊假/其它": "Cuti khusus / Lainnya"
+    ,"请假": "Cuti"
+    ,"已批准": "Disetujui"
+    ,"单待审": "Menunggu persetujuan"
+    ,"已拒绝": "Ditolak"
+    ,"处理中": "Diproses"
+    ,"选择日期": "Pilih tanggal"
+    ,"至": "sampai"
   },
   ms: {
     "首页": "muka depan",
@@ -1534,6 +1709,41 @@ export const appTranslations = {
     "点击切换": "Ketik untuk tukar",
     "暂未开放的设置": "Tetapan yang belum tersedia",
     "通知提醒、账号安全等功能还未开放；当前页面不会跳转到不可用的空入口。": "Peringatan pemberitahuan, keselamatan akaun dan fungsi serupa masih belum tersedia. Halaman ini tidak akan membawa anda ke pintu masuk kosong yang tidak boleh digunakan."
+
+    ,"考勤请假": "Kehadiran & cuti"
+    ,"请假管理": "Urus cuti"
+    ,"提交请假申请": "Hantar permohonan cuti"
+    ,"请假记录加载失败": "Gagal memuat rekod cuti"
+    ,"请按 YYYY-MM-DD 输入开始和结束日期": "Masukkan tarikh mula dan tamat dalam format YYYY-MM-DD"
+    ,"结束日期不能早于开始日期": "Tarikh tamat tidak boleh lebih awal daripada tarikh mula"
+    ,"请输入请假原因": "Sila masukkan sebab cuti"
+    ,"请假申请已提交": "Permohonan cuti telah dihantar"
+    ,"请假申请提交失败": "Gagal menghantar permohonan cuti"
+    ,"本月已请假": "Cuti bulan ini"
+    ,"审批状态": "Status kelulusan"
+    ,"请假类别": "Jenis cuti"
+    ,"开始日期": "Tarikh mula"
+    ,"结束日期": "Tarikh tamat"
+    ,"请假时长：": "Tempoh cuti: "
+    ,"天": "hari"
+    ,"请输入具体的请假事由（例如：突发感冒就医、家中有事处理等）...": "Masukkan sebab cuti secara terperinci (contohnya: demam secara tiba-tiba, mendapatkan rawatan, atau urusan keluarga)..."
+    ,"请假原因": "Sebab cuti"
+    ,"提交中...": "Sedang menghantar..."
+    ,"提交申请": "Hantar permohonan"
+    ,"请假历史记录": "Sejarah cuti"
+    ,"暂无请假记录": "Belum ada rekod cuti"
+    ,"提交请假申请后，这里会展示历史记录和审批状态。": "Selepas anda menghantar permohonan cuti, sejarah dan status kelulusan akan dipaparkan di sini."
+    ,"事假": "Cuti peribadi"
+    ,"病假": "Cuti sakit"
+    ,"年假": "Cuti tahunan"
+    ,"特殊假/其它": "Cuti khas / Lain-lain"
+    ,"请假": "Cuti"
+    ,"已批准": "Diluluskan"
+    ,"单待审": "Menunggu kelulusan"
+    ,"已拒绝": "Ditolak"
+    ,"处理中": "Sedang diproses"
+    ,"选择日期": "Pilih tarikh"
+    ,"至": "hingga"
   },
   es: {
     "首页": "página delantera",
@@ -1790,6 +2000,41 @@ export const appTranslations = {
     "点击切换": "Toca para cambiar",
     "暂未开放的设置": "Ajustes aún no disponibles",
     "通知提醒、账号安全等功能还未开放；当前页面不会跳转到不可用的空入口。": "Las alertas de notificación, la seguridad de la cuenta y funciones similares aún no están disponibles. Esta página no abrirá accesos vacíos que no se puedan usar."
+
+    ,"考勤请假": "Asistencia y permisos"
+    ,"请假管理": "Gestión de permisos"
+    ,"提交请假申请": "Enviar solicitud de permiso"
+    ,"请假记录加载失败": "No se pudieron cargar los registros de permisos"
+    ,"请按 YYYY-MM-DD 输入开始和结束日期": "Introduce las fechas de inicio y fin con el formato YYYY-MM-DD"
+    ,"结束日期不能早于开始日期": "La fecha de fin no puede ser anterior a la fecha de inicio"
+    ,"请输入请假原因": "Introduce el motivo del permiso"
+    ,"请假申请已提交": "Solicitud de permiso enviada"
+    ,"请假申请提交失败": "No se pudo enviar la solicitud de permiso"
+    ,"本月已请假": "Permisos tomados este mes"
+    ,"审批状态": "Estado de aprobación"
+    ,"请假类别": "Tipo de permiso"
+    ,"开始日期": "Fecha de inicio"
+    ,"结束日期": "Fecha de fin"
+    ,"请假时长：": "Duración del permiso: "
+    ,"天": "días"
+    ,"请输入具体的请假事由（例如：突发感冒就医、家中有事处理等）...": "Introduce el motivo concreto del permiso (por ejemplo: enfermedad repentina, visita médica o asuntos familiares)..."
+    ,"请假原因": "Motivo del permiso"
+    ,"提交中...": "Enviando..."
+    ,"提交申请": "Enviar solicitud"
+    ,"请假历史记录": "Historial de permisos"
+    ,"暂无请假记录": "Aún no hay registros de permisos"
+    ,"提交请假申请后，这里会展示历史记录和审批状态。": "Después de enviar la solicitud de permiso, aquí se mostrarán el historial y el estado de aprobación."
+    ,"事假": "Permiso personal"
+    ,"病假": "Baja por enfermedad"
+    ,"年假": "Vacaciones anuales"
+    ,"特殊假/其它": "Permiso especial / Otros"
+    ,"请假": "Permiso"
+    ,"已批准": "Aprobado"
+    ,"单待审": "Pendiente"
+    ,"已拒绝": "Rechazado"
+    ,"处理中": "En proceso"
+    ,"选择日期": "Seleccionar fecha"
+    ,"至": "a"
   },
   pt: {
     "首页": "primeira página",
@@ -2046,5 +2291,39 @@ export const appTranslations = {
     "点击切换": "Toque para trocar",
     "暂未开放的设置": "Configurações ainda não disponíveis",
     "通知提醒、账号安全等功能还未开放；当前页面不会跳转到不可用的空入口。": "Alertas de notificação, segurança da conta e funções semelhantes ainda não estão disponíveis. Esta página não abrirá entradas vazias indisponíveis."
-  }
+
+    ,"考勤请假": "Presença e licença"
+    ,"请假管理": "Gestão de licenças"
+    ,"提交请假申请": "Enviar pedido de licença"
+    ,"请假记录加载失败": "Falha ao carregar os registros de licença"
+    ,"请按 YYYY-MM-DD 输入开始和结束日期": "Introduza as datas de início e fim no formato YYYY-MM-DD"
+    ,"结束日期不能早于开始日期": "A data de fim não pode ser anterior à data de início"
+    ,"请输入请假原因": "Introduza o motivo da licença"
+    ,"请假申请已提交": "Pedido de licença enviado"
+    ,"请假申请提交失败": "Falha ao enviar o pedido de licença"
+    ,"本月已请假": "Licenças neste mês"
+    ,"审批状态": "Estado da aprovação"
+    ,"请假类别": "Tipo de licença"
+    ,"开始日期": "Data de início"
+    ,"结束日期": "Data de fim"
+    ,"请假时长：": "Duração da licença: "
+    ,"天": "dias"
+    ,"请输入具体的请假事由（例如：突发感冒就医、家中有事处理等）...": "Introduza o motivo específico da licença (por exemplo: doença súbita, consulta médica ou assuntos familiares)..."
+    ,"请假原因": "Motivo da licença"
+    ,"提交中...": "Enviando..."
+    ,"提交申请": "Enviar pedido"
+    ,"请假历史记录": "Histórico de licenças"
+    ,"暂无请假记录": "Ainda não há registros de licença"
+    ,"提交请假申请后，这里会展示历史记录和审批状态。": "Depois de enviar o pedido de licença, o histórico e o estado da aprovação serão mostrados aqui."
+    ,"事假": "Licença pessoal"
+    ,"病假": "Licença médica"
+    ,"年假": "Férias anuais"
+    ,"特殊假/其它": "Licença especial / Outros"
+    ,"请假": "Licença"
+    ,"已批准": "Aprovado"
+    ,"单待审": "Pendente"
+    ,"已拒绝": "Rejeitado"
+    ,"处理中": "Em processamento"
+    ,"选择日期": "Selecionar data"
+    ,"至": "até"  }
 } as const;

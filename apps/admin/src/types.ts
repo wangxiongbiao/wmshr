@@ -4,7 +4,7 @@
  */
 
 // Admin 一级页签在这里统一收口；v3 三模块已直接接入当前 admin 壳层，新增 tab 必须同步更新 adminRoute、Sidebar、App 标题映射与挂载逻辑。
-export type TabId = 'dashboard' | 'employees' | 'attendance' | 'payroll' | 'sop' | 'customers' | 'goods' | 'expenses';
+export type TabId = 'dashboard' | 'employees' | 'attendance' | 'leave' | 'payroll' | 'sop' | 'customers' | 'goods' | 'expenses';
 
 export type Gender = 'male' | 'female';
 
@@ -14,6 +14,8 @@ export type SalaryType = 'fixed' | 'hourly';
 export type SalaryAdjustmentType = 'allowance' | 'deduction' | 'other';
 export type PayrollCalculationStatus = 'draft' | 'calculated' | 'blocked' | 'confirmed';
 export type PayrollReviewStatus = 'pending' | 'approved' | 'rejected';
+export type LeaveType = 'personal' | 'sick' | 'annual' | 'special';
+export type LeaveApprovalStatus = 'pending' | 'approved' | 'rejected';
 
 export type AttendanceType = 'normal' | 'late' | 'early' | 'absent' | 'leave' | 'sick_leave' | 'overtime';
 
@@ -561,6 +563,37 @@ export interface PayrollNightlyRunResponse {
     employeeId: number;
     error: string;
   }>;
+}
+
+export interface AdminLeaveRequestItem {
+  id: number;
+  employeeId: number;
+  employeeNo?: string;
+  employeeName: string;
+  employeeDept: string;
+  employeeRole?: string;
+  employeePhoto?: string | null;
+  type: LeaveType;
+  durationDays: number;
+  startDate: string;
+  endDate: string;
+  reason: string;
+  status: LeaveApprovalStatus;
+  submittedAt: string | null;
+  approvedAt: string | null;
+  rejectedAt: string | null;
+  approvalNote: string;
+}
+
+export interface AdminLeaveRequestPage {
+  items: AdminLeaveRequestItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface AdminLeaveRequestApprovalPayload {
+  approvalNote?: string;
 }
 
 export interface WorkspaceBootstrapResponse {

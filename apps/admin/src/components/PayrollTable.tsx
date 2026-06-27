@@ -280,16 +280,15 @@ export function PayrollTable({ isActive }: PayrollTableProps) {
 
   const employeeFilterOptions = useMemo(() => {
     const optionEmployees = mergeUniqueEmployees([selectedFilterEmployee, ...employeeSearchResults]);
+    // 员工筛选统一只显示主文案；员工编号/岗位信息继续作为搜索关键词，不再显示为第二行。
     return [
       {
         value: "all",
-        label: tAdmin("所有员工 (全部)"),
-        description: tAdmin("不过滤员工")
+        label: tAdmin("所有员工 (全部)")
       },
       ...optionEmployees.map((employee) => ({
         value: String(employee.id),
         label: formatEmployeeDisplayName(employee),
-        description: [employee.employeeNo, employee.role].filter(Boolean).join(" · "),
         keywords: [employee.name, employee.nickname, employee.employeeNo, employee.role, employee.dept]
       }))
     ];
@@ -672,58 +671,99 @@ export function PayrollTable({ isActive }: PayrollTableProps) {
 
   return (
     <div className="h-full min-h-0 flex flex-col gap-6" data-i18n-language={translationRenderLanguage}>
-      <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-green-50 text-green-600 flex items-center justify-center font-bold shadow-inner">
-            <Calendar className="w-5 h-5" />
-          </div>
-          <div>
-            <h2 className="font-bold text-slate-800 text-base flex items-center gap-2">{tAdmin("月份工资发放与核算")}<span className="px-2 py-0.5 rounded-full bg-brand-50 text-brand-700 text-xs font-mono font-bold">
-                {yearMonth}
-              </span>
-            </h2>
+      <section className="space-y-4">
+        {/* 薪资页也压缩成客户列表式工具栏：筛选区不再带说明标题或字段 label，统一通过控件占位和按钮文案表达。 */}
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200/80 p-4 flex flex-col gap-4">
+          <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
+              <div className="w-full sm:w-72">
+                <SearchableSelect
+                  value={String(selectedEmployeeId)}
+                  options={employeeFilterOptions}
+                  onChange={(nextValue) => {
+                    if (nextValue === "all") {
+                      setSelectedEmployeeId("all");
+                      setSelectedFilterEmployee(null);
+                      return;
+                    }
+                    const employee = mergeUniqueEmployees([selectedFilterEmployee, ...employeeSearchResults])
+                      .find((item) => String(item.id) === nextValue) || null;
+                    setSelectedEmployeeId(Number(nextValue));
+                    setSelectedFilterEmployee(employee);
+                  }}
+                  onQueryChange={(query) => void handleEmployeeQueryChange(query)}
+                  loading={employeeSearchLoading}
+                  placeholder={tAdmin("员工")}
+                  searchPlaceholder={tAdmin("搜索员工")}
+                  emptyText={tAdmin("没有匹配的员工")}
+                />
+              </div>
+              <div className="min-w-[220px]">
+                <YearMonthPicker
+                  value={yearMonth}
+                  onChange={setYearMonth}
+                  availableMonths={availableMonths}
+                />
+              </div>
+              <select
+                value={payoutFilter}
+                onChange={(event) => applyPayoutStatusFilter(event.target.value as typeof payoutFilter)}
+                className="text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg px-3 py-1.5 cursor-pointer outline-none focus:ring-1 focus:ring-brand-500 hover:bg-slate-50 transition"
+              >
+                <option value="all">{tAdmin("全部员工")}</option>
+                <option value="pending">{tAdmin("待发")}</option>
+                <option value="paid">{tAdmin("已发")}</option>
+              </select>
+              <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600 select-none">
+                <input
+                  type="checkbox"
+                  checked={resignedOnly}
+                  onChange={(event) => setResignedOnly(event.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                />
+                <span>{tAdmin("只看离职人员")}</span>
+              </label>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+              {showRefreshing ? (
+                <span className="inline-flex h-[38px] items-center rounded-lg border border-brand-100 bg-brand-50 px-3 text-xs font-semibold text-brand-700">{tAdmin("刷新中")}</span>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => void loadData({ force: true })}
+                disabled={loading || submitting}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-4 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
+                <span>{tAdmin("刷新")}</span>
+              </button>
+            </div>
           </div>
         </div>
 
-        <div className="w-full sm:w-auto flex flex-wrap items-center gap-2.5">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-slate-500 whitespace-nowrap">{tAdmin("核算年月:")}</span>
-            <YearMonthPicker
-              value={yearMonth}
-              onChange={setYearMonth}
-              availableMonths={availableMonths}
-            />
+        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div className="text-xs text-slate-400">{tAdmin("{{month}} · 共 {{count}} 名员工 · 已发 {{confirmed}} / 待发 {{pending}}", { month: yearMonth, count: total, confirmed: payrollMetrics.confirmedCount, pending: payrollMetrics.pendingCount })}</div>
+          <div className="flex flex-wrap gap-2 xl:justify-end">
+            <button
+              onClick={handleExportCSV}
+              disabled={displayedResults.length === 0}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+            >
+              <Download className="w-4 h-4 text-emerald-500" />
+              <span>{tAdmin("导出")}</span>
+            </button>
+            <button
+              onClick={handleRunNightlyPayrollNow}
+              disabled={submitting}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <RefreshCw className={cn("w-4 h-4", submitting && "animate-spin")} />
+              <span>{tAdmin("立即核算")}</span>
+            </button>
           </div>
-
-          <button
-            type="button"
-            onClick={() => void loadData({ force: true })}
-            disabled={loading || submitting}
-            className="px-3 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50 transition flex items-center gap-1.5 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
-            <span>{tAdmin("刷新")}</span>
-          </button>
-
-          <button
-            onClick={handleRunNightlyPayrollNow}
-            disabled={submitting}
-            className="px-3 py-1.5 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 transition flex items-center gap-1.5 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <RefreshCw className={cn("w-4 h-4", submitting && "animate-spin")} />
-            <span>{tAdmin("立即核算薪资")}</span>
-          </button>
-
-          <button
-            onClick={handleExportCSV}
-            disabled={displayedResults.length === 0}
-            className="px-3 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50 transition flex items-center gap-1.5 shadow-sm ml-auto sm:ml-0 disabled:opacity-50"
-          >
-            <Download className="w-4 h-4 text-emerald-500" />
-            <span>{tAdmin("导出CSV表")}</span>
-          </button>
         </div>
-      </div>
+      </section>
 
       {error && (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -784,66 +824,14 @@ export function PayrollTable({ isActive }: PayrollTableProps) {
       </div>
 
       <div className="glass-panel rounded-xl overflow-hidden min-h-0 flex flex-1 flex-col">
-        {/* 薪资列表同样按 Header / Content 分层：筛选搜索条固定，长表格只在内容区滚动，避免搜索入口被表格行顶走。 */}
-        <div className="p-4 bg-slate-50 border-b border-slate-100 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex flex-wrap items-center gap-2.5">
-            {showRefreshing ? (
-              <span className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand-50 border border-brand-100 text-brand-700">{tAdmin("刷新中")}</span>
-            ) : null}
-            <button
-              onClick={() => applyPayoutStatusFilter("all")}
-              className={cn("px-3 py-1.5 text-xs font-semibold rounded-lg transition-all", payoutFilter === "all" ? "bg-brand-600 text-white shadow-sm" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-100")}
-            >
-              {tAdmin("全部员工 ({{count}})", { count: displayedResults.length })}
-            </button>
-            <button
-              onClick={() => applyPayoutStatusFilter("pending")}
-              className={cn("px-3 py-1.5 text-xs font-semibold rounded-lg transition-all", payoutFilter === "pending" ? "bg-amber-500 text-white shadow-sm" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-100")}
-            >
-              ⏳ {tAdmin("待发")} ({payrollMetrics.pendingCount})
-            </button>
-            <button
-              onClick={() => applyPayoutStatusFilter("paid")}
-              className={cn("px-3 py-1.5 text-xs font-semibold rounded-lg transition-all", payoutFilter === "paid" ? "bg-emerald-600 text-white shadow-sm" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-100")}
-            >
-              ✅ {tAdmin("已发")} ({payrollMetrics.confirmedCount})
-            </button>
+        <div className="p-4 bg-slate-50 border-b border-slate-100 flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-800">{tAdmin("薪资结果列表")}</h3>
+            <p className="mt-1 text-xs text-slate-400">{tAdmin("列表区只负责展示结果与工资条入口，筛选与核算操作已上移到顶部双层头部。")}</p>
           </div>
-
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
-            {/* 薪资核算的员工筛选改为远程搜索：默认不预取员工列表，只有输入关键词后才请求无分页搜索接口，真正生效的仍是选中的 employeeId。 */}
-            <div className="w-full sm:w-72">
-              <SearchableSelect
-                value={String(selectedEmployeeId)}
-                options={employeeFilterOptions}
-                onChange={(nextValue) => {
-                  if (nextValue === "all") {
-                    setSelectedEmployeeId("all");
-                    setSelectedFilterEmployee(null);
-                    return;
-                  }
-                  const employee = mergeUniqueEmployees([selectedFilterEmployee, ...employeeSearchResults])
-                    .find((item) => String(item.id) === nextValue) || null;
-                  setSelectedEmployeeId(Number(nextValue));
-                  setSelectedFilterEmployee(employee);
-                }}
-                onQueryChange={(query) => void handleEmployeeQueryChange(query)}
-                loading={employeeSearchLoading}
-                placeholder={tAdmin("请选择员工")}
-                searchPlaceholder={tAdmin("输入姓名、昵称、工号后搜索")}
-                emptyText={tAdmin("没有匹配的员工")}
-              />
-            </div>
-            <label className="inline-flex items-center gap-2 text-xs text-slate-600 select-none">
-              <input
-                type="checkbox"
-                checked={resignedOnly}
-                onChange={(event) => setResignedOnly(event.target.checked)}
-                className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-              />
-              <span>{tAdmin("只看离职人员")}</span>
-            </label>
-          </div>
+          {showRefreshing ? (
+            <span className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand-50 border border-brand-100 text-brand-700">{tAdmin("刷新中")}</span>
+          ) : null}
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto">

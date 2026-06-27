@@ -156,36 +156,36 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
   return (
     <div className="h-full min-h-0 flex flex-col">
       <div className="shrink-0 pb-4 space-y-3">
-        {/* 员工列表按 Header / Content 分层：筛选和新增按钮固定在顶部，只有下面的卡片区域滚动，避免长列表把操作入口顶出视口。 */}
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div className="w-full sm:w-auto flex flex-col sm:flex-row sm:items-center gap-3">
-          <div className="relative w-full sm:w-72">
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={tAdmin("搜索姓名、昵称、职位或区域...")}
-              className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none text-sm bg-white"
-            />
-            <Search className="w-5 h-5 absolute left-3 top-2.5 text-slate-400" />
+        {/* 员工列表顶部工具栏与客户管理统一为同款卡片式布局：左侧收口搜索/筛选，右侧保留新增入口，避免不同列表页在响应式断点和控件密度上继续分叉。 */}
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200/80 p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
+            <div className="relative w-full sm:w-72">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={tAdmin("搜索姓名、昵称、职位或区域...")}
+                className="w-full pl-9 pr-4 py-1.5 border border-slate-200 rounded-lg outline-none text-xs focus:ring-1 focus:ring-brand-500 text-slate-700 bg-slate-50 transition placeholder:text-slate-400 font-medium"
+              />
+            </div>
+            <label className="inline-flex min-h-[30px] items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 select-none leading-tight hover:bg-slate-50 transition">
+              <input
+                type="checkbox"
+                checked={resignedOnly}
+                onChange={(event) => setResignedOnly(event.target.checked)}
+                className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+              />
+              <span className="whitespace-nowrap">{tAdmin("只看离职人员")}</span>
+            </label>
           </div>
-          <label className="inline-flex min-h-[38px] items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 select-none leading-tight">
-            <input
-              type="checkbox"
-              checked={resignedOnly}
-              onChange={(event) => setResignedOnly(event.target.checked)}
-              className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-            />
-            <span className="whitespace-normal break-words">{tAdmin("只看离职人员")}</span>
-          </label>
-        </div>
-        <button
-          onClick={onAddEmployee}
-          className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-md transition flex items-center gap-2 text-left leading-tight"
-        >
-          <Plus className="w-4 h-4 flex-shrink-0" />
-          <span className="whitespace-normal">{tAdmin("新增员工")}</span>
-        </button>
+          <button
+            onClick={onAddEmployee}
+            className="w-full sm:w-auto bg-brand-600 hover:bg-brand-700 text-white px-4 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>{tAdmin("新增员工")}</span>
+          </button>
         </div>
         {showRefreshing ? (
           <div className="rounded-xl border border-brand-100 bg-brand-50/80 px-4 py-2 text-xs text-brand-700">

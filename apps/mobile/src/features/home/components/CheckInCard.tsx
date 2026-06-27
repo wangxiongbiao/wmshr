@@ -107,12 +107,13 @@ export function CheckInCard({status, onCheckIn, phase = 'idle', disabled = false
       {/* 首页这里仅移除打卡流程进度条/步骤区；时间、定位和打卡按钮保持原样，避免误改其它首页内容。 */}
       <View style={styles.locationRow}>
         <Ionicons name="location-outline" size={18} color={colors.primary} />
-        <Text style={styles.locationText}>{gpsText}</Text>
+        <Text style={styles.locationText} numberOfLines={2}>{gpsText}</Text>
       </View>
 
+      {/* 打卡按钮和时间标签会直面英文/东南亚语等长词条：按钮改为最小高度+文本可收缩，优先保住一屏内可点击性。 */}
       <Pressable disabled={isDisabled} style={({pressed}) => [styles.primaryButton, isDisabled && styles.buttonDisabled, pressed && styles.buttonPressed]} onPress={onCheckIn}>
         <Ionicons name="finger-print-outline" size={22} color={colors.white} />
-        <Text style={styles.primaryButtonText}>{buttonText}</Text>
+        <Text style={styles.primaryButtonText} numberOfLines={2}>{buttonText}</Text>
       </Pressable>
     </View>
   );
@@ -121,7 +122,7 @@ export function CheckInCard({status, onCheckIn, phase = 'idle', disabled = false
 function TimeBox({label, value, active}: {label: string; value: string; active: boolean}) {
   return (
     <View style={styles.timeBox}>
-      <Text style={styles.timeLabel}>{label}</Text>
+      <Text style={styles.timeLabel} numberOfLines={1}>{label}</Text>
       <Text style={[styles.timeValue, !active && styles.inactiveText]}>{value}</Text>
     </View>
   );
@@ -131,13 +132,13 @@ const styles = StyleSheet.create({
   clockCard: {backgroundColor: colors.white, borderRadius: 32, padding: 24, shadowColor: colors.text, shadowOpacity: 0.05, shadowRadius: 28, shadowOffset: {width: 0, height: 14}, elevation: 5, borderWidth: 1, borderColor: 'rgba(241,245,249,0.9)'},
   timeGrid: {flexDirection: 'row', gap: 14},
   timeBox: {flex: 1, backgroundColor: '#f8fafc', borderRadius: 24, padding: 18, alignItems: 'center', borderWidth: 1, borderColor: '#f1f5f9'},
-  timeLabel: {fontSize: 11, color: colors.textMuted, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5},
+  timeLabel: {fontSize: 11, lineHeight: 14, color: colors.textMuted, fontWeight: '800', textAlign: 'center', flexShrink: 1},
   timeValue: {fontSize: 26, color: colors.text, fontWeight: '900', marginTop: 8, letterSpacing: -0.5},
   inactiveText: {color: '#cbd5e1'},
   locationRow: {flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 20, padding: 14, backgroundColor: '#eff6ff', borderRadius: 20},
-  locationText: {color: '#1d4ed8', fontWeight: '700', flex: 1, fontSize: 13},
-  primaryButton: {marginTop: 22, height: 60, borderRadius: 24, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 12, shadowColor: colors.primary, shadowOpacity: 0.25, shadowRadius: 16, shadowOffset: {width: 0, height: 8}, elevation: 4},
+  locationText: {color: '#1d4ed8', fontWeight: '700', flex: 1, fontSize: 13, lineHeight: 18},
+  primaryButton: {marginTop: 22, minHeight: 60, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 24, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 12, shadowColor: colors.primary, shadowOpacity: 0.25, shadowRadius: 16, shadowOffset: {width: 0, height: 8}, elevation: 4},
   buttonPressed: {opacity: 0.85},
   buttonDisabled: {backgroundColor: colors.textMuted, shadowOpacity: 0},
-  primaryButtonText: {color: colors.white, fontWeight: '900', fontSize: 18, letterSpacing: 0.5},
+  primaryButtonText: {color: colors.white, fontWeight: '900', fontSize: 18, lineHeight: 22, textAlign: 'center', flexShrink: 1},
 });

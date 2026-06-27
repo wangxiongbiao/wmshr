@@ -2,7 +2,7 @@ import { normalizeLanguage, type SupportedLanguageCode } from "@wmshr/i18n";
 import type { TabId } from "../types";
 
 // Admin 一级业务页签统一在这里维护；v3 三模块已经正式并入当前后台，路由白名单必须和 Sidebar、App 标题映射保持同一份来源，避免分享链接与可见导航脱节。
-export const ADMIN_TABS: readonly TabId[] = ["dashboard", "employees", "attendance", "payroll", "sop", "customers", "goods", "expenses"] as const;
+export const ADMIN_TABS: readonly TabId[] = ["dashboard", "employees", "attendance", "leave", "payroll", "sop", "customers", "goods", "expenses"] as const;
 export const DEFAULT_ADMIN_TAB: TabId = "dashboard";
 
 export function isAdminTab(value?: string | null): value is TabId {

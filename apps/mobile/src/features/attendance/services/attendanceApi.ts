@@ -1,5 +1,16 @@
+import {
+  AttendanceLocationSyncPayload,
+  AttendanceRecord,
+  CheckInPayload,
+  EmployeeNotification,
+  EmployeeNotificationListResult,
+  LeaveRecord,
+  LeaveRequestPayload,
+  LeaveSummary,
+  MobileHomeSummary,
+  TodayAttendanceStatus,
+} from '../types';
 import {httpClient} from '../../../shared/api/httpClient';
-import {AttendanceLocationSyncPayload, AttendanceRecord, CheckInPayload, EmployeeNotification, EmployeeNotificationListResult, MobileHomeSummary, TodayAttendanceStatus} from '../types';
 
 function authHeaders(accessToken: string) {
   // 员工端业务接口只接受后端签发 token；页面必须显式传入当前 session，避免 service 层偷偷读取全局状态造成登出后串号。
@@ -33,6 +44,26 @@ export async function fetchAttendanceRecords(accessToken: string, {limit = 7, of
   const query = `?limit=${encodeURIComponent(String(limit))}&offset=${encodeURIComponent(String(offset))}`;
   return httpClient<AttendanceRecord[]>(`/api/mobile/attendance/records${query}`, {
     headers: authHeaders(accessToken),
+  });
+}
+
+export async function fetchLeaveSummary(accessToken: string): Promise<LeaveSummary> {
+  return httpClient<LeaveSummary>('/api/mobile/attendance/leave/summary', {
+    headers: authHeaders(accessToken),
+  });
+}
+
+export async function fetchLeaveHistory(accessToken: string): Promise<LeaveRecord[]> {
+  return httpClient<LeaveRecord[]>('/api/mobile/attendance/leave/history', {
+    headers: authHeaders(accessToken),
+  });
+}
+
+export async function submitLeaveRequest(accessToken: string, payload: LeaveRequestPayload): Promise<LeaveRecord> {
+  return httpClient<LeaveRecord>('/api/mobile/attendance/leave/request', {
+    method: 'POST',
+    headers: authHeaders(accessToken),
+    body: JSON.stringify(payload),
   });
 }
 
