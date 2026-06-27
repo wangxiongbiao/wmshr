@@ -438,10 +438,11 @@ export function EmployeeModal({
           </div>
           <div>
             <FieldLabel>{tAdmin("社保金")}</FieldLabel>
+            {/* 社保金实际会出现 336 这类非整百值；若继续用 step=100，移动端浏览器会直接拦截输入并报“最接近的有效值为 300/400”。 */}
             <input
               type="number"
               name="socialSecurity"
-              step="100"
+              step="1"
               min="0"
               value={formData.socialSecurity ?? ""}
               onChange={handleChange}
