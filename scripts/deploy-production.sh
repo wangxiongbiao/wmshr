@@ -350,19 +350,15 @@ url = str(payload.get("url", "")).strip()
 if not version or not url:
     raise SystemExit(f"Mobile update API missing version/url: {payload}")
 filename = os.path.basename(urlparse(url).path) or f"wmshr-android-{version}.apk"
-print(version)
-print(url)
-print(filename)
+print(f"{version}\t{url}\t{filename}")
 PY
 }
 
 stage_current_mobile_release_for_home_deploy() {
-  local api_json release_info release_version release_url release_filename tmp_apk staged_apk
+  local api_json metadata_line release_version release_url release_filename tmp_apk staged_apk
   api_json="$(curl -fsS --connect-timeout 10 --max-time 30 "${CUSTOM_ORIGIN}/api/public/mobile-app-update")"
-  mapfile -t release_info < <(read_mobile_release_metadata "$api_json")
-  release_version="${release_info[0]}"
-  release_url="${release_info[1]}"
-  release_filename="${release_info[2]}"
+  metadata_line="$(read_mobile_release_metadata "$api_json")"
+  IFS=$'\t' read -r release_version release_url release_filename <<< "$metadata_line"
   tmp_apk="$(mktemp -t wmshr-current-mobile-release.XXXXXX.apk)"
 
   # 门户官网的 APK 资产不是长期落在仓库里；如果后续再发一次 portal，
@@ -387,11 +383,10 @@ PY
 }
 
 verify_mobile_release_downloads() {
-  local api_json release_info release_version release_url
+  local api_json metadata_line release_version release_url release_filename
   api_json="$(curl -fsS --connect-timeout 10 --max-time 30 "${HOME_CUSTOM_ORIGIN}/api/public/mobile-app-update")"
-  mapfile -t release_info < <(read_mobile_release_metadata "$api_json")
-  release_version="${release_info[0]}"
-  release_url="${release_info[1]}"
+  metadata_line="$(read_mobile_release_metadata "$api_json")"
+  IFS=$'\t' read -r release_version release_url release_filename <<< "$metadata_line"
   echo "== Portal mobile release verification =="
   echo "Version: ${release_version}"
   echo "URL: ${release_url}"
