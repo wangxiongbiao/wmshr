@@ -278,6 +278,127 @@ verify_http_status() {
   done
 }
 
+assert_apk_response() {
+  local url="$1"
+  local label="$2"
+  local expected_disposition_substring="${3:-}"
+  local header_file body_file
+  header_file="$(mktemp -t wmshr-apk-head.XXXXXX)"
+  body_file="$(mktemp -t wmshr-apk-body.XXXXXX)"
+
+  curl -sI -L --connect-timeout 10 --max-time 30 "$url" > "$header_file"
+  python3 - "$header_file" "$label" "$expected_disposition_substring" <<'PY'
+import sys
+from pathlib import Path
+
+header_path, label, expected_disposition = sys.argv[1:4]
+text = Path(header_path).read_text(errors="ignore").replace("\r\n", "\n")
+blocks = [block.strip() for block in text.split("\n\n") if block.strip()]
+if not blocks:
+    raise SystemExit(f"{label}: missing response headers")
+lines = blocks[-1].split("\n")
+status_line = lines[0].strip()
+parts = status_line.split()
+if len(parts) < 2 or not parts[1].isdigit():
+    raise SystemExit(f"{label}: unexpected status line {status_line!r}")
+status = int(parts[1])
+if status != 200:
+    raise SystemExit(f"{label}: expected HTTP 200, got {status}")
+headers = {}
+for line in lines[1:]:
+    if ":" not in line:
+        continue
+    key, value = line.split(":", 1)
+    headers[key.strip().lower()] = value.strip()
+content_type = headers.get("content-type", "")
+if "text/html" in content_type.lower():
+    raise SystemExit(f"{label}: upstream returned HTML instead of APK ({content_type})")
+content_length = headers.get("content-length", "")
+if content_length and int(content_length) < 1024 * 1024:
+    raise SystemExit(f"{label}: content-length too small for APK ({content_length})")
+if expected_disposition and expected_disposition not in headers.get("content-disposition", ""):
+    raise SystemExit(
+        f"{label}: content-disposition {headers.get('content-disposition', '')!r} missing {expected_disposition!r}"
+    )
+PY
+
+  curl -L -s --connect-timeout 10 --max-time 30 --range 0-3 -o "$body_file" "$url"
+  python3 - "$body_file" "$label" <<'PY'
+import sys
+from pathlib import Path
+
+body_path, label = sys.argv[1:3]
+data = Path(body_path).read_bytes()
+if data[:4] != b"PK\x03\x04":
+    raise SystemExit(f"{label}: first four bytes are {data[:4]!r}, expected APK/ZIP signature PK\\x03\\x04")
+PY
+
+  rm -f "$header_file" "$body_file"
+}
+
+read_mobile_release_metadata() {
+  local api_json="$1"
+  python3 - "$api_json" <<'PY'
+import json
+import os
+import sys
+from urllib.parse import urlparse
+
+payload = json.loads(sys.argv[1])
+version = str(payload.get("version", "")).strip()
+url = str(payload.get("url", "")).strip()
+if not version or not url:
+    raise SystemExit(f"Mobile update API missing version/url: {payload}")
+filename = os.path.basename(urlparse(url).path) or f"wmshr-android-{version}.apk"
+print(version)
+print(url)
+print(filename)
+PY
+}
+
+stage_current_mobile_release_for_home_deploy() {
+  local api_json release_info release_version release_url release_filename tmp_apk staged_apk
+  api_json="$(curl -fsS --connect-timeout 10 --max-time 30 "${CUSTOM_ORIGIN}/api/public/mobile-app-update")"
+  mapfile -t release_info < <(read_mobile_release_metadata "$api_json")
+  release_version="${release_info[0]}"
+  release_url="${release_info[1]}"
+  release_filename="${release_info[2]}"
+  tmp_apk="$(mktemp -t wmshr-current-mobile-release.XXXXXX.apk)"
+
+  # 门户官网的 APK 资产不是长期落在仓库里；如果后续再发一次 portal，
+  # 必须先把“当前已发布的正式 APK”重新拉回 apps/home/public/downloads/，
+  # 否则 Vercel 新部署里会丢失该静态文件，直接 URL 与下载代理都会回退成 index.html。
+  download_with_retry "$release_url" "$tmp_apk"
+  python3 - "$tmp_apk" "$release_version" "$release_url" <<'PY'
+import sys
+from pathlib import Path
+
+apk_path, version, url = sys.argv[1:4]
+data = Path(apk_path).read_bytes()
+if data[:4] != b"PK\x03\x04":
+    raise SystemExit(f"Current mobile release {version} from {url} is not an APK/ZIP payload")
+PY
+
+  staged_apk="${REPO_ROOT}/apps/home/public/downloads/${release_filename}"
+  mkdir -p "$(dirname "$staged_apk")"
+  cp "$tmp_apk" "$staged_apk"
+  rm -f "$tmp_apk"
+  echo "$staged_apk"
+}
+
+verify_mobile_release_downloads() {
+  local api_json release_info release_version release_url
+  api_json="$(curl -fsS --connect-timeout 10 --max-time 30 "${HOME_CUSTOM_ORIGIN}/api/public/mobile-app-update")"
+  mapfile -t release_info < <(read_mobile_release_metadata "$api_json")
+  release_version="${release_info[0]}"
+  release_url="${release_info[1]}"
+  echo "== Portal mobile release verification =="
+  echo "Version: ${release_version}"
+  echo "URL: ${release_url}"
+  assert_apk_response "$release_url" "Portal direct Android APK"
+  assert_apk_response "${HOME_CUSTOM_ORIGIN}/api/public/mobile-app-download" "Portal proxied Android APK" "wms-${release_version}.apk"
+}
+
 verify_home_production() {
   local html_file bundle_path bundle_file
   html_file="$(mktemp -t wmshr-home-html.XXXXXX)"
@@ -315,12 +436,14 @@ PY
     echo "Portal bundle still contains removed Google-login CTA text." >&2
     exit 1
   fi
+  verify_mobile_release_downloads
 }
 
 deploy_home_production() {
   local home_deploy_log="$1"
-  local admin_config_backup deploy_status
+  local admin_config_backup deploy_status staged_mobile_release
   admin_config_backup="$(mktemp -t wmshr-admin-vercel-config.XXXXXX.json)"
+  staged_mobile_release="$(stage_current_mobile_release_for_home_deploy)"
 
   # Vercel only receives one root vercel.json during a monorepo root deploy.
   # The admin config is restored through a RETURN trap even when the portal deploy
@@ -332,7 +455,7 @@ deploy_home_production() {
   # remote build, and can fail the release on upload size alone.
   assert_vercel_config "${REPO_ROOT}/vercel.json" admin
   cp "${REPO_ROOT}/vercel.json" "$admin_config_backup"
-  trap 'cp "$admin_config_backup" "${REPO_ROOT}/vercel.json"; rm -f "$admin_config_backup"; trap - RETURN' RETURN
+  trap 'rm -f "$staged_mobile_release"; cp "$admin_config_backup" "${REPO_ROOT}/vercel.json"; rm -f "$admin_config_backup"; trap - RETURN' RETURN
 
   cat >"${REPO_ROOT}/vercel.json" <<'JSON'
 {
@@ -361,6 +484,7 @@ JSON
   deploy_status=${PIPESTATUS[0]}
   set -e
 
+  rm -f "$staged_mobile_release"
   cp "$admin_config_backup" "${REPO_ROOT}/vercel.json"
   rm -f "$admin_config_backup"
   trap - RETURN

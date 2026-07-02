@@ -3708,6 +3708,18 @@ async function handleMobileAppDownload(req, res) {
     }
 
     const contentType = upstream.headers.get("content-type") || "application/octet-stream";
+    // 官网下载代理不能把门户首页 HTML 伪装成 APK 附件透传出去；
+    // 一旦上游静态包在后续门户部署中丢失，Vercel 会回 index.html，用户表面上就会看到“下载了 html 而不是 apk”。
+    // 这里必须把这种回退显式判成坏发布，返回 502 触发重新发布当前 APK，而不是继续把错误内容缓存到用户设备。
+    if (/text\/html/i.test(contentType)) {
+      console.error("[mobile-app-download] upstream returned html instead of apk", {
+        version: release.version,
+        url: release.url,
+        contentType,
+        method: req.method,
+      });
+      return res.status(502).json({ error: "Android 安装包下载源返回了网页内容，请重新发布当前版本 APK" });
+    }
     const contentLength = upstream.headers.get("content-length");
     const contentRange = upstream.headers.get("content-range");
     const acceptRanges = upstream.headers.get("accept-ranges");

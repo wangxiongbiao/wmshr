@@ -76,6 +76,71 @@ for cmd in npm node python3 curl vercel; do
   fi
 done
 
+assert_apk_response() {
+  local url="$1"
+  local label="$2"
+  local expected_size="${3:-}"
+  local expected_disposition_substring="${4:-}"
+  local header_file body_file
+  header_file="$(mktemp -t wmshr-apk-head.XXXXXX)"
+  body_file="$(mktemp -t wmshr-apk-body.XXXXXX)"
+
+  curl -sI -L --connect-timeout 10 --max-time 30 "$url" > "$header_file"
+  python3 - "$header_file" "$label" "$expected_size" "$expected_disposition_substring" <<'PY'
+import sys
+from pathlib import Path
+
+header_path, label, expected_size_raw, expected_disposition = sys.argv[1:5]
+text = Path(header_path).read_text(errors="ignore").replace("\r\n", "\n")
+blocks = [block.strip() for block in text.split("\n\n") if block.strip()]
+if not blocks:
+    raise SystemExit(f"{label}: missing response headers")
+lines = blocks[-1].split("\n")
+status_line = lines[0].strip()
+parts = status_line.split()
+if len(parts) < 2 or not parts[1].isdigit():
+    raise SystemExit(f"{label}: unexpected status line {status_line!r}")
+status = int(parts[1])
+if status != 200:
+    raise SystemExit(f"{label}: expected HTTP 200, got {status}")
+headers = {}
+for line in lines[1:]:
+    if ":" not in line:
+        continue
+    key, value = line.split(":", 1)
+    headers[key.strip().lower()] = value.strip()
+content_type = headers.get("content-type", "")
+if "text/html" in content_type.lower():
+    raise SystemExit(f"{label}: upstream returned HTML instead of APK ({content_type})")
+content_length = headers.get("content-length", "")
+if expected_size_raw:
+    expected_size = int(expected_size_raw)
+    if not content_length:
+        raise SystemExit(f"{label}: missing content-length, expected {expected_size}")
+    if int(content_length) != expected_size:
+        raise SystemExit(f"{label}: content-length mismatch, got {content_length}, expected {expected_size}")
+elif content_length and int(content_length) < 1024 * 1024:
+    raise SystemExit(f"{label}: content-length too small for APK ({content_length})")
+if expected_disposition and expected_disposition not in headers.get("content-disposition", ""):
+    raise SystemExit(
+        f"{label}: content-disposition {headers.get('content-disposition', '')!r} missing {expected_disposition!r}"
+    )
+PY
+
+  curl -L -s --connect-timeout 10 --max-time 30 --range 0-3 -o "$body_file" "$url"
+  python3 - "$body_file" "$label" <<'PY'
+import sys
+from pathlib import Path
+
+body_path, label = sys.argv[1:3]
+data = Path(body_path).read_bytes()
+if data[:4] != b"PK\x03\x04":
+    raise SystemExit(f"{label}: first four bytes are {data[:4]!r}, expected APK/ZIP signature PK\\x03\\x04")
+PY
+
+  rm -f "$header_file" "$body_file"
+}
+
 APK_ABS="$(python3 - "$APK_PATH" <<'PY'
 import sys
 from pathlib import Path
@@ -91,6 +156,7 @@ fi
 APK_NAME="wmshr-android-${VERSION}.apk"
 STAGED_APK="${REPO_ROOT}/apps/home/public/downloads/${APK_NAME}"
 DIST_APK="${REPO_ROOT}/apps/home/dist/downloads/${APK_NAME}"
+LOCAL_APK_SIZE="$(stat -f '%z' "$APK_ABS")"
 DEPLOY_LOG="$(mktemp -t wmshr-home-apk-deploy.XXXXXX.log)"
 VERCEL_BACKUP="$(mktemp -t wmshr-home-vercel-config.XXXXXX.json)"
 
@@ -139,11 +205,9 @@ cp "$VERCEL_BACKUP" "${REPO_ROOT}/vercel.json"
 rm -f "$VERCEL_BACKUP"
 
 APK_URL="${HOME_CUSTOM_ORIGIN}/downloads/${APK_NAME}"
-HTTP_STATUS="$(curl -I -L -s -o /tmp/wmshr-home-apk-head.txt -w '%{http_code}' "$APK_URL")"
-if [[ "$HTTP_STATUS" != "200" ]]; then
-  echo "Published APK URL did not return HTTP 200: $APK_URL (got $HTTP_STATUS)" >&2
-  exit 1
-fi
+# 门户静态 APK 如果只校验 200，会把 Vercel SPA fallback 的 index.html 当成“发布成功”；
+# 这里必须同时校验头部与 ZIP magic，避免后续官网下载重新回成 html 还继续写入数据库版本记录。
+assert_apk_response "$APK_URL" "Published portal APK URL" "$LOCAL_APK_SIZE"
 
 node "${REPO_ROOT}/scripts/update-mobile-android-release.mjs" \
   --version "$VERSION" \
@@ -162,6 +226,12 @@ expected_version, expected_url = sys.argv[1], sys.argv[2]
 if payload.get('version') != expected_version or payload.get('url') != expected_url:
     raise SystemExit(f"Update API mismatch: {payload}")
 PY
+
+assert_apk_response \
+  "${HOME_CUSTOM_ORIGIN}/api/public/mobile-app-download" \
+  "Published portal download proxy" \
+  "$LOCAL_APK_SIZE" \
+  "wms-${VERSION}.apk"
 
 popd >/dev/null
 
