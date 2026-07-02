@@ -38,10 +38,20 @@ COMMIT_MESSAGE="release production $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 HTTP_CHECK_MAX_ATTEMPTS=3
 HTTP_CHECK_RETRY_DELAY_SECONDS=2
 VERCEL_BIN=""
+POST_DEPLOY_CHECKLIST_RELATIVE="docs/production-release-post-checklist.md"
+POST_DEPLOY_CHECKLIST_PATH="${REPO_ROOT}/${POST_DEPLOY_CHECKLIST_RELATIVE}"
+PREVIOUS_ADMIN_DEPLOYMENT_URL=""
+PREVIOUS_HOME_DEPLOYMENT_URL=""
+ADMIN_ALIAS_UPDATED=0
+HOME_ALIAS_UPDATED=0
+PRODUCTION_CHECKS_PASSED=0
 
 usage() {
   cat <<'EOF'
 Usage: npm run deploy:prod -- [options]
+
+Post-deploy checklist:
+  docs/production-release-post-checklist.md
 
 Options:
   -m, --message <text>   Commit message used when the working tree has changes.
@@ -51,7 +61,8 @@ Options:
 
 Default flow:
   lint/build/diff-check/test -> optional Supabase db push -> commit if dirty -> push main ->
-  Vercel prod deploy admin + portal -> alias custom domains -> verify production endpoints/assets -> update project log.
+  Vercel prod deploy admin + portal -> alias custom domains -> verify production endpoints/assets ->
+  if verification fails, restore the production domains to the deployment URLs that were live when the release started -> update project log.
 EOF
 }
 
@@ -134,6 +145,17 @@ resolve_vercel_bin() {
 run_vercel() {
   echo "+ ${VERCEL_BIN} $*"
   "$VERCEL_BIN" "$@"
+}
+
+assert_post_deploy_checklist_present() {
+  if [[ ! -f "$POST_DEPLOY_CHECKLIST_PATH" ]]; then
+    echo "Post-deploy checklist not found: $POST_DEPLOY_CHECKLIST_PATH" >&2
+    exit 1
+  fi
+}
+
+print_post_deploy_checklist_link() {
+  echo "Post-deploy checklist: ${POST_DEPLOY_CHECKLIST_RELATIVE}"
 }
 
 assert_vercel_auth() {
@@ -243,6 +265,74 @@ extract_home_deployment_url() {
   # The monorepo root is linked to dutylix-admin, so the portal deploy is parsed separately
   # from the explicit apps/home Vercel project to avoid aliasing the admin deployment to dutylix.com.
   grep -Eo 'https://dutylix-[^[:space:]]+-wang-lins-projects\.vercel\.app' "$1" | tail -n 1
+}
+
+capture_current_production_deployment_urls() {
+  local admin_inspect_log home_inspect_log
+  admin_inspect_log="$(mktemp -t wmshr-admin-inspect.XXXXXX.log)"
+  home_inspect_log="$(mktemp -t wmshr-home-inspect.XXXXXX.log)"
+
+  # Any release-time rollback must go back to the exact deployments that were serving
+  # admin.dutylix.com and dutylix.com when this run started; capture those URLs before
+  # we deploy or re-alias anything so a failed verification can restore production quickly.
+  "$VERCEL_BIN" inspect "$CUSTOM_DOMAIN" > "$admin_inspect_log" 2>&1
+  "$VERCEL_BIN" inspect "$HOME_CUSTOM_DOMAIN" > "$home_inspect_log" 2>&1
+
+  PREVIOUS_ADMIN_DEPLOYMENT_URL="$(extract_deployment_url "$admin_inspect_log")"
+  PREVIOUS_HOME_DEPLOYMENT_URL="$(extract_home_deployment_url "$home_inspect_log")"
+  rm -f "$admin_inspect_log" "$home_inspect_log"
+
+  if [[ -z "$PREVIOUS_ADMIN_DEPLOYMENT_URL" || -z "$PREVIOUS_HOME_DEPLOYMENT_URL" ]]; then
+    echo "Could not capture the current production deployment URLs for rollback." >&2
+    echo "admin previous deployment: ${PREVIOUS_ADMIN_DEPLOYMENT_URL:-<missing>}" >&2
+    echo "portal previous deployment: ${PREVIOUS_HOME_DEPLOYMENT_URL:-<missing>}" >&2
+    exit 1
+  fi
+
+  assert_deployment_url admin "$PREVIOUS_ADMIN_DEPLOYMENT_URL"
+  assert_deployment_url home "$PREVIOUS_HOME_DEPLOYMENT_URL"
+  echo "Current admin production deployment: $PREVIOUS_ADMIN_DEPLOYMENT_URL"
+  echo "Current portal production deployment: $PREVIOUS_HOME_DEPLOYMENT_URL"
+}
+
+rollback_production_aliases() {
+  local rollback_failed=0
+  if [[ "$ADMIN_ALIAS_UPDATED" != "1" && "$HOME_ALIAS_UPDATED" != "1" ]]; then
+    echo "No production domains were changed yet; nothing to roll back." >&2
+    return 0
+  fi
+
+  echo "== Automated production rollback ==" >&2
+
+  if [[ "$ADMIN_ALIAS_UPDATED" == "1" && -n "$PREVIOUS_ADMIN_DEPLOYMENT_URL" ]]; then
+    if ! run_vercel alias set "$PREVIOUS_ADMIN_DEPLOYMENT_URL" "$CUSTOM_DOMAIN"; then
+      rollback_failed=1
+    fi
+  fi
+
+  if [[ "$HOME_ALIAS_UPDATED" == "1" && -n "$PREVIOUS_HOME_DEPLOYMENT_URL" ]]; then
+    if ! run_vercel alias set "$PREVIOUS_HOME_DEPLOYMENT_URL" "$HOME_CUSTOM_DOMAIN"; then
+      rollback_failed=1
+    fi
+  fi
+
+  if [[ "$rollback_failed" == "1" ]]; then
+    echo "Automatic rollback did not finish cleanly." >&2
+    echo "Manual rollback targets:" >&2
+    echo "  admin -> ${PREVIOUS_ADMIN_DEPLOYMENT_URL}" >&2
+    echo "  portal -> ${PREVIOUS_HOME_DEPLOYMENT_URL}" >&2
+    return 1
+  fi
+
+  echo "Production domains restored to their pre-release deployments." >&2
+}
+
+release_exit_trap() {
+  local status=$?
+  if [[ "$status" != "0" && "$PRODUCTION_CHECKS_PASSED" != "1" ]]; then
+    echo "Release exited before production verification completed successfully (exit ${status})." >&2
+    rollback_production_aliases || true
+  fi
 }
 
 verify_http_status() {
@@ -552,6 +642,7 @@ PY
 
 main() {
   cd "$REPO_ROOT"
+  trap release_exit_trap EXIT
 
   require_command git
   require_command npm
@@ -563,6 +654,7 @@ main() {
 
   resolve_vercel_bin
   assert_vercel_auth
+  assert_post_deploy_checklist_present
 
   local branch
   branch="$(git branch --show-current)"
@@ -572,10 +664,12 @@ main() {
   fi
 
   assert_vercel_config "${REPO_ROOT}/vercel.json" admin
+  capture_current_production_deployment_urls
 
   echo "== WMSHR production release =="
   echo "Repo: $REPO_ROOT"
   echo "Domain: $CUSTOM_ORIGIN"
+  print_post_deploy_checklist_link
   echo
   run git status --short --branch
 
@@ -636,6 +730,7 @@ main() {
   assert_deployment_url admin "$deployment_url"
 
   run_vercel alias set "$deployment_url" "$CUSTOM_DOMAIN"
+  ADMIN_ALIAS_UPDATED=1
 
   echo "== Production verification =="
   verify_http_status "$CUSTOM_ORIGIN" "200"
@@ -664,7 +759,9 @@ main() {
   fi
   assert_deployment_url home "$home_deployment_url"
   run_vercel alias set "$home_deployment_url" "$HOME_CUSTOM_DOMAIN"
+  HOME_ALIAS_UPDATED=1
   verify_home_production
+  PRODUCTION_CHECKS_PASSED=1
 
   if [[ "$RUN_PROJECT_MANAGER_LOG" == "1" ]]; then
     update_project_manager_log "$head_sha" "$deployment_url" "$home_deployment_url"
@@ -675,10 +772,13 @@ main() {
   echo
   echo "Release completed."
   echo "HEAD: $head_sha"
+  echo "Previous admin deployment: $PREVIOUS_ADMIN_DEPLOYMENT_URL"
   echo "Admin deployment: $deployment_url"
   echo "Admin production: $CUSTOM_ORIGIN"
+  echo "Previous portal deployment: $PREVIOUS_HOME_DEPLOYMENT_URL"
   echo "Portal deployment: $home_deployment_url"
   echo "Portal production: $HOME_CUSTOM_ORIGIN"
+  print_post_deploy_checklist_link
 }
 
 main "$@"
