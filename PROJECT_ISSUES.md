@@ -105,3 +105,17 @@
 - 导致的问题：`HOME=/Users/admin npm run mobile:release:android` 已把移动端版本写到 `0.1.29`，且 `:app:createBundleReleaseJsAndAssets --rerun-tasks` 返回 `BUILD SUCCESSFUL`，但尚未执行 `assembleRelease` 和官网发布步骤，因此没有产出/发布 APK。
 - 解决方式：两个 production 本地构建脚本都改为显式区分“有架构参数”和“无架构参数”两条 assembleRelease 命令；无架构参数时直接运行 `./gradlew assembleRelease`，避免空数组在 macOS Bash + `set -u` 下被展开。
 - 解决验证：用固定版本 `0.1.29` 重新执行 `HOME=/Users/admin npm run mobile:release:android -- --version 0.1.29`，脚本完整退出 0；官网部署到 `https://dutylix.com`，APK 地址为 `https://dutylix.com/downloads/wmshr-android-0.1.29.apk`，更新 API 返回 `version=0.1.29` 和同一 URL。本地 APK 大小 `71611886`，线上 `content-length=71611886`；本地 MD5 与线上 ETag 均为 `c43f34e62117498f116116b63899e8db`；`aapt dump badging` 确认 APK 为 `versionName='0.1.29'`、`versionCode='129'`。
+
+## 2026-07-02 问题 14：门户再次发布后官网 APK 下载回退成 HTML
+- 原因：当前 Android 正式包通过 `scripts/publish-local-android-apk-to-home.sh` 临时拷贝到 `apps/home/public/downloads/` 后发布到 `dutylix.com`；后续再执行普通 portal 生产发布时，如果没有把“当前已发布 APK”重新带进新的 home 部署，`/downloads/wmshr-android-0.1.29.apk` 会在新 deployment 中消失并回退成 SPA 的 `index.html`。同时旧的 `handleMobileAppDownload()` 只要上游 `200` 就直接透传，导致同源下载代理也会把 HTML 当成 APK 附件返回。修复 deploy 脚本时还额外暴露了一个环境兼容坑：macOS 自带 Bash 3.2 不支持 `mapfile`，第一次生产发布在 admin 成功后中断在 portal 阶段。
+- 导致的问题：官网 `https://dutylix.com/downloads/wmshr-android-0.1.29.apk` 返回 `content-type: text/html; charset=utf-8`、`content-length: 606`；`https://dutylix.com/api/public/mobile-app-download` 也会返回带 `attachment` 头的 HTML，用户看到的现象就是“下载成了 html 而不是 apk”。
+- 解决方式：
+  - `apps/admin/server/index.js` 的 `handleMobileAppDownload()` 新增上游内容校验，若下载源返回 `text/html` 就直接返回 502，不再把首页 HTML 伪装成 APK 透传。
+  - `scripts/publish-local-android-apk-to-home.sh` 改为在写数据库前强校验官网静态 APK 与同源代理：不仅要求 HTTP 200，还要求 `content-type` 非 HTML、`content-length` 与本地 APK 一致，且首 4 字节必须是 APK/ZIP magic `PK\x03\x04`。
+  - `scripts/deploy-production.sh` 改为在 portal 部署前先从当前 `mobile-app-update` 记录下载并暂存“当前正式 APK”到 `apps/home/public/downloads/`，确保后续 portal 再发布时不会丢失该静态资产；portal 生产验收也新增 Android 直链和同源代理校验。脚本里的 `mapfile` 同步改成 macOS Bash 3.2 可用的 TSV + `read` 解析。
+  - 现场恢复时，先用本地已有 `apps/mobile/android/app/build/outputs/apk/release/app-release.apk` 重新执行 `HOME=/Users/admin npm run mobile:publish:android:local-to-home -- --apk ... --version 0.1.29`，把官网当前 APK 重新挂回生产；随后执行 `HOME=/Users/admin npm run deploy:prod -- --no-db --no-project-log`，将 admin 保护逻辑和新的 portal 保留/验收逻辑一起发布到正式环境。
+- 解决验证：
+  - 重新发布当前 APK 后，`https://dutylix.com/downloads/wmshr-android-0.1.29.apk` 返回 `content-type: application/vnd.android.package-archive`、`content-length: 71611886`、`etag: "c43f34e62117498f116116b63899e8db"`。
+  - 同源代理 `https://dutylix.com/api/public/mobile-app-download` 返回 `content-disposition: attachment; filename="wms-0.1.29.apk"`、`content-type: application/vnd.android.package-archive`、`content-length: 71611886`，`curl --range 0-3` 的首 4 字节为 `504b0304`。
+  - 更新接口 `https://dutylix.com/api/public/mobile-app-update` 返回 `{"version":"0.1.29","url":"https://dutylix.com/downloads/wmshr-android-0.1.29.apk"}`。
+  - 防回归发布已真实跑通：`HOME=/Users/admin npm run deploy:prod -- --no-db --no-project-log` 完整退出 0；GitHub `main` HEAD 为 `930500057b0616dc44a45feecc678946b89899b2`；admin 正式部署 URL 为 `https://dutylix-admin-24oodg8a8-wang-lins-projects.vercel.app`，portal 正式部署 URL 为 `https://dutylix-ie5b0ynd5-wang-lins-projects.vercel.app`。
