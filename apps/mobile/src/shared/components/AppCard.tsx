@@ -14,7 +14,7 @@ const styles = StyleSheet.create({
   // AppCard 只沉淀通用卡片容器样式；业务字段、点击行为和数据状态必须留在 feature 组件内，避免 shared 层反向了解业务。
   card: {
     backgroundColor: colors.surface,
-    borderRadius: 24,
+    borderRadius: 16,
     padding: 18,
     shadowColor: colors.text,
     shadowOpacity: 0.05,

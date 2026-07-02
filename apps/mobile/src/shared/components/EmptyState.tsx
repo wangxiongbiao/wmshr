@@ -25,7 +25,7 @@ export function EmptyState({title, description, icon = 'file-tray-outline'}: Pro
 const styles = StyleSheet.create({
   // EmptyState 只表达“无数据”通用形态；具体空态原因和下一步动作由调用方传入，避免共享组件写死业务流程。
   container: {alignItems: 'center', justifyContent: 'center', padding: 28, gap: 10},
-  iconWrap: {width: 58, height: 58, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f1f5f9'},
+  iconWrap: {width: 58, height: 58, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f1f5f9'},
   title: {textAlign: 'center'},
   description: {textAlign: 'center'},
 });

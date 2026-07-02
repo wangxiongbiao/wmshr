@@ -344,7 +344,7 @@ function StatCard({label, value, unit}: {label: string; value: string; unit: str
   return (
     <View style={styles.statCard}>
       <Text style={styles.statLabel} numberOfLines={2}>{label}</Text>
-      <Text style={styles.statValue}>
+      <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>
         {value}
         <Text style={styles.statUnit}>{unit}</Text>
       </Text>
@@ -389,24 +389,24 @@ function NoticeRow({
 const styles = StyleSheet.create({
   statsGrid: {marginTop: 16, flexDirection: 'row', gap: 12},
   // 首页统计卡在中英文切换时都保持三列，因此标题默认允许两行并取消全大写/大字距，优先保证小屏上的可读性。
-  statCard: {flex: 1, minHeight: 94, paddingHorizontal: 14, paddingVertical: 18, borderRadius: 24, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center', shadowColor: colors.text, shadowOpacity: 0.03, shadowRadius: 16, shadowOffset: {width: 0, height: 6}, elevation: 2, borderWidth: 1, borderColor: '#f8fafc'},
+  statCard: {flex: 1, minHeight: 94, paddingHorizontal: 14, paddingVertical: 18, borderRadius: 16, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center', shadowColor: colors.text, shadowOpacity: 0.03, shadowRadius: 16, shadowOffset: {width: 0, height: 6}, elevation: 2, borderWidth: 1, borderColor: '#f8fafc'},
   statLabel: {fontSize: 10, lineHeight: 13, color: colors.textMuted, fontWeight: '900', textAlign: 'center', flexShrink: 1},
-  statValue: {marginTop: 8, fontSize: 24, lineHeight: 28, color: colors.text, fontWeight: '900'},
-  statUnit: {fontSize: 11, color: colors.textMuted, fontWeight: '800'},
-  noticeCard: {marginTop: 16, padding: 20, borderRadius: 28, backgroundColor: colors.white, shadowColor: colors.text, shadowOpacity: 0.03, shadowRadius: 20, shadowOffset: {width: 0, height: 8}, elevation: 3, borderWidth: 1, borderColor: '#f1f5f9'},
+  statValue: {width: '100%', marginTop: 8, fontSize: 20, lineHeight: 24, color: colors.text, fontWeight: '900', textAlign: 'center', includeFontPadding: false},
+  statUnit: {fontSize: 10, color: colors.textMuted, fontWeight: '800'},
+  noticeCard: {marginTop: 16, padding: 20, borderRadius: 16, backgroundColor: colors.white, shadowColor: colors.text, shadowOpacity: 0.03, shadowRadius: 20, shadowOffset: {width: 0, height: 8}, elevation: 3, borderWidth: 1, borderColor: '#f1f5f9'},
   noticeHeader: {flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 10},
   noticeTitleWrap: {flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, minWidth: 0},
   noticeTitle: {fontSize: 13, lineHeight: 17, color: colors.text, fontWeight: '900', flexShrink: 1},
   noticeActionWrap: {flexShrink: 0, maxWidth: 88},
   noticeAction: {fontSize: 11, color: colors.primary, fontWeight: '900', textAlign: 'right'},
-  noticeBadge: {minWidth: 20, height: 20, borderRadius: 999, paddingHorizontal: 6, backgroundColor: '#dbeafe', alignItems: 'center', justifyContent: 'center', flexShrink: 0},
+  noticeBadge: {minWidth: 20, height: 20, borderRadius: 16, paddingHorizontal: 6, backgroundColor: '#dbeafe', alignItems: 'center', justifyContent: 'center', flexShrink: 0},
   noticeBadgeText: {fontSize: 11, color: colors.primary, fontWeight: '900'},
   noticeRow: {flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 12},
   noticeRowPressed: {opacity: 0.72},
-  noticeIconWrap: {width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center', flexShrink: 0},
+  noticeIconWrap: {width: 40, height: 40, borderRadius: 16, alignItems: 'center', justifyContent: 'center', flexShrink: 0},
   noticeCopy: {flex: 1, minWidth: 0},
   noticeRowTitleWrap: {flexDirection: 'row', alignItems: 'center', gap: 8, minWidth: 0},
   noticeRowTitle: {fontSize: 14, lineHeight: 18, color: colors.text, fontWeight: '800', flexShrink: 1},
   noticeRowDetail: {marginTop: 2, fontSize: 12, lineHeight: 18, color: colors.textSubtle, fontWeight: '600'},
-  noticeUnreadDot: {width: 8, height: 8, borderRadius: 999, backgroundColor: colors.primary, flexShrink: 0},
+  noticeUnreadDot: {width: 8, height: 8, borderRadius: 16, backgroundColor: colors.primary, flexShrink: 0},
 });

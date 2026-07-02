@@ -334,18 +334,6 @@ export function AttendanceListScreen() {
 
       {activeTab === 'records' ? (
         <>
-          <View style={styles.heroCard}>
-            <View style={styles.heroHeader}>
-              <View style={styles.heroIconWrap}>
-                <Ionicons name="calendar-outline" size={18} color={colors.primary} />
-              </View>
-              <View style={styles.heroCopy}>
-                <Text style={styles.heroTitle}>{t('最近打卡总览')}</Text>
-                <Text style={styles.heroDetail}>{t('列表页直接查看每天的上下班时间、工时和记录状态。')}</Text>
-              </View>
-            </View>
-          </View>
-
           <View style={styles.statsGrid}>
             <StatCard label={t('累计工时')} value={attendanceSummary.totalHours} unit="h" />
             <StatCard label={t('加班次数')} value={attendanceSummary.overtimeCount} unit="d" />
@@ -402,12 +390,12 @@ export function AttendanceListScreen() {
           <View style={styles.leaveStatsCard}>
             <View style={styles.leaveStatBlock}>
               <Text style={styles.leaveStatLabel}>{t('本月已请假')}</Text>
-              <Text style={styles.leaveStatValue}>{leaveSummary.monthUsedDays}<Text style={styles.leaveStatUnit}>{t('天')}</Text></Text>
+              <Text style={styles.leaveStatValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>{leaveSummary.monthUsedDays}<Text style={styles.leaveStatUnit}>{t('天')}</Text></Text>
             </View>
             <View style={styles.leaveDivider} />
             <View style={styles.leaveStatBlock}>
               <Text style={styles.leaveStatLabel}>{t('审批状态')}</Text>
-              <Text style={[styles.leaveStatValue, styles.leavePendingValue]}>{leaveSummary.pendingCount}<Text style={styles.leaveStatUnit}>{t('单待审')}</Text></Text>
+              <Text style={[styles.leaveStatValue, styles.leavePendingValue]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>{leaveSummary.pendingCount}<Text style={styles.leaveStatUnit}>{t('单待审')}</Text></Text>
             </View>
           </View>
 
@@ -547,7 +535,7 @@ function SegmentButton({active, label, onPress}: {active: boolean; label: string
 function LeaveTypeChip({active, label, onPress}: {active: boolean; label: string; onPress: () => void}) {
   return (
     <Pressable style={({pressed}) => [styles.leaveTypeChip, active && styles.leaveTypeChipActive, pressed && styles.recordCardPressed]} onPress={onPress}>
-      <Text style={[styles.leaveTypeChipText, active && styles.leaveTypeChipTextActive]}>{label}</Text>
+      <Text style={[styles.leaveTypeChipText, active && styles.leaveTypeChipTextActive]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.82}>{label}</Text>
     </Pressable>
   );
 }
@@ -574,8 +562,8 @@ function DateInput({
   return (
     <View>
       <Pressable style={({pressed}) => [styles.dateInputWrap, pressed && styles.recordCardPressed]} onPress={() => setIsPickerVisible(true)}>
-        <Text style={value ? styles.dateInputValue : styles.dateInputPlaceholder}>{value || placeholder}</Text>
-        <Ionicons name="calendar-outline" size={20} color={colors.text} />
+        <Text style={value ? styles.dateInputValue : styles.dateInputPlaceholder} numberOfLines={1}>{value || placeholder}</Text>
+        <Ionicons name="calendar-outline" size={18} color={colors.text} />
       </Pressable>
       <Modal transparent animationType="fade" visible={isPickerVisible} onRequestClose={() => setIsPickerVisible(false)}>
         <View style={styles.calendarOverlay}>
@@ -618,7 +606,7 @@ function StatCard({label, value, unit}: {label: string; value: string; unit: str
   return (
     <View style={styles.statCard}>
       <Text style={styles.statLabel}>{label}</Text>
-      <Text style={styles.statValue}>
+      <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>
         {value}
         <Text style={styles.statUnit}>{unit}</Text>
       </Text>
@@ -641,90 +629,85 @@ const styles = StyleSheet.create({
   headerTitleBlock: {flex: 1, minWidth: 0},
   headerTitleText: {flexShrink: 1},
   headerSubtitleText: {flexShrink: 1},
-  headerActionButton: {width: 136, flexShrink: 0, minHeight: 56, borderRadius: 20, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary, shadowColor: colors.primary, shadowOpacity: 0.24, shadowRadius: 16, shadowOffset: {width: 0, height: 8}, elevation: 4},
+  headerActionButton: {width: 136, flexShrink: 0, minHeight: 56, borderRadius: 16, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary, shadowColor: colors.primary, shadowOpacity: 0.24, shadowRadius: 16, shadowOffset: {width: 0, height: 8}, elevation: 4},
   headerActionButtonPressed: {opacity: 0.86},
   headerActionButtonText: {fontSize: 15, fontWeight: '900', color: colors.white, textAlign: 'center'},
-  segmentWrap: {marginBottom: 18, flexDirection: 'row', gap: 12, backgroundColor: '#edf2f7', borderRadius: 22, padding: 6, borderWidth: 1, borderColor: '#e2e8f0'},
-  segmentButton: {flex: 1, minWidth: 0, minHeight: 52, borderRadius: 18, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12},
+  segmentWrap: {marginBottom: 18, flexDirection: 'row', gap: 12, backgroundColor: '#edf2f7', borderRadius: 16, padding: 6, borderWidth: 1, borderColor: '#e2e8f0'},
+  segmentButton: {flex: 1, minWidth: 0, minHeight: 52, borderRadius: 16, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12},
   segmentButtonActive: {backgroundColor: colors.white, shadowColor: colors.text, shadowOpacity: 0.06, shadowRadius: 12, shadowOffset: {width: 0, height: 4}, elevation: 2},
   segmentButtonText: {fontSize: 15, fontWeight: '800', color: colors.textSubtle, textAlign: 'center', flexShrink: 1},
   segmentButtonTextActive: {color: colors.text},
-  heroCard: {backgroundColor: colors.white, borderRadius: 28, padding: 20, borderWidth: 1, borderColor: '#eef2ff', shadowColor: colors.text, shadowOpacity: 0.03, shadowRadius: 20, shadowOffset: {width: 0, height: 8}, elevation: 3},
-  heroHeader: {flexDirection: 'row', alignItems: 'flex-start', gap: 14},
-  heroIconWrap: {width: 42, height: 42, borderRadius: 16, backgroundColor: '#eff6ff', alignItems: 'center', justifyContent: 'center'},
-  heroCopy: {flex: 1},
-  heroTitle: {fontSize: 16, color: colors.text, fontWeight: '900'},
-  heroDetail: {marginTop: 4, fontSize: 13, lineHeight: 19, color: colors.textSubtle, fontWeight: '600'},
-  statsGrid: {marginTop: 16, flexDirection: 'row', gap: 12},
-  statCard: {flex: 1, minHeight: 94, paddingHorizontal: 14, paddingVertical: 18, borderRadius: 24, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center', shadowColor: colors.text, shadowOpacity: 0.03, shadowRadius: 16, shadowOffset: {width: 0, height: 6}, elevation: 2, borderWidth: 1, borderColor: '#f8fafc'},
+  statsGrid: {marginTop: 0, flexDirection: 'row', gap: 12},
+  statCard: {flex: 1, minHeight: 94, paddingHorizontal: 14, paddingVertical: 18, borderRadius: 16, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center', shadowColor: colors.text, shadowOpacity: 0.03, shadowRadius: 16, shadowOffset: {width: 0, height: 6}, elevation: 2, borderWidth: 1, borderColor: '#f8fafc'},
   statLabel: {fontSize: 10, color: colors.textMuted, fontWeight: '900', letterSpacing: 1.2, textTransform: 'uppercase'},
-  statValue: {marginTop: 8, fontSize: 24, lineHeight: 28, color: colors.text, fontWeight: '900'},
-  statUnit: {fontSize: 11, color: colors.textMuted, fontWeight: '800'},
-  placeholderCard: {marginTop: 16, backgroundColor: colors.white, borderRadius: 28, padding: 24, alignItems: 'center', gap: 10, borderWidth: 1, borderColor: '#eef2ff'},
-  placeholderIcon: {width: 52, height: 52, borderRadius: 18, backgroundColor: '#f8fafc', alignItems: 'center', justifyContent: 'center'},
+  statValue: {width: '100%', marginTop: 8, fontSize: 20, lineHeight: 24, color: colors.text, fontWeight: '900', textAlign: 'center', includeFontPadding: false},
+  statUnit: {fontSize: 10, color: colors.textMuted, fontWeight: '800'},
+  placeholderCard: {marginTop: 16, backgroundColor: colors.white, borderRadius: 16, padding: 24, alignItems: 'center', gap: 10, borderWidth: 1, borderColor: '#eef2ff'},
+  placeholderIcon: {width: 52, height: 52, borderRadius: 16, backgroundColor: '#f8fafc', alignItems: 'center', justifyContent: 'center'},
   placeholderTitle: {fontSize: 18, color: colors.text, fontWeight: '900'},
   placeholderDetail: {fontSize: 13, lineHeight: 20, color: colors.textSubtle, textAlign: 'center'},
-  retryButton: {marginTop: 8, height: 46, minWidth: 132, borderRadius: 18, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18},
+  retryButton: {marginTop: 8, height: 46, minWidth: 132, borderRadius: 16, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18},
   retryButtonText: {color: colors.white, fontSize: 15, fontWeight: '900'},
   autoLoadHint: {marginTop: 8, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8},
-  autoLoadDot: {width: 8, height: 8, borderRadius: 999, backgroundColor: colors.primary},
+  autoLoadDot: {width: 8, height: 8, borderRadius: 16, backgroundColor: colors.primary},
   autoLoadHintText: {color: colors.textMuted, fontSize: 13, fontWeight: '700'},
-  recordCard: {marginTop: 16, backgroundColor: colors.white, borderRadius: 28, padding: 20, borderWidth: 1, borderColor: '#f1f5f9', shadowColor: colors.text, shadowOpacity: 0.03, shadowRadius: 20, shadowOffset: {width: 0, height: 8}, elevation: 3},
+  recordCard: {marginTop: 16, backgroundColor: colors.white, borderRadius: 16, padding: 20, borderWidth: 1, borderColor: '#f1f5f9', shadowColor: colors.text, shadowOpacity: 0.03, shadowRadius: 20, shadowOffset: {width: 0, height: 8}, elevation: 3},
   recordCardPressed: {opacity: 0.84},
   recordTopRow: {flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12},
   recordDate: {fontSize: 17, color: colors.text, fontWeight: '900'},
   recordTimeRange: {marginTop: 6, fontSize: 13, color: colors.textSubtle, fontWeight: '700'},
-  recordBadge: {minHeight: 30, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6, alignItems: 'center', justifyContent: 'center'},
+  recordBadge: {minHeight: 30, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6, alignItems: 'center', justifyContent: 'center'},
   recordBadgeText: {fontSize: 11, fontWeight: '900', letterSpacing: 0.4},
   recordMetrics: {marginTop: 16, flexDirection: 'row', flexWrap: 'wrap', gap: 10},
   metricPill: {flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 16, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#eef2ff'},
   metricText: {fontSize: 12, color: colors.textSubtle, fontWeight: '700'},
-  leaveStatsCard: {marginTop: 8, flexDirection: 'row', alignItems: 'stretch', backgroundColor: colors.white, borderRadius: 28, paddingHorizontal: 22, paddingVertical: 24, borderWidth: 1, borderColor: '#edf2ff', shadowColor: colors.text, shadowOpacity: 0.03, shadowRadius: 20, shadowOffset: {width: 0, height: 8}, elevation: 3},
+  // 请假页是移动端高频填写页，视觉密度要比首页统计卡更紧凑；保留 16 圆角的同时压低大数字、输入框和按钮高度，避免一屏只能看到很少内容。
+  leaveStatsCard: {marginTop: 8, flexDirection: 'row', alignItems: 'stretch', backgroundColor: colors.white, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 16, borderWidth: 1, borderColor: '#edf2ff', shadowColor: colors.text, shadowOpacity: 0.03, shadowRadius: 20, shadowOffset: {width: 0, height: 8}, elevation: 3},
   leaveStatBlock: {flex: 1, alignItems: 'center', justifyContent: 'center'},
-  leaveStatLabel: {fontSize: 14, color: '#94a3b8', fontWeight: '800'},
-  leaveStatValue: {marginTop: 10, fontSize: 42, lineHeight: 46, color: colors.text, fontWeight: '900'},
+  leaveStatLabel: {fontSize: 12, lineHeight: 16, color: '#94a3b8', fontWeight: '800'},
+  leaveStatValue: {width: '100%', marginTop: 6, fontSize: 32, lineHeight: 36, color: colors.text, fontWeight: '900', textAlign: 'center', includeFontPadding: false},
   leavePendingValue: {color: '#f59e0b'},
-  leaveStatUnit: {fontSize: 16, color: '#94a3b8', fontWeight: '800'},
-  leaveDivider: {width: 1, marginHorizontal: 12, backgroundColor: '#e2e8f0'},
-  leaveFormCard: {marginTop: 22, backgroundColor: colors.white, borderRadius: 28, padding: 20, borderWidth: 1, borderColor: '#dbeafe', shadowColor: colors.text, shadowOpacity: 0.03, shadowRadius: 20, shadowOffset: {width: 0, height: 8}, elevation: 3},
-  leaveFormTitleRow: {flexDirection: 'row', alignItems: 'center', gap: 12},
-  formTitleDot: {width: 10, height: 24, borderRadius: 999, backgroundColor: colors.primary},
-  leaveFormTitle: {fontSize: 17, color: colors.text, fontWeight: '900'},
-  formSectionLabel: {marginTop: 18, marginBottom: 10, fontSize: 14, color: '#94a3b8', fontWeight: '800'},
-  leaveTypeRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 12},
-  leaveTypeChip: {minWidth: 96, minHeight: 48, paddingHorizontal: 18, borderRadius: 18, borderWidth: 1, borderColor: '#dbe3ef', backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center'},
+  leaveStatUnit: {fontSize: 12, color: '#94a3b8', fontWeight: '800'},
+  leaveDivider: {width: 1, marginHorizontal: 10, backgroundColor: '#e2e8f0'},
+  leaveFormCard: {marginTop: 16, backgroundColor: colors.white, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#dbeafe', shadowColor: colors.text, shadowOpacity: 0.03, shadowRadius: 20, shadowOffset: {width: 0, height: 8}, elevation: 3},
+  leaveFormTitleRow: {flexDirection: 'row', alignItems: 'center', gap: 10},
+  formTitleDot: {width: 8, height: 18, borderRadius: 16, backgroundColor: colors.primary},
+  leaveFormTitle: {fontSize: 16, color: colors.text, fontWeight: '900'},
+  formSectionLabel: {marginTop: 14, marginBottom: 8, fontSize: 12, lineHeight: 16, color: '#94a3b8', fontWeight: '800'},
+  leaveTypeRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},
+  leaveTypeChip: {minWidth: 78, minHeight: 40, paddingHorizontal: 12, borderRadius: 16, borderWidth: 1, borderColor: '#dbe3ef', backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center'},
   leaveTypeChipActive: {backgroundColor: colors.primary, borderColor: colors.primary},
-  leaveTypeChipText: {fontSize: 15, fontWeight: '800', color: colors.textSubtle},
+  leaveTypeChipText: {fontSize: 13, fontWeight: '800', color: colors.textSubtle},
   leaveTypeChipTextActive: {color: colors.white},
-  dateRow: {marginTop: 4, flexDirection: 'row', gap: 14},
+  dateRow: {marginTop: 2, flexDirection: 'row', gap: 10},
   dateColumn: {flex: 1},
-  dateInputWrap: {minHeight: 68, borderRadius: 18, borderWidth: 1, borderColor: '#dbe3ef', backgroundColor: colors.white, paddingHorizontal: 18, flexDirection: 'row', alignItems: 'center', gap: 12},
-  dateInput: {flex: 1, fontSize: 17, color: colors.text, fontWeight: '800'},
-  dateInputValue: {flex: 1, fontSize: 17, color: colors.text, fontWeight: '800'},
-  dateInputPlaceholder: {flex: 1, fontSize: 17, color: colors.textMuted, fontWeight: '700'},
+  dateInputWrap: {minHeight: 54, borderRadius: 16, borderWidth: 1, borderColor: '#dbe3ef', backgroundColor: colors.white, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 8},
+  dateInput: {flex: 1, fontSize: 15, color: colors.text, fontWeight: '800'},
+  dateInputValue: {flex: 1, fontSize: 15, color: colors.text, fontWeight: '800'},
+  dateInputPlaceholder: {flex: 1, fontSize: 15, color: colors.textMuted, fontWeight: '700'},
   calendarOverlay: {flex: 1, justifyContent: 'center', paddingHorizontal: 20},
   calendarBackdrop: {position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: 'rgba(15, 23, 42, 0.32)'},
-  calendarCard: {borderRadius: 28, backgroundColor: colors.white, padding: 18, shadowColor: colors.text, shadowOpacity: 0.12, shadowRadius: 24, shadowOffset: {width: 0, height: 12}, elevation: 8},
-  calendarHeader: {marginBottom: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'},
-  calendarTitle: {fontSize: 17, fontWeight: '900', color: colors.text},
-  calendarCloseButton: {width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: '#eef2f7'},
-  durationHint: {marginTop: 14, textAlign: 'right', fontSize: 13, color: colors.primary, fontWeight: '900'},
-  durationHintStrong: {fontSize: 18, color: colors.primary, fontWeight: '900'},
-  reasonInput: {marginTop: 2, minHeight: 132, borderRadius: 22, borderWidth: 1, borderColor: '#dbe3ef', backgroundColor: '#f8fafc', paddingHorizontal: 18, paddingVertical: 18, fontSize: 15, lineHeight: 24, color: colors.text, fontWeight: '600'},
-  formButtonRow: {marginTop: 20, flexDirection: 'row', gap: 18},
-  formCancelButton: {flex: 1, minHeight: 56, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: '#eef2f7'},
-  formCancelText: {fontSize: 16, fontWeight: '900', color: colors.textSubtle},
-  formSubmitButton: {flex: 1, minHeight: 56, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary, shadowColor: colors.primary, shadowOpacity: 0.24, shadowRadius: 16, shadowOffset: {width: 0, height: 8}, elevation: 4},
+  calendarCard: {borderRadius: 16, backgroundColor: colors.white, padding: 14, shadowColor: colors.text, shadowOpacity: 0.12, shadowRadius: 24, shadowOffset: {width: 0, height: 12}, elevation: 8},
+  calendarHeader: {marginBottom: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'},
+  calendarTitle: {fontSize: 16, fontWeight: '900', color: colors.text},
+  calendarCloseButton: {width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: '#eef2f7'},
+  durationHint: {marginTop: 10, textAlign: 'right', fontSize: 12, color: colors.primary, fontWeight: '900'},
+  durationHintStrong: {fontSize: 15, color: colors.primary, fontWeight: '900'},
+  reasonInput: {marginTop: 2, minHeight: 108, borderRadius: 16, borderWidth: 1, borderColor: '#dbe3ef', backgroundColor: '#f8fafc', paddingHorizontal: 14, paddingVertical: 12, fontSize: 14, lineHeight: 21, color: colors.text, fontWeight: '600'},
+  formButtonRow: {marginTop: 16, flexDirection: 'row', gap: 12},
+  formCancelButton: {flex: 1, minHeight: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: '#eef2f7'},
+  formCancelText: {fontSize: 14, fontWeight: '900', color: colors.textSubtle},
+  formSubmitButton: {flex: 1, minHeight: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary, shadowColor: colors.primary, shadowOpacity: 0.24, shadowRadius: 16, shadowOffset: {width: 0, height: 8}, elevation: 4},
   formSubmitButtonDisabled: {opacity: 0.72},
-  formSubmitText: {fontSize: 16, fontWeight: '900', color: colors.white},
-  historyHeading: {marginTop: 22, marginBottom: 6, fontSize: 13, color: '#94a3b8', fontWeight: '900', letterSpacing: 1.1, textTransform: 'uppercase'},
-  leaveHistoryCard: {marginTop: 16, backgroundColor: colors.white, borderRadius: 28, padding: 20, borderWidth: 1, borderColor: '#f1f5f9', shadowColor: colors.text, shadowOpacity: 0.03, shadowRadius: 20, shadowOffset: {width: 0, height: 8}, elevation: 3},
-  leaveHistoryMetaRow: {flexDirection: 'row', alignItems: 'center', gap: 12},
+  formSubmitText: {fontSize: 14, fontWeight: '900', color: colors.white},
+  historyHeading: {marginTop: 16, marginBottom: 4, fontSize: 12, color: '#94a3b8', fontWeight: '900', letterSpacing: 0.8, textTransform: 'uppercase'},
+  leaveHistoryCard: {marginTop: 12, backgroundColor: colors.white, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#f1f5f9', shadowColor: colors.text, shadowOpacity: 0.03, shadowRadius: 20, shadowOffset: {width: 0, height: 8}, elevation: 3},
+  leaveHistoryMetaRow: {flexDirection: 'row', alignItems: 'center', gap: 8},
   leaveTypeBadge: {backgroundColor: '#ecfdf5'},
-  leaveDurationText: {fontSize: 17, fontWeight: '900', color: colors.text},
-  leaveDateRange: {marginTop: 18, fontSize: 15, color: colors.textSubtle, fontWeight: '700'},
-  leaveReasonCard: {marginTop: 18, borderRadius: 18, backgroundColor: '#f8fafc', paddingHorizontal: 18, paddingVertical: 16, borderWidth: 1, borderColor: '#eef2ff'},
-  leaveReasonText: {fontSize: 15, lineHeight: 25, color: colors.text, fontWeight: '700'},
+  leaveDurationText: {fontSize: 15, fontWeight: '900', color: colors.text},
+  leaveDateRange: {marginTop: 12, fontSize: 13, color: colors.textSubtle, fontWeight: '700'},
+  leaveReasonCard: {marginTop: 12, borderRadius: 16, backgroundColor: '#f8fafc', paddingHorizontal: 14, paddingVertical: 12, borderWidth: 1, borderColor: '#eef2ff'},
+  leaveReasonText: {fontSize: 14, lineHeight: 22, color: colors.text, fontWeight: '700'},
   badgeDone: {backgroundColor: '#ecfdf5'},
   badgeDoneText: {color: colors.success},
   badgeOvertime: {backgroundColor: '#fff7ed'},

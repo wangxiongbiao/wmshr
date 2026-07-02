@@ -872,9 +872,9 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
   };
 
   return (
-    <div className="h-full min-h-0 flex flex-col gap-6 animate-fade-in">
-      <section className="shrink-0 space-y-4">
-        {/* 考勤页头部改成紧凑工具栏：去掉标题与表单式 label，保留最小必要的占位符/按钮文案来表达筛选语义。 */}
+    <div className="h-full min-h-0 flex flex-col gap-4 animate-fade-in">
+      <section className="shrink-0 space-y-3">
+        {/* 筛选条件和业务操作保持在同一个顶部工具栏；不要再恢复独立统计卡片/操作区，否则会把表格主体继续向下挤。 */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200/80 p-4 flex flex-col gap-3 text-sm">
           <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
@@ -950,7 +950,54 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
                 <span>{tAdmin("只看离职人员")}</span>
             </label>
             </div>
-              <div className="flex w-full flex-wrap gap-2 xl:justify-end">
+              <div className="flex w-full flex-wrap items-center gap-2 xl:justify-end">
+                <button
+                  type="button"
+                  onClick={() => setIsMaintenanceConfirmOpen(true)}
+                  disabled={submitting}
+                  className="inline-flex h-[38px] items-center justify-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-60"
+                  title={tAdmin("结算前一天考勤，并生成今天考勤底稿")}
+                >
+                  <RefreshCw className="w-4 h-4" />{submitting ? tAdmin("更新考勤中...") : tAdmin("更新考勤")}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleOpenCreate}
+                  className="inline-flex h-[38px] items-center justify-center gap-1.5 rounded-lg bg-brand-600 px-3 text-xs font-semibold text-white transition hover:bg-brand-700"
+                  title={tAdmin("选择日期、员工、上下班时间新增一条考勤记录")}
+                >
+                  <Plus className="w-4 h-4" />{tAdmin("新增考勤")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { void handleExportCSV(); }}
+                  disabled={isExporting}
+                  className="inline-flex h-[38px] items-center justify-center gap-1.5 rounded-lg border border-brand-200 bg-brand-50 px-3 text-xs font-semibold text-brand-700 transition hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  title={tAdmin("按当前筛选条件导出全部数据为 CSV 文件")}
+                >
+                  <Download className="w-4 h-4" />{isExporting ? tAdmin("导出中...") : tAdmin("导出")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!configForm) {
+                      return;
+                    }
+                    setHolidayDatesText(formatHolidayDatesInput(configForm.holidayDates));
+                    setIsHolidaySettingsOpen(true);
+                  }}
+                  disabled={!configForm}
+                  className="inline-flex h-[38px] items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-60"
+                >
+                  <Settings className="w-4 h-4" />{tAdmin("节假日")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsSettingsOpen(true)}
+                  className="inline-flex h-[38px] items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+                >
+                  <Settings className="w-4 h-4" />{tAdmin("设置规则")}
+                </button>
                 {showRefreshing ? (
                   <span className="inline-flex h-[38px] items-center rounded-lg border border-brand-100 bg-brand-50 px-3 text-xs font-semibold text-brand-700">
                     {tAdmin("刷新中")}
@@ -960,7 +1007,7 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
                   <button
                     type="button"
                     onClick={resetFilters}
-                    className="inline-flex h-[34px] items-center justify-center rounded-lg border border-red-200 bg-red-50 px-3 text-xs font-semibold text-red-600 transition hover:bg-red-100"
+                    className="inline-flex h-[38px] items-center justify-center rounded-lg border border-red-200 bg-red-50 px-3 text-xs font-semibold text-red-600 transition hover:bg-red-100"
                   >
                     {tAdmin("清除")}
                   </button>
@@ -972,7 +1019,7 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
                     void loadData();
                   }}
                   disabled={loading}
-                  className="inline-flex h-[34px] items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-60"
+                  className="inline-flex h-[38px] items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-60"
                   title={tAdmin("按当前筛选条件刷新列表")}
                 >
                   <RefreshCw className="w-4 h-4" />{loading ? tAdmin("刷新中") : tAdmin("刷新")}
@@ -981,80 +1028,8 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
           </div>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{tAdmin("当前结果")}</div>
-            <div className="mt-2 text-2xl font-bold text-slate-900">{displayedCalculations.length}</div>
-            <div className="mt-1 text-xs text-slate-500">{tAdmin("当前页已加载记录")}</div>
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{tAdmin("已选记录")}</div>
-            <div className="mt-2 text-2xl font-bold text-slate-900">{selectedIds.size}</div>
-            <div className="mt-1 text-xs text-slate-500">{tAdmin("用于批量查看与后续操作")}</div>
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{tAdmin("筛选月份")}</div>
-            <div className="mt-2 text-2xl font-bold text-slate-900">{selectedMonth}</div>
-            <div className="mt-1 text-xs text-slate-500">{selectedDate ? tAdmin("已定位到 {{date}}", { date: selectedDate }) : tAdmin("当前查看整月结果")}</div>
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{tAdmin("全部记录")}</div>
-            <div className="mt-2 text-2xl font-bold text-slate-900">{total}</div>
-            <div className="mt-1 text-xs text-slate-500">{isFiltered ? tAdmin("当前处于筛选视图") : tAdmin("当前未启用筛选")}</div>
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div className="rounded-xl border border-slate-200 bg-white px-4 py-2.5">
           <div className="text-xs text-slate-400">{tAdmin("当前月份：{{month}} · 共 {{total}} 条记录", { month: selectedMonth, total })}</div>
-          <div className="flex flex-wrap gap-2 xl:justify-end">
-            <button
-              type="button"
-              onClick={() => setIsMaintenanceConfirmOpen(true)}
-              disabled={submitting}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-60"
-              title={tAdmin("结算前一天考勤，并生成今天考勤底稿")}
-            >
-              <RefreshCw className="w-4 h-4" />{submitting ? tAdmin("更新考勤中...") : tAdmin("更新考勤")}
-            </button>
-            <button
-              type="button"
-              onClick={handleOpenCreate}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-brand-700"
-              title={tAdmin("选择日期、员工、上下班时间新增一条考勤记录")}
-            >
-              <Plus className="w-4 h-4" />{tAdmin("新增考勤")}
-            </button>
-            <button
-              type="button"
-              onClick={() => { void handleExportCSV(); }}
-              disabled={isExporting}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-700 transition hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-60"
-              title={tAdmin("按当前筛选条件导出全部数据为 CSV 文件")}
-            >
-              <Download className="w-4 h-4" />{isExporting ? tAdmin("导出中...") : tAdmin("导出")}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (!configForm) {
-                  return;
-                }
-                setHolidayDatesText(formatHolidayDatesInput(configForm.holidayDates));
-                setIsHolidaySettingsOpen(true);
-              }}
-              disabled={!configForm}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-60"
-            >
-              <Settings className="w-4 h-4" />{tAdmin("节假日")}
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsSettingsOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
-            >
-              <Settings className="w-4 h-4" />{tAdmin("设置规则")}
-            </button>
-          </div>
         </div>
       </section>
 

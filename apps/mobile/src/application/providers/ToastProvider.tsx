@@ -48,6 +48,6 @@ export function useToast() {
 }
 
 const styles = StyleSheet.create({
-  toast: {position: 'absolute', top: 54, left: 20, right: 20, zIndex: 20, padding: 14, borderRadius: 18, backgroundColor: colors.success},
+  toast: {position: 'absolute', top: 54, left: 20, right: 20, zIndex: 20, padding: 14, borderRadius: 16, backgroundColor: colors.success},
   toastText: {color: colors.white, fontWeight: '800', textAlign: 'center'},
 });

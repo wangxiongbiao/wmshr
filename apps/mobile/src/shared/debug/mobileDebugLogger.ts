@@ -1,4 +1,5 @@
 import {env} from '../config/env';
+import {getLocalAppVersion} from '../config/appVersion';
 
 type DebugLevel = 'info' | 'warn' | 'error' | 'fatal';
 
@@ -22,7 +23,7 @@ type ErrorUtilsLike = {
   setGlobalHandler?: (handler: (error: Error, isFatal?: boolean) => void) => void;
 };
 
-const LOCAL_APP_VERSION = String((require('../../../app.json') as {expo?: {version?: string}}).expo?.version || '').trim() || 'unknown';
+const LOCAL_APP_VERSION = getLocalAppVersion('unknown');
 const sessionId = globalThis.__WMSHR_MOBILE_DEBUG_SESSION_ID__
   || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 

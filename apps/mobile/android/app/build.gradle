@@ -94,10 +94,22 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         // Android 原生版本号必须与发布脚本同步维护：EAS/本地 release 产物最终读取这里，
         // 不能只改 app.json/package.json，否则官网记录、App 内更新提示与 APK 内部版本会再次分叉。
-        versionCode 127
-        versionName "0.1.27"
+        versionCode 129
+        versionName "0.1.29"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
+
+        def requestedArchitectures = ((findProperty('reactNativeArchitectures') ?: System.getenv('REACT_NATIVE_ARCHITECTURES')) ?: '')
+            .split(',')
+            .collect { it.trim() }
+            .findAll { it.length() > 0 }
+        if (!requestedArchitectures.isEmpty()) {
+            // 本地真机调试/验收经常走无线 ADB；全 ABI debug APK 过大时会让 Wi‑Fi ADB push/install 掉线。
+            // 默认构建仍保持全 ABI，只有显式传 reactNativeArchitectures / REACT_NATIVE_ARCHITECTURES 时才收窄，避免影响常规产物。
+            ndk {
+                abiFilters(*requestedArchitectures as String[])
+            }
+        }
     }
     signingConfigs {
         debug {

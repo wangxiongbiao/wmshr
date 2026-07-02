@@ -9,6 +9,8 @@ set -euo pipefail
 #   2. 本机已安装 JDK 17 与 Android SDK/NDK/cmake；
 #   3. apps/mobile/android 已存在，或允许先通过 Expo prebuild 生成；
 #   4. 当前 release 构建仍沿用 apps/mobile/android/app/build.gradle 中的 debug keystore。
+# 可选：
+#   - REACT_NATIVE_ARCHITECTURES=arm64-v8a 可只构建真机验证用 ABI；默认不设置时仍构建完整多 ABI 侧载包。
 # 影响：
 #   1. 若 apps/mobile/android 不存在，会先执行 `npx expo prebuild --platform android` 生成原生工程；
 #   2. 会产出 release APK，路径在 outputs/apk/release；
@@ -28,11 +30,16 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 MOBILE_DIR="${REPO_ROOT}/apps/mobile"
 ANDROID_DIR="${MOBILE_DIR}/android"
 APK_PATH="${ANDROID_DIR}/app/build/outputs/apk/release/app-release.apk"
+GRADLE_ARCH_ARGS=()
 
 export JAVA_HOME="${JAVA_HOME:-/usr/local/opt/openjdk@17}"
 export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-${HOME}/Library/Android/sdk}"
 export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT}}"
 export PATH="${JAVA_HOME}/bin:${ANDROID_SDK_ROOT}/platform-tools:${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin:${PATH}"
+
+if [[ -n "${REACT_NATIVE_ARCHITECTURES:-}" ]]; then
+  GRADLE_ARCH_ARGS=("-PreactNativeArchitectures=${REACT_NATIVE_ARCHITECTURES}")
+fi
 
 run() {
   echo "+ $*"
@@ -43,7 +50,19 @@ if [[ ! -d "${ANDROID_DIR}" ]]; then
   run bash -lc "cd '${MOBILE_DIR}' && npx expo prebuild --platform android"
 fi
 
-run bash -lc "cd '${ANDROID_DIR}' && ./gradlew assembleRelease"
+# Release 产物必须强制重跑 JS bundle 任务，避免 Gradle/Metro 增量缓存复用旧的
+# assets/index.android.bundle，导致侧载包的原生版本和 App 内展示版本分叉。
+# 不使用全量 `gradlew clean`，因为 React Native 新架构下它会清掉 node_modules 内的 codegen JNI 目录，
+# 后续 CMake 配置阶段可能报 react_codegen_* 目标缺失；也不要把 --rerun-tasks 挂到 assembleRelease，
+# 否则会全量重编 native 依赖。先只重跑 bundle 任务，再让 assembleRelease 复用其余 up-to-date 产物。
+run bash -lc "cd '${ANDROID_DIR}' && ./gradlew :app:createBundleReleaseJsAndAssets --rerun-tasks"
+if [[ ${#GRADLE_ARCH_ARGS[@]} -gt 0 ]]; then
+  run bash -lc "cd '${ANDROID_DIR}' && ./gradlew assembleRelease ${GRADLE_ARCH_ARGS[*]}"
+else
+  # macOS bundled Bash runs with `set -u` here; expanding an empty array inside the command string aborts after JS bundle succeeds.
+  # Keep the no-architecture path explicit so full public APK builds can continue into assembleRelease and the publish step.
+  run bash -lc "cd '${ANDROID_DIR}' && ./gradlew assembleRelease"
+fi
 
 if [[ ! -f "${APK_PATH}" ]]; then
   echo "Expected release APK not found: ${APK_PATH}" >&2

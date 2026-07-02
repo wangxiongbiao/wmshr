@@ -129,15 +129,15 @@ function TimeBox({label, value, active}: {label: string; value: string; active: 
 }
 
 const styles = StyleSheet.create({
-  clockCard: {backgroundColor: colors.white, borderRadius: 32, padding: 24, shadowColor: colors.text, shadowOpacity: 0.05, shadowRadius: 28, shadowOffset: {width: 0, height: 14}, elevation: 5, borderWidth: 1, borderColor: 'rgba(241,245,249,0.9)'},
+  clockCard: {backgroundColor: colors.white, borderRadius: 16, padding: 24, shadowColor: colors.text, shadowOpacity: 0.05, shadowRadius: 28, shadowOffset: {width: 0, height: 14}, elevation: 5, borderWidth: 1, borderColor: 'rgba(241,245,249,0.9)'},
   timeGrid: {flexDirection: 'row', gap: 14},
-  timeBox: {flex: 1, backgroundColor: '#f8fafc', borderRadius: 24, padding: 18, alignItems: 'center', borderWidth: 1, borderColor: '#f1f5f9'},
+  timeBox: {flex: 1, backgroundColor: '#f8fafc', borderRadius: 16, padding: 18, alignItems: 'center', borderWidth: 1, borderColor: '#f1f5f9'},
   timeLabel: {fontSize: 11, lineHeight: 14, color: colors.textMuted, fontWeight: '800', textAlign: 'center', flexShrink: 1},
   timeValue: {fontSize: 26, color: colors.text, fontWeight: '900', marginTop: 8, letterSpacing: -0.5},
   inactiveText: {color: '#cbd5e1'},
-  locationRow: {flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 20, padding: 14, backgroundColor: '#eff6ff', borderRadius: 20},
+  locationRow: {flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 20, padding: 14, backgroundColor: '#eff6ff', borderRadius: 16},
   locationText: {color: '#1d4ed8', fontWeight: '700', flex: 1, fontSize: 13, lineHeight: 18},
-  primaryButton: {marginTop: 22, minHeight: 60, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 24, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 12, shadowColor: colors.primary, shadowOpacity: 0.25, shadowRadius: 16, shadowOffset: {width: 0, height: 8}, elevation: 4},
+  primaryButton: {marginTop: 22, minHeight: 60, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 16, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 12, shadowColor: colors.primary, shadowOpacity: 0.25, shadowRadius: 16, shadowOffset: {width: 0, height: 8}, elevation: 4},
   buttonPressed: {opacity: 0.85},
   buttonDisabled: {backgroundColor: colors.textMuted, shadowOpacity: 0},
   primaryButtonText: {color: colors.white, fontWeight: '900', fontSize: 18, lineHeight: 22, textAlign: 'center', flexShrink: 1},

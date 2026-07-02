@@ -8,18 +8,20 @@ set -euo pipefail
 #   2. 手机上已经安装 `com.wmshr.app`；
 #   3. 多设备场景下应显式传 `--target`，避免误启动到错误设备。
 # 影响：
-#   1. 会先检查本机 Metro 8081 是否可用，并为目标设备建立 `adb reverse tcp:8081 tcp:8081`；
-#   2. 随后向目标设备发送标准 LAUNCHER 启动事件；
-#   3. 默认使用项目当前包名 `com.wmshr.app`，必要时可通过参数覆盖；
-#   4. 成功后会输出实际 target 与 package，便于后续串联日志脚本。
+#   1. 默认会先检查本机 Metro 8081 是否可用，并为目标设备建立 `adb reverse tcp:8081 tcp:8081`；
+#   2. 若传入 `--skip-metro`，则按 release / 内嵌 JS bundle 测试路径直接启动，不要求 Metro；
+#   3. 随后向目标设备发送标准 LAUNCHER 启动事件；
+#   4. 默认使用项目当前包名 `com.wmshr.app`，必要时可通过参数覆盖；
+#   5. 成功后会输出实际 target 与 package，便于后续串联日志脚本。
 # 失败优先检查：
 #   - `adb devices -l` 里目标是否为 `device`；
 #   - 若目标是 Wi‑Fi 设备，必要时先执行 `npm run mobile:adb:wifi` 重新连上；
 #   - 真机安装的是 debug 包时，本机需先有 Metro 在 8081 监听，否则 App 会白屏；
+#   - 真机安装的是 release / 内嵌 bundle 包时，传 `--skip-metro`，避免把 release 验证误绑到 Expo/Metro；
 #   - 若报包不存在，先重新安装 debug APK。
 # 边界：
 #   - 这里按 LAUNCHER 入口启动应用，不负责登录、导航或页面级自动化；
-#   - 当前脚本默认服务本地 debug 包链路，因此固定为 Metro 8081 建立 reverse；若后续改成 release / 内嵌 bundle 交付，应同步更新这里的前置检查说明；
+#   - 当前脚本默认服务本地 debug 包链路，因此会为 Metro 8081 建立 reverse；release / 内嵌 bundle 验证必须显式跳过，避免误判“本地包还在跑 Expo”；
 #   - 若后续修改了 Android applicationId / launcher activity，应同步更新这里的默认包名或调用参数。
 
 export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-${HOME}/Library/Android/sdk}"
@@ -27,6 +29,7 @@ export PATH="${ANDROID_SDK_ROOT}/platform-tools:${PATH}"
 
 TARGET=""
 PACKAGE_NAME="com.wmshr.app"
+SKIP_METRO=0
 
 usage() {
   cat <<'EOF'
@@ -35,6 +38,7 @@ Usage: bash scripts/adb-launch-mobile-app.sh [options]
 Options:
   --target <serial|ip:port>   指定启动目标；多设备连接时建议显式传入
   --package <package>         要启动的包名，默认 com.wmshr.app
+  --skip-metro                跳过 Metro 8081 检查和 adb reverse，用于 release / 内嵌 bundle 包
   -h, --help                  显示帮助
 EOF
 }
@@ -68,6 +72,10 @@ while [[ $# -gt 0 ]]; do
     --package)
       PACKAGE_NAME="${2:-}"
       shift 2
+      ;;
+    --skip-metro)
+      SKIP_METRO=1
+      shift
       ;;
     -h|--help)
       usage
@@ -105,9 +113,13 @@ if [[ "$state" != "device" ]]; then
   exit 1
 fi
 
-ensure_local_metro_ready
-run adb -s "$TARGET" reverse tcp:8081 tcp:8081
+# Debug APK 需要 Metro；release / 内嵌 bundle APK 不需要。这个分支保持默认 debug 体验不变，同时让版本更新真机验证可以走纯本地 release 包。
+if [[ "$SKIP_METRO" != "1" ]]; then
+  ensure_local_metro_ready
+  run adb -s "$TARGET" reverse tcp:8081 tcp:8081
+fi
 run adb -s "$TARGET" shell monkey -p "$PACKAGE_NAME" -c android.intent.category.LAUNCHER 1
 
 echo "ADB_LAUNCH_TARGET=$TARGET"
 echo "ADB_LAUNCH_PACKAGE=$PACKAGE_NAME"
+echo "ADB_LAUNCH_SKIP_METRO=$SKIP_METRO"

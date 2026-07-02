@@ -7,13 +7,15 @@ import {useAuth} from '../../../application/providers/AuthProvider';
 import {useToast} from '../../../application/providers/ToastProvider';
 import {fetchMobileHomeSummary} from '../../attendance/services/attendanceApi';
 import {MobileHomeSummary} from '../../attendance/types';
+import {useAppUpdatePrompt} from '../../app-update/components/AppUpdateGate';
 import {fetchLatestAppUpdate} from '../../app-update/services/appUpdateApi';
 import {AppModal} from '../../../shared/components/AppModal';
 import {ScreenContainer} from '../../../shared/components/ScreenContainer';
 import {colors} from '../../../shared/constants/colors';
 import {env} from '../../../shared/config/env';
+import {getLocalAppVersion} from '../../../shared/config/appVersion';
 
-const LOCAL_APP_VERSION = String((require('../../../../app.json') as {expo?: {version?: string}}).expo?.version || '').trim() || '1.0.24';
+const LOCAL_APP_VERSION = getLocalAppVersion('1.0.24');
 const DESIGN_REFERENCE_VERSION = '1.0.24';
 const DEFAULT_STANDARD_HOURS = 176;
 
@@ -43,6 +45,7 @@ export function MineScreen() {
   const {t, i18n} = useTranslation('app');
   const {employee, session, logout} = useAuth();
   const {showToast} = useToast();
+  const {hasRequiredUpdate, latestVersion: promptedLatestVersion, openUpdatePrompt} = useAppUpdatePrompt();
   const [logoutConfirmVisible, setLogoutConfirmVisible] = useState(false);
   const [homeSummary, setHomeSummary] = useState<MobileHomeSummary | null>(null);
   const [updateBadge, setUpdateBadge] = useState<UpdateBadgeState>({hasUpdate: false});
@@ -115,12 +118,13 @@ export function MineScreen() {
   }, [currentLanguageCode, i18n, showToast, t]);
 
   const handleOpenUpdate = useCallback(() => {
-    if (updateBadge.latestVersion && compareVersion(LOCAL_APP_VERSION, updateBadge.latestVersion) < 0) {
-      showToast(t('发现新版本 {{version}}', {version: updateBadge.latestVersion}));
+    const latestVersion = updateBadge.latestVersion || promptedLatestVersion;
+    if (hasRequiredUpdate || (latestVersion && compareVersion(LOCAL_APP_VERSION, latestVersion) < 0)) {
+      openUpdatePrompt();
       return;
     }
     showToast(t('当前已是最新版本'));
-  }, [showToast, t, updateBadge.latestVersion]);
+  }, [hasRequiredUpdate, openUpdatePrompt, promptedLatestVersion, showToast, t, updateBadge.latestVersion]);
 
   const isScreenshotPreview = env.appEnv === 'screenshots';
   const avatarText = useMemo(() => {
@@ -202,17 +206,17 @@ export function MineScreen() {
 
       <View style={styles.statsCard}>
         <View style={styles.statColumn}>
-          <Text style={styles.statValue}>{attendanceValue}</Text>
+          <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>{attendanceValue}</Text>
           <Text style={styles.statLabel}>{t('出勤率')}</Text>
         </View>
         <View style={styles.statDivider} />
         <View style={styles.statColumn}>
-          <Text style={styles.statValue}>{anomalyValue}</Text>
+          <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>{anomalyValue}</Text>
           <Text style={styles.statLabel}>{t('异常')}</Text>
         </View>
         <View style={styles.statDivider} />
         <View style={styles.statColumn}>
-          <Text style={styles.statValue}>{overtimeValue}</Text>
+          <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>{overtimeValue}</Text>
           <Text style={styles.statLabel}>{t('加班')}</Text>
         </View>
       </View>
@@ -262,7 +266,7 @@ const styles = StyleSheet.create({
   avatarCard: {
     width: 136,
     height: 136,
-    borderRadius: 34,
+    borderRadius: 16,
     backgroundColor: '#1F58EE',
     alignItems: 'center',
     justifyContent: 'center',
@@ -272,7 +276,7 @@ const styles = StyleSheet.create({
     shadowOffset: {width: 0, height: 8},
     elevation: 8,
   },
-  avatarImage: {width: '100%', height: '100%', borderRadius: 34},
+  avatarImage: {width: '100%', height: '100%', borderRadius: 16},
   avatarText: {fontSize: 50, lineHeight: 58, fontWeight: '900', color: colors.white},
   avatarStatusBadge: {
     position: 'absolute',
@@ -280,7 +284,7 @@ const styles = StyleSheet.create({
     bottom: -2,
     width: 38,
     height: 38,
-    borderRadius: 19,
+    borderRadius: 16,
     backgroundColor: '#17C964',
     borderWidth: 4,
     borderColor: colors.white,
@@ -297,7 +301,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
     paddingHorizontal: 16,
     paddingVertical: 8,
-    borderRadius: 999,
+    borderRadius: 16,
     backgroundColor: colors.white,
     borderWidth: 1,
     borderColor: '#E8EDF6',
@@ -310,7 +314,7 @@ const styles = StyleSheet.create({
   departmentBadgeText: {fontSize: 12, lineHeight: 16, fontWeight: '800', color: '#7D8AA6'},
   languageCard: {
     backgroundColor: colors.white,
-    borderRadius: 24,
+    borderRadius: 16,
     paddingTop: 16,
     paddingBottom: 14,
     paddingHorizontal: 12,
@@ -322,7 +326,7 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   cardHeader: {flexDirection: 'row', alignItems: 'center', marginBottom: 16, paddingHorizontal: 4},
-  cardHeaderDot: {width: 12, height: 12, borderRadius: 999, backgroundColor: '#3B82F6', marginRight: 10},
+  cardHeaderDot: {width: 12, height: 12, borderRadius: 16, backgroundColor: '#3B82F6', marginRight: 10},
   cardHeaderText: {fontSize: 14, lineHeight: 18, fontWeight: '900', color: '#18233D'},
   languageScrollContent: {paddingHorizontal: 2, gap: 10},
   languageChip: {
@@ -349,7 +353,7 @@ const styles = StyleSheet.create({
   languageChipTextActive: {color: colors.white},
   statsCard: {
     backgroundColor: colors.white,
-    borderRadius: 24,
+    borderRadius: 16,
     paddingVertical: 14,
     paddingHorizontal: 4,
     marginBottom: 14,
@@ -361,13 +365,13 @@ const styles = StyleSheet.create({
     shadowOffset: {width: 0, height: 5},
     elevation: 3,
   },
-  statColumn: {flex: 1, alignItems: 'center', justifyContent: 'center'},
-  statValue: {fontSize: 24, lineHeight: 30, fontWeight: '900', color: '#151D36'},
+  statColumn: {flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center'},
+  statValue: {width: '100%', fontSize: 20, lineHeight: 24, fontWeight: '900', color: '#151D36', textAlign: 'center', includeFontPadding: false},
   statLabel: {marginTop: 6, fontSize: 12, lineHeight: 16, fontWeight: '800', color: '#A0AEC4'},
   statDivider: {width: 1, marginVertical: 6, backgroundColor: '#EDF1F7'},
   actionsCard: {
     backgroundColor: colors.white,
-    borderRadius: 24,
+    borderRadius: 16,
     paddingTop: 12,
     paddingHorizontal: 12,
     paddingBottom: 16,
@@ -396,7 +400,7 @@ const styles = StyleSheet.create({
     minWidth: 46,
     height: 24,
     paddingHorizontal: 8,
-    borderRadius: 999,
+    borderRadius: 16,
     backgroundColor: '#F3F7FF',
     alignItems: 'center',
     justifyContent: 'center',

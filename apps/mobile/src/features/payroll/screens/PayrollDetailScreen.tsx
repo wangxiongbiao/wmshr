@@ -223,10 +223,10 @@ function LineItem({
 }
 
 const styles = StyleSheet.create({
-  placeholderCard: {marginTop: 16, backgroundColor: colors.white, borderRadius: 22, padding: 18, alignItems: 'center', gap: 10},
+  placeholderCard: {marginTop: 16, backgroundColor: colors.white, borderRadius: 16, padding: 18, alignItems: 'center', gap: 10},
   retryButton: {marginTop: 8, minWidth: 120, height: 44, borderRadius: 16, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16},
   retryButtonText: {color: colors.white, fontWeight: '900'},
-  heroCard: {backgroundColor: colors.white, borderRadius: 28, padding: 22, borderWidth: 1, borderColor: '#dbeafe'},
+  heroCard: {backgroundColor: colors.white, borderRadius: 16, padding: 22, borderWidth: 1, borderColor: '#dbeafe'},
   heroOverline: {fontSize: 12, color: colors.primary, fontWeight: '900', letterSpacing: 1.2, textTransform: 'uppercase'},
   heroTitle: {marginTop: 10, fontSize: 24, color: colors.text, fontWeight: '900'},
   heroSubtitle: {marginTop: 4, fontSize: 14, color: colors.textSubtle, fontWeight: '700'},
@@ -234,10 +234,10 @@ const styles = StyleSheet.create({
   netPayValue: {marginTop: 6, fontSize: 30, color: colors.primary, fontWeight: '900'},
   heroHint: {marginTop: 8, fontSize: 12, color: colors.textSubtle, fontWeight: '700'},
   metricsGrid: {marginTop: 16, flexDirection: 'row', gap: 12},
-  metricCard: {flex: 1, minHeight: 92, backgroundColor: colors.white, borderRadius: 22, padding: 14, alignItems: 'center', justifyContent: 'center'},
+  metricCard: {flex: 1, minHeight: 92, backgroundColor: colors.white, borderRadius: 16, padding: 14, alignItems: 'center', justifyContent: 'center'},
   metricLabel: {fontSize: 11, color: colors.textMuted, fontWeight: '900'},
   metricValue: {marginTop: 10, fontSize: 22, color: colors.text, fontWeight: '900'},
-  sectionCard: {marginTop: 16, backgroundColor: colors.white, borderRadius: 24, padding: 18},
+  sectionCard: {marginTop: 16, backgroundColor: colors.white, borderRadius: 16, padding: 18},
   sectionTitle: {fontSize: 16, color: colors.text, fontWeight: '900', marginBottom: 8},
   lineItem: {paddingVertical: 10, flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#e2e8f0'},
   lineItemLabelWrap: {flex: 1, gap: 4},

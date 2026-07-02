@@ -28,7 +28,7 @@ export function AppButton({title, icon, onPress, variant = 'primary', disabled =
 }
 
 const styles = StyleSheet.create({
-  button: {marginTop: 18, height: 58, borderRadius: 22, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 10},
+  button: {marginTop: 18, height: 58, borderRadius: 16, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 10},
   secondary: {backgroundColor: '#eff6ff'},
   disabled: {opacity: 0.58},
   pressed: {opacity: 0.82},

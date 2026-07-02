@@ -65,12 +65,12 @@ export function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  currentCard: {marginTop: 18, backgroundColor: '#eff6ff', borderRadius: 22, padding: 16},
+  currentCard: {marginTop: 18, backgroundColor: '#eff6ff', borderRadius: 16, padding: 16},
   currentLanguage: {marginTop: 8, fontSize: 18, fontWeight: '900', color: colors.primary},
   sectionLabel: {marginTop: 22, marginBottom: 10, fontSize: 13, fontWeight: '900', color: colors.textSubtle},
-  languageRow: {backgroundColor: colors.white, borderRadius: 22, padding: 16, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 12},
+  languageRow: {backgroundColor: colors.white, borderRadius: 16, padding: 16, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 12},
   languageRowActive: {borderWidth: 1, borderColor: colors.primary},
   languageStatus: {fontSize: 12, fontWeight: '900', color: colors.textMuted},
   activeText: {color: colors.primary},
-  unavailableCard: {marginTop: 6, backgroundColor: '#f8fafc', borderRadius: 22, padding: 16},
+  unavailableCard: {marginTop: 6, backgroundColor: '#f8fafc', borderRadius: 16, padding: 16},
 });

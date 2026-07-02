@@ -49,3 +49,59 @@
 - 原因：`apps/admin/src/components/Modals.tsx` 里“社保金”字段使用了 `input[type=number]` 且写死 `step="100"`。移动端 Chrome 会按原生 number 输入校验处理，所以输入 336 时直接报“请输入有效值。两个最接近的有效值分别为300和400”。
 - 导致的问题：员工管理无法录入 336 这类真实存在的非整百社保金金额；用户会误以为这是业务规则限制，实际只是前端输入粒度写错。
 - 解决方式：把社保金字段步进改为 `step="1"`，允许按 1 元粒度录入；并在字段旁补注释，说明该字段存在非整百真实值，避免后续又被改回 `100`。
+
+## 2026-06-28 问题 7：真机无线调试未连接导致移动端版本更新验证暂时阻塞
+- 原因：用户准备通过 Android 无线调试安装低版本开发/测试包来验证 App 更新弹窗与安装器版本显示；执行项目标准入口 `npm run mobile:adb:wifi` 时，脚本未发现 Android 11+ wireless debugging 的 mDNS TLS 目标，也没有检测到 USB 授权设备。
+- 导致的问题：当前无法直接向手机安装用于复现“App 内提示当前 0.1.26 / 安装器识别目标 0.1.28”的测试包，也无法通过 adb 抓取设备端实际 `dumpsys package` 版本信息。
+- 当前判断：需要先完成无线调试配对或提供已配对的连接地址；服务器侧当前更新接口与 APK 直链已验证为 0.1.28，设备端仍需通过 adb 实测确认是旧安装包当前版本提示、下载缓存提示，还是安装器/文件管理器展示差异。
+- 已尝试：
+  1. 确认项目已有 `mobile:adb:wifi`、`mobile:install:android:debug`、`mobile:install:android:release`、`mobile:launch:android` 标准入口；
+  2. 执行 `npm run mobile:adb:wifi`，真实返回 `No wireless-debugging mDNS target or USB-connected ADB device found`；
+  3. 用户提供连接地址 `100.70.244.32:43395` 后，执行 `npm run mobile:adb:wifi -- --ip 100.70.244.32 --port 43395` 已连接到 `LGE-AN00`；
+  4. 通过 `dumpsys package com.wmshr.app` 确认手机当前真实安装版本为 `versionName=0.1.28`、`versionCode=128`、安装来源为 Chrome；
+  5. 临时副本构建 `0.1.26` debug 包时首次失败，原因是只链接了根 `node_modules`，而 Expo config plugin 解析 `expo-web-browser` 需要 `apps/mobile/node_modules`；补充移动端 workspace node_modules 链接后进入本地 Gradle 构建；
+  6. 为避免 debug/Metro 干扰，改用真实工作区短暂切到 `0.1.26` 构建本地 release 测试包，再恢复工作区版本文件到 `0.1.28`；
+  7. 已产出并校验临时 APK：`/tmp/wmshr-android-update-test-0.1.26-arm64.apk`，`aapt dump badging` 显示 `versionName='0.1.26'`、`versionCode='126'`、`native-code: 'arm64-v8a'`，SHA-256 为 `3a16c4b38f2ea1863906bbf1fe33f9532881f8b9240f78d3bbdac8084b2b48a0`；
+  8. 执行 `npm run mobile:adb:wifi -- --ip 100.70.244.32 --port 43395` 复连旧无线调试端口，真实返回 `Connection refused`，随后 `adb devices -l` 为空，说明手机端无线调试端口已关闭或已变更；
+  9. 用户重新提供 `100.70.244.32:37257` 后已连接到 `LGE-AN00`；执行 `adb install -r -d /tmp/wmshr-android-update-test-0.1.26-arm64.apk` 被系统拒绝，真实报错为 `INSTALL_FAILED_VERSION_DOWNGRADE: Downgrade detected: Update version code 126 is older than current 128`；
+  10. 再次通过 `dumpsys package com.wmshr.app` 确认手机当前仍是 `versionName=0.1.28`、`versionCode=128`、`installerPackageName=com.android.chrome`。
+- 下一步：若要继续真机验证更新弹窗，需要明确允许卸载当前 `com.wmshr.app` 后安装 `/tmp/wmshr-android-update-test-0.1.26-arm64.apk`；卸载会清除该 App 本地数据。未获得明确许可前，不执行 `adb uninstall`。
+
+- 追加结果：用户回复“继续”后，已执行 `adb uninstall com.wmshr.app` 并安装 `/tmp/wmshr-android-update-test-0.1.26-arm64.apk`；`dumpsys package com.wmshr.app` 确认真机安装版本为 `versionName=0.1.26`、`versionCode=126`、`primaryCpuAbi=arm64-v8a`。
+- 验收结果：启动 App 后更新弹窗真实出现，UI 文本和截图均确认显示 `发现新版本`、`当前版本：0.1.26`、`最新版本：0.1.28`、更新内容为“例行更新，修复已知问题并优化使用体验”，说明当前版本获取与远端版本比较流程通过真机验证。
+- 未完全确认：点击弹窗主按钮后，弹窗关闭并进入登录页，未在抓屏窗口中看到系统安装器前台；随后设备进入 `Magic:ProximityWnd` / AOD 覆盖状态，界面级截图不可用。因此“检查并提示更新”已验证通过，但“系统安装器前台展示”仍需在设备保持亮屏可操作时单独复验。
+- 恢复状态：为避免手机停留在低版本测试包，已下载并校验线上 `/tmp/wmshr-android-0.1.28-online.apk`，`aapt dump badging` 显示 `versionName='0.1.28'`、`versionCode='128'`；但 `adb install -r` 与 `pm install -r` 都被系统拒绝，真实报错为 `INSTALL_FAILED_ABORTED: User rejected permissions`。设备诊断显示 `mWakefulness=Dozing`、`mCurrentFocus=AOD`、`mFocusedApp=null`，当前仍停在 `versionName=0.1.26`。需要用户点亮/解锁手机后再执行覆盖安装恢复 `0.1.28`。
+- 脚本补充：`scripts/adb-launch-mobile-app.sh` 已新增 `--skip-metro` 参数，release / 内嵌 bundle 包可用 `bash scripts/adb-launch-mobile-app.sh --target <ip:port> --skip-metro` 启动，不再误要求 Metro 8081；默认 debug 链路仍保留 Metro 检查。
+- 追加恢复结果（2026-06-29）：手机解锁后再次恢复线上包时，`adb install -r /tmp/wmshr-android-0.1.28-online.apk` 仍被系统图形安装器拦截，后台命令返回 `INSTALL_FAILED_ABORTED: User rejected permissions`；改用 `adb push` 到 `/data/local/tmp/wmshr-android-0.1.28-online.apk` 后执行设备端 `pm install -r` 成功。最终 `dumpsys package com.wmshr.app` 确认设备已恢复为 `versionName=0.1.28`、`versionCode=128`，且 `pkgFlags` 不再包含 `DEBUGGABLE`；临时远端 APK 已删除。
+- 追加根因与修复结果（2026-06-29）：用户截图仍显示“当前版本：0.1.26 / 最新版本：0.1.28”后，经拆包确认旧 `/tmp/wmshr-android-0.1.28-online.apk` 的 Android manifest 与 `assets/app.config` 均为 `0.1.28`，但 `assets/index.android.bundle` 里仍包含 `0.1.26`，根因是 release 构建复用了旧 JS bundle；同时 App 内当前版本逻辑直接 `require(app.json)`，会被旧 bundle 固化。已新增 `apps/mobile/src/shared/config/appVersion.ts`，统一优先读取 `Constants.expoConfig.version`，`app.json` 仅作兜底；`AppUpdateGate`、`MineScreen`、`mobileDebugLogger` 已改用该入口。`scripts/build-mobile-android-production-local.sh` 与 `scripts/build-mobile-android-production-online-local.sh` 已改为先强制重跑 `:app:createBundleReleaseJsAndAssets --rerun-tasks`，再执行 `assembleRelease`，避免旧 bundle 复用；同时支持 `REACT_NATIVE_ARCHITECTURES=arm64-v8a` 做真机快速验证。验证结果：`npm --workspace @wmshr/mobile run lint` 通过；`HOME=/Users/admin REACT_NATIVE_ARCHITECTURES=arm64-v8a npm --workspace @wmshr/mobile run build:android:production:online:local` 返回 `BUILD SUCCESSFUL`；脚本产物 `/tmp/wmshr-android-0.1.28-fixed-script-arm64.apk` 经 `aapt dump badging` 确认为 `versionName='0.1.28'`、`versionCode='128'`、`native-code: 'arm64-v8a'`，拆包显示 `assets/index.android.bundle` 中 `0.1.26` 出现次数为 0、`0.1.28` 出现次数为 1。真机覆盖安装后强停冷启动，前台为 `com.wmshr.app/.MainActivity`，UI 文本进入员工登录页，`HAS_WMSHR_UPDATE_MODAL=False`，更新弹窗已消失。
+
+## 2026-06-29 问题 9：真机安装 debug APK 被系统拒绝 ADB 安装权限
+- 原因：当前手机系统对 ADB/shell 发起的 APK 安装做了额外权限限制，`adb install -r`、设备端 `pm install -r` 和 `pm install -r -t` 都返回 `INSTALL_FAILED_ABORTED: User rejected permissions`。签名排查确认当前已装包和新构建 debug APK 均为同一 Android Debug 证书，非签名不兼容。
+- 导致的问题：项目标准入口 `npm run mobile:install:android:debug -- --target <target>` 无法直接覆盖安装 debug 包；系统安装器 Intent 也无法通过 `file://` 路径打开。
+- 解决方式：先用 `appops set com.android.shell REQUEST_INSTALL_PACKAGES allow` 放开 shell 安装 APK 权限，再执行 `pm install -r -t /data/local/tmp/wmshr-debug-0.1.28.apk`，安装成功。最终 `dumpsys package com.wmshr.app` 确认 `versionName=0.1.28`、`versionCode=128`，且 `pkgFlags` 包含 `DEBUGGABLE`。
+
+## 2026-06-29 问题 10：Debug APK 启动后红屏 Unable to load script
+- 原因：手机安装的是 debug APK，debug 包不会内嵌 release JS bundle，启动时必须连接本机 Metro。截图显示 `Unable to load script`，本机当时没有 WMSHR 的 8081 Metro，手机无线 ADB 旧端口也已失效，导致 App 无法从 `localhost:8081` 获取 `index.android.bundle`。
+- 导致的问题：debug 包虽然已安装成功且 `pkgFlags` 包含 `DEBUGGABLE`，但启动进入 React Native 红屏，无法进入业务界面测试更新弹窗。
+- 解决方式：启动 WMSHR Metro：`HOME=/Users/admin npm --workspace @wmshr/mobile run start -- --host localhost --port 8081`；用户重新提供无线调试端口后执行 `adb connect 100.70.244.32:39871`，再执行 `adb -s 100.70.244.32:39871 reverse tcp:8081 tcp:8081` 并强停重启 `com.wmshr.app/.MainActivity`。Metro 日志显示 Android bundle 构建完成，后续抓取 UI 文本确认不再包含 `Unable to load script`。
+
+## 2026-06-29 问题 11：App 内点击“立即安装”未跳转系统 APK 安装器
+- 原因：真机复现时，更新弹窗已显示 `安装包已下载 100%`，点击“立即安装”后 App 私有 debug 日志记录 `app_update_install_start`、`app_update_download_ready` 和 `app_update_install_prompt_opened`，但前台仍停留在 `com.wmshr.app/.MainActivity`，系统安装器没有展示。排查 `dumpsys package com.wmshr.app` 与构建 APK 后确认，原 Android Manifest 未声明 `android.permission.REQUEST_INSTALL_PACKAGES`，也未在 Android 11+ package visibility 的 `<queries>` 中声明 APK 安装 VIEW Intent；`expo-intent-launcher` 的 `startActivityForResult` 在该设备上会快速返回，导致 JS 误判为安装器已打开。
+- 导致的问题：下载完成后按钮切到“立即安装”，点击会关闭更新弹窗并显示底部“安装包已下载”状态，但用户看不到系统 APK 安装确认流程。
+- 解决方式：已在 `apps/mobile/android/app/src/main/AndroidManifest.xml` 增加 `REQUEST_INSTALL_PACKAGES` 和 `application/vnd.android.package-archive` 的 VIEW query；同步在 `apps/mobile/app.json` 增加 Android permission；并让 `openAndroidInstaller()` 返回并记录 `IntentLauncher.startActivityAsync` 的 result，便于后续区分“真正安装完成/用户取消/系统瞬间返回”。`npm --workspace @wmshr/mobile run lint` 已通过，debug APK 也已重新构建并校验包含 `uses-permission: android.permission.REQUEST_INSTALL_PACKAGES`。
+- 当前阻塞：覆盖安装新 debug APK 进行真机复验时，无线 ADB 在传输 129MB debug APK 后多次掉线/端口刷新。后续手机端口重新出现后，`ping`/`nc` 和 mDNS 均能看到设备（如 `192.168.1.22:39451/39887`），但 `adb connect` 在 ADB TLS 层失败，说明当前电脑与手机的无线调试授权需要重新配对。电脑侧 HTTP 下载入口已验证可用（`http://192.168.1.18:18081/wmshr-debug-install-permission-arm64.apk`，`Content-Length=135667813`）；待用户提供“使用配对码配对设备”的配对端口和 6 位配对码后，继续执行设备端下载到 `/data/local/tmp`、`pm install -r -t`、恢复 `adb reverse tcp:8081 tcp:8081` 并复测“立即安装”。
+
+- 追加验证结果（2026-06-30）：重新配对无线调试后，成功安装包含 `REQUEST_INSTALL_PACKAGES` 的 debug APK，并恢复 `adb reverse tcp:8081 tcp:8081`。首次点击“立即安装”已成功跳到 `com.android.packageinstaller/.PackageInstallerActivity`，证明“不跳系统安装器”的原问题已解决；随后系统提示“解析错误”，继续排查发现 App 缓存 `cache/hmshr-0.1.29.apk` 只有 `9,632,868` 字节，而线上 APK 当前 `Content-Length=71,606,586` 且 `aapt dump badging` 可读，根因为历史残缺 APK 缓存被旧逻辑按“文件存在且非空”误复用。
+- 追加修复（2026-06-30）：`AppUpdateGate` 已增加远端 `Content-Length` 校验：检查更新和点击下载时都会比对缓存大小，不一致则删除缓存重新下载；下载完成后也校验最终文件大小，不一致则删除并提示“下载安装包不完整，请重试。”。真机删除坏缓存后复测，App 重新下载完整 `71,606,586` 字节安装包，`app_update_download_ready` 记录 `reusedCache=false`、`bytesWritten=71606586`、`bytesExpected=71606586`，随后前台进入荣耀系统安装器页面，显示 HMSHR 安装安全提示和“取消”等系统安装流程控件，未再出现解析错误。
+
+## 2026-06-30 问题 12：版本更新 UI 改动的真机点按验证被无线 ADB 端口失效阻塞
+- 原因：本次新增“底部更新进度卡片关闭按钮”和“我的页更新入口重新打开版本更新弹窗”后，`npm --workspace @wmshr/mobile run lint` 已通过；准备继续用真机自动点按验证时，`adb devices -l` 为空，`adb mdns services` 为空，旧无线调试端口 `100.70.244.32:39451`、`192.168.1.22:39451`、`192.168.1.22:39887` 均返回 connection refused。
+- 导致的问题：当前只能完成类型检查和静态 diff 检查，暂时无法继续自动点击底部卡片关闭 icon、我的页“更新应用”入口和根层更新弹窗。
+- 当前判断：这是手机无线调试端口刷新/授权断开导致的环境阻塞，不是代码编译问题；Metro 8081 仍在监听。
+- 下一步：用户重新提供无线调试当前 IP:端口（必要时同时提供配对端口和 6 位配对码）后，继续恢复 `adb reverse tcp:8081 tcp:8081` 并完成真机点按验证。
+
+## 2026-06-30 问题 13：Android 一键发布在 JS bundle 成功后被空数组展开打断
+- 原因：`scripts/build-mobile-android-production-online-local.sh` 和 `scripts/build-mobile-android-production-local.sh` 在 `set -u` 下直接把空数组 `${GRADLE_ARCH_ARGS[*]}` 拼进 `bash -lc` 命令；未设置 `REACT_NATIVE_ARCHITECTURES` 的完整官网包构建路径会在空数组展开阶段报 `unbound variable`。
+- 导致的问题：`HOME=/Users/admin npm run mobile:release:android` 已把移动端版本写到 `0.1.29`，且 `:app:createBundleReleaseJsAndAssets --rerun-tasks` 返回 `BUILD SUCCESSFUL`，但尚未执行 `assembleRelease` 和官网发布步骤，因此没有产出/发布 APK。
+- 解决方式：两个 production 本地构建脚本都改为显式区分“有架构参数”和“无架构参数”两条 assembleRelease 命令；无架构参数时直接运行 `./gradlew assembleRelease`，避免空数组在 macOS Bash + `set -u` 下被展开。
+- 解决验证：用固定版本 `0.1.29` 重新执行 `HOME=/Users/admin npm run mobile:release:android -- --version 0.1.29`，脚本完整退出 0；官网部署到 `https://dutylix.com`，APK 地址为 `https://dutylix.com/downloads/wmshr-android-0.1.29.apk`，更新 API 返回 `version=0.1.29` 和同一 URL。本地 APK 大小 `71611886`，线上 `content-length=71611886`；本地 MD5 与线上 ETag 均为 `c43f34e62117498f116116b63899e8db`；`aapt dump badging` 确认 APK 为 `versionName='0.1.29'`、`versionCode='129'`。

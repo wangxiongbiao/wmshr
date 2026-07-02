@@ -151,24 +151,24 @@ export function NotificationsScreen() {
 }
 
 const styles = StyleSheet.create({
-  placeholderCard: {marginTop: 16, backgroundColor: colors.white, borderRadius: 22, padding: 18, alignItems: 'center', gap: 10},
+  placeholderCard: {marginTop: 16, backgroundColor: colors.white, borderRadius: 16, padding: 18, alignItems: 'center', gap: 10},
   retryButton: {marginTop: 8, minWidth: 120, height: 44, borderRadius: 16, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16},
   retryButtonText: {color: colors.white, fontWeight: '900'},
-  listCard: {marginTop: 16, backgroundColor: colors.white, borderRadius: 24, paddingHorizontal: 18},
+  listCard: {marginTop: 16, backgroundColor: colors.white, borderRadius: 16, paddingHorizontal: 18},
   // 通知页正文和工资条通知属于天然长文案：列表项统一改为顶部对齐，并限制标题/正文/时间的展示行数，避免小屏多语言下整行被撑乱。
   row: {flexDirection: 'row', alignItems: 'flex-start', gap: 14, paddingVertical: 16},
   rowBorder: {borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#e2e8f0'},
   rowPressed: {opacity: 0.78},
-  iconWrap: {width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center', flexShrink: 0},
+  iconWrap: {width: 42, height: 42, borderRadius: 16, alignItems: 'center', justifyContent: 'center', flexShrink: 0},
   iconWrapUnread: {backgroundColor: '#eff6ff'},
   iconWrapRead: {backgroundColor: '#f8fafc'},
   copy: {flex: 1, minWidth: 0},
   titleRow: {flexDirection: 'row', alignItems: 'center', gap: 8, minWidth: 0},
   title: {fontSize: 14, lineHeight: 18, color: colors.text, fontWeight: '800', flexShrink: 1},
-  unreadDot: {width: 8, height: 8, borderRadius: 999, backgroundColor: colors.primary, flexShrink: 0, marginTop: 5},
+  unreadDot: {width: 8, height: 8, borderRadius: 16, backgroundColor: colors.primary, flexShrink: 0, marginTop: 5},
   detail: {marginTop: 4, fontSize: 12, lineHeight: 18, color: colors.textSubtle, fontWeight: '600'},
   meta: {marginTop: 6, fontSize: 11, lineHeight: 15, color: colors.textMuted, fontWeight: '700'},
-  loadMoreButton: {marginTop: 16, minHeight: 48, borderRadius: 18, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#dbeafe', paddingHorizontal: 16, paddingVertical: 12},
+  loadMoreButton: {marginTop: 16, minHeight: 48, borderRadius: 16, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#dbeafe', paddingHorizontal: 16, paddingVertical: 12},
   loadMoreButtonPressed: {opacity: 0.82},
   loadMoreText: {fontSize: 14, color: colors.primary, fontWeight: '900', textAlign: 'center'},
 });
