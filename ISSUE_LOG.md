@@ -126,3 +126,15 @@
 - 导致的问题：官网和更新接口看起来像“安卓包没了”，实际是包文件未重新挂到可公开下载的位置，且 `dutylix.com/api/public/mobile-app-download` 代理无法拿到新库配置。
 - 解决方式：创建 GitHub Release `android-0.1.29`，上传 `wmshr-android-0.1.29.apk`；将 `public.mobile_app_releases` 回写为 GitHub release asset URL；同步 `dutylix` 项目的 Supabase production 环境变量；更新下载代理逻辑，让 GitHub Release 资产直接 302 跳转，避免 Vercel Function 中转 68MB APK；重新发布 admin 与 portal。
 - 验收结果：`https://github.com/wangxiongbiao/wmshr/releases/download/android-0.1.29/wmshr-android-0.1.29.apk`、`https://admin.dutylix.com/api/public/mobile-app-download`、`https://dutylix.com/api/public/mobile-app-download` 均返回 `HTTP 200`、`content-type: application/vnd.android.package-archive`、`content-length: 71611886`，首 4 字节为 `PK\x03\x04`；Admin 与 Portal 的 `/api/public/mobile-app-update` 均返回版本 `0.1.29` 和同一 GitHub URL。
+
+## 2026-07-15 问题 19：APK 发布流程校验被本机 NODE_OPTIONS preload 阻断
+- 原因：本机 shell 仍继承失效的 `NODE_OPTIONS` preload 路径，直接执行 `node -e` 解析 `package.json` 时再次报 `Cannot find module .../electron-runtime-compat/preload.cjs`。
+- 导致的问题：首次验证 Android GitHub Release 发布脚本入口时，普通 Node 命令失败，不能确认 package scripts 是否只剩新的 GitHub 发布入口。
+- 解决方式：复用问题 13 的处理口径，对本次 Node / npm 校验命令使用 `env -u NODE_OPTIONS`；同时删除旧 `mobile:publish:android:local-to-home` 脚本入口，避免后续继续误用旧官网静态 APK 发布流程。
+- 验收结果：`bash -n` 通过 Android 发布相关 shell 脚本；`env -u NODE_OPTIONS npm run mobile:publish:android:github -- --help` 正常输出 GitHub Release 发布帮助；`env -u NODE_OPTIONS npm run mobile:release:android -- --dry-run` 显示后续会调用 `scripts/publish-local-android-apk-to-github.sh`。
+
+## 2026-07-15 问题 20：GitHub CLI keyring token 失效
+- 原因：执行 `gh auth status --hostname github.com` 时，GitHub CLI 返回当前 `wangxiongbiao` 账号为 active，但 keyring 中 token 已失效。
+- 导致的问题：新的 Android GitHub Release 发布脚本如果继续执行真实上传，会在发布前置校验阶段失败；这比构建完成后才失败更可控。
+- 解决方式：在 `scripts/publish-local-android-apk-to-github.sh` 和 `scripts/release-mobile-android.sh` 中加入 `gh auth status --hostname github.com` 前置校验，缺失或失效时直接提示 `gh auth login`。
+- 验收结果：脚本语法校验与 dry-run 已通过；真实上传前需要先在本机执行 `gh auth login -h github.com` 恢复 GitHub CLI token。

@@ -483,53 +483,17 @@ print(f"{version}\t{url}\t{filename}")
 PY
 }
 
-stage_current_mobile_release_for_home_deploy() {
-  local api_json metadata_line release_version release_url release_filename tmp_apk staged_apk api_body_file api_status
-  api_body_file="$(mktemp -t wmshr-current-mobile-release.XXXXXX.json)"
-  api_status="$(fetch_http_body_with_status "${CUSTOM_ORIGIN}/api/public/mobile-app-update" "$api_body_file")" || {
-    rm -f "$api_body_file"
-    return 1
-  }
-  api_json="$(cat "$api_body_file")"
-  rm -f "$api_body_file"
-
-  if [[ "$api_status" != "200" ]]; then
-    if is_mobile_release_unconfigured_payload "$api_json"; then
-      echo "No configured Android release found; portal deploy will skip staging APK." >&2
-      return 0
-    fi
-    echo "Mobile update API returned HTTP ${api_status} before portal deploy." >&2
-    echo "$api_json" >&2
-    return 1
-  fi
-
-  metadata_line="$(read_mobile_release_metadata "$api_json")"
-  IFS=$'\t' read -r release_version release_url release_filename <<< "$metadata_line"
-  if [[ -z "$release_url" || -z "$release_filename" || "$release_filename" == "." || "$release_filename" == "/" ]]; then
-    echo "Mobile update API returned unsafe release metadata: ${metadata_line}" >&2
-    return 1
-  fi
-  tmp_apk="$(mktemp -t wmshr-current-mobile-release.XXXXXX.apk)"
-
-  # 门户官网的 APK 资产不是长期落在仓库里；如果后续再发一次 portal，
-  # 必须先把“当前已发布的正式 APK”重新拉回 apps/home/public/downloads/，
-  # 否则 Vercel 新部署里会丢失该静态文件，直接 URL 与下载代理都会回退成 index.html。
-  download_with_retry "$release_url" "$tmp_apk"
-  python3 - "$tmp_apk" "$release_version" "$release_url" <<'PY'
+is_github_release_asset_url() {
+  local url="$1"
+  python3 - "$url" <<'PY'
 import sys
-from pathlib import Path
+from urllib.parse import urlparse
 
-apk_path, version, url = sys.argv[1:4]
-data = Path(apk_path).read_bytes()
-if data[:4] != b"PK\x03\x04":
-    raise SystemExit(f"Current mobile release {version} from {url} is not an APK/ZIP payload")
+parsed = urlparse(sys.argv[1])
+if parsed.netloc == "github.com" and "/releases/download/" in parsed.path:
+    raise SystemExit(0)
+raise SystemExit(1)
 PY
-
-  staged_apk="${REPO_ROOT}/apps/home/public/downloads/${release_filename}"
-  mkdir -p "$(dirname "$staged_apk")"
-  cp "$tmp_apk" "$staged_apk"
-  rm -f "$tmp_apk"
-  echo "$staged_apk"
 }
 
 verify_mobile_release_downloads() {
@@ -557,6 +521,10 @@ verify_mobile_release_downloads() {
   echo "== Portal mobile release verification =="
   echo "Version: ${release_version}"
   echo "URL: ${release_url}"
+  if ! is_github_release_asset_url "$release_url"; then
+    echo "Android release URL must be a GitHub Release asset: ${release_url}" >&2
+    return 1
+  fi
   assert_apk_response "$release_url" "Portal direct Android APK"
   assert_apk_response "${HOME_CUSTOM_ORIGIN}/api/public/mobile-app-download" "Portal proxied Android APK"
 }
@@ -603,9 +571,8 @@ PY
 
 deploy_home_production() {
   local home_deploy_log="$1"
-  local admin_config_backup deploy_status staged_mobile_release
+  local admin_config_backup deploy_status
   admin_config_backup="$(mktemp -t wmshr-admin-vercel-config.XXXXXX.json)"
-  staged_mobile_release="$(stage_current_mobile_release_for_home_deploy)"
 
   # Vercel only receives one root vercel.json during a monorepo root deploy.
   # The admin config is restored through a RETURN trap even when the portal deploy
@@ -617,7 +584,7 @@ deploy_home_production() {
   # remote build, and can fail the release on upload size alone.
   assert_vercel_config "${REPO_ROOT}/vercel.json" admin
   cp "${REPO_ROOT}/vercel.json" "$admin_config_backup"
-  trap 'if [[ -n "${staged_mobile_release:-}" && -f "$staged_mobile_release" ]]; then rm -f "$staged_mobile_release"; fi; cp "$admin_config_backup" "${REPO_ROOT}/vercel.json"; rm -f "$admin_config_backup"; trap - RETURN' RETURN
+  trap 'cp "$admin_config_backup" "${REPO_ROOT}/vercel.json"; rm -f "$admin_config_backup"; trap - RETURN' RETURN
 
   cat >"${REPO_ROOT}/vercel.json" <<'JSON'
 {

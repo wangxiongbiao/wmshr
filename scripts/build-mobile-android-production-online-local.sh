@@ -15,7 +15,7 @@ set -euo pipefail
 #   1. 若 apps/mobile/android 不存在，会先执行 `npx expo prebuild --platform android` 生成原生工程；
 #   2. 会产出 release APK，路径在 outputs/apk/release；
 #   3. 该入口只改变 JS 打包阶段注入的运行时环境，不改变当前本地签名策略；
-#   4. 该入口现在就是 Android 官网更新包的标准构建入口，后续发布默认与官网静态托管脚本配套使用。
+#   4. 该入口现在就是 Android 官网更新包的标准构建入口，后续发布默认与 GitHub Release 上传脚本配套使用。
 # 失败优先检查：
 #   - JAVA_HOME 是否指向 /usr/local/opt/openjdk@17；
 #   - ANDROID_SDK_ROOT 下的 cmdline-tools / build-tools / ndk / cmake 是否完整；

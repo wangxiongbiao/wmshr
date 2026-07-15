@@ -32,7 +32,7 @@
     "mobile:google-play": "node scripts/google-play-upload-aab.mjs",
     "mobile:google-play:check": "node scripts/google-play-upload-aab.mjs --check-permission",
     "mobile:google-play:submit-review": "node scripts/google-play-submit-review.mjs",
-    "mobile:publish:android:local-to-home": "bash scripts/publish-local-android-apk-to-home.sh",
+    "mobile:publish:android:github": "bash scripts/publish-local-android-apk-to-github.sh",
     "mobile:release:android": "bash scripts/release-mobile-android.sh",
     "mobile:adb:wifi": "bash scripts/adb-connect-wifi.sh",
     "mobile:install:android:debug": "bash scripts/adb-install-mobile-debug.sh",

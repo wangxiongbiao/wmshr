@@ -3,25 +3,25 @@ set -euo pipefail
 
 # WMSHR Android 一键本地发布脚本。
 # 作用：统一完成移动端版本号落盘、TypeScript 校验、本地 production-online release APK 构建，
-#       并把 APK 通过 dutylix.com 静态托管发布到官网更新接口。
+#       并把 APK 上传到 GitHub Releases 后回写官网更新接口。
 # 前提：
 #   1. 当前仓库依赖 apps/mobile 的 Expo prebuild + 原生 Android 工程；
 #   2. 本机已具备 JDK 17 与 Android SDK/NDK/cmake；
 #   3. apps/admin/.env 中已配置可写 mobile_app_releases 的 Supabase service role；
-#   4. 当前环境已具备 Vercel CLI 登录态，且可发布 dutylix 门户项目。
+#   4. 当前环境已具备 GitHub CLI 登录态，且对 wangxiongbiao/wmshr 有 release 写权限。
 # 影响：
 #   1. 会修改 apps/mobile/app.json、apps/mobile/package.json 与 android/app/build.gradle 中的版本号；
 #   2. 会在当前机器执行 release APK 构建；
-#   3. 构建成功后会重新部署官网门户，并把数据库中的最新 Android 版本记录更新为本次 APK 地址。
+#   3. 构建成功后会创建/更新 GitHub Release，并把数据库中的最新 Android 版本记录更新为 GitHub asset 地址。
 # 失败优先检查：
 #   - JAVA_HOME 是否指向 /usr/local/opt/openjdk@17；
 #   - ANDROID_SDK_ROOT 下的 cmdline-tools / build-tools / ndk / cmake 是否完整；
 #   - `HOME=/Users/admin npm --workspace @wmshr/mobile run lint` 是否通过；
-#   - `HOME=/Users/admin bash -lc 'vercel whoami'` 是否已登录；
+#   - `HOME=/Users/admin gh auth status` 是否已登录且具备 repo 权限；
 #   - apps/admin/.env 的 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY 是否可用。
 # 边界：
 #   - 门户与 App 更新弹窗共用数据库里的“当前最新 Android 包”单条记录；不要在这里扩展成历史版本列表，除非先同步前后端数据模型；
-#   - 这里默认发布的是“本地构建 + 官网静态托管”的匿名可下载 APK，不再依赖 EAS artifact 或 private GitHub release 资产。
+#   - 这里默认发布的是“本地构建 + GitHub Release 公开资产”的匿名可下载 APK，不再依赖 EAS artifact 或 Vercel 静态 APK 资产。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -142,6 +142,17 @@ run() {
   "$@"
 }
 
+assert_github_auth() {
+  if ! command -v gh >/dev/null 2>&1; then
+    echo "Required command not found: gh" >&2
+    exit 127
+  fi
+  if ! gh auth status --hostname github.com >/dev/null 2>&1; then
+    echo "GitHub CLI is not authenticated for github.com. Run: gh auth login" >&2
+    exit 1
+  fi
+}
+
 update_mobile_version_files() {
   local next_version="$1"
   python3 - "$APP_JSON_PATH" "$MOBILE_PACKAGE_JSON_PATH" "$ANDROID_BUILD_GRADLE_PATH" "$next_version" <<'PY'
@@ -209,10 +220,11 @@ main() {
       echo "[dry-run] would run: npm --workspace @wmshr/mobile run lint"
     fi
     echo "[dry-run] would run: npm --workspace @wmshr/mobile run build:android:production:online:local"
-    echo "[dry-run] would run: bash scripts/publish-local-android-apk-to-home.sh --apk '${LOCAL_APK_PATH}' --version '${VERSION}' --content '${CONTENT}'"
+    echo "[dry-run] would run: bash scripts/publish-local-android-apk-to-github.sh --apk '${LOCAL_APK_PATH}' --version '${VERSION}' --content '${CONTENT}'"
     exit 0
   fi
 
+  assert_github_auth
   update_mobile_version_files "${VERSION}"
 
   if [[ "${SKIP_LINT}" != "1" ]]; then
@@ -226,7 +238,7 @@ main() {
     exit 1
   fi
 
-  run bash "${REPO_ROOT}/scripts/publish-local-android-apk-to-home.sh" \
+  run bash "${REPO_ROOT}/scripts/publish-local-android-apk-to-github.sh" \
     --apk "${LOCAL_APK_PATH}" \
     --version "${VERSION}" \
     --content "${CONTENT}"
@@ -234,7 +246,7 @@ main() {
   echo "== Android local release completed =="
   echo "Version: ${VERSION}"
   echo "APK: ${LOCAL_APK_PATH}"
-  echo "Published URL: https://dutylix.com/downloads/wmshr-android-${VERSION}.apk"
+  echo "Published URL: https://github.com/wangxiongbiao/wmshr/releases/download/android-${VERSION}/wmshr-android-${VERSION}.apk"
 }
 
 main "$@"

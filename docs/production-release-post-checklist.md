@@ -25,7 +25,7 @@
 - 生产 bundle 仍含预期 CTA 文案 `Use Now` / `立即使用`
 - 生产 bundle 不再出现旧的 `Login with Google` / `谷歌登录`
 - `https://dutylix.com/api/public/mobile-app-update` 仍返回当前官网 APK 信息
-- APK 直链与同源代理都必须满足：
+- GitHub Release APK 直链与同源代理都必须满足：
   - `HTTP 200`
   - `content-type` 不是 `text/html`
   - `content-length` 至少是正常 APK 大小量级
@@ -67,14 +67,15 @@
 
 - `https://dutylix.com` 首页能正常打开
 - 关键 CTA 文案显示正常
-- 官网 APK 下载按钮实际下载的是 APK，不是 HTML
+- 官网 APK 下载按钮通过同源代理拿到当前 GitHub Release APK，不是 HTML
 - 下载后的文件名、大小、安装行为符合预期
 
 建议补一条命令行抽检：
 
 ```bash
-curl -I -L -s https://dutylix.com/downloads/wmshr-android-<version>.apk
-curl -I -s https://dutylix.com/api/public/mobile-app-download
+curl -I -L -s https://github.com/wangxiongbiao/wmshr/releases/download/android-<version>/wmshr-android-<version>.apk
+curl -I -L -s https://dutylix.com/api/public/mobile-app-download
+curl -I -L -s https://admin.dutylix.com/api/public/mobile-app-download
 ```
 
 ### 3. Admin 人工点检
@@ -90,7 +91,7 @@ curl -I -s https://dutylix.com/api/public/mobile-app-download
 至少确认：
 
 - `https://admin.dutylix.com/api/public/mobile-app-update` 的 `version` 与 `url` 正确
-- 手机端/测试端点击“更新应用”后，落到的是当前官网 APK
+- 手机端/测试端点击“更新应用”后，落到的是当前 GitHub Release APK
 - 安装包可以正常拉取，不会下载成 HTML 或空文件
 
 ## 如果人工复核失败，如何手动回归版本
