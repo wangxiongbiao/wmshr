@@ -9,6 +9,49 @@ dotenv.config();
 
 const PUBLIC_ADMIN_API_BASE_URL = process.env.ADMIN_API_BASE_URL
   || (process.env.NODE_ENV !== "production" ? "http://127.0.0.1:8788" : "https://admin.dutylix.com");
+const DEFAULT_PUBLIC_ANDROID_RELEASE_VERSION = "0.1.29";
+const DEFAULT_PUBLIC_ANDROID_RELEASE_CONTENT = "例行更新，修复已知问题并优化使用体验";
+const DEFAULT_PUBLIC_ANDROID_RELEASE_URL =
+  "https://github.com/wangxiongbiao/wmshr/releases/download/android-0.1.29/wmshr-android-0.1.29.apk";
+const PUBLIC_ANDROID_RELEASE_VERSION = String(
+  process.env.PUBLIC_ANDROID_RELEASE_VERSION || DEFAULT_PUBLIC_ANDROID_RELEASE_VERSION
+).trim();
+const PUBLIC_ANDROID_RELEASE_CONTENT = String(
+  process.env.PUBLIC_ANDROID_RELEASE_CONTENT || DEFAULT_PUBLIC_ANDROID_RELEASE_CONTENT
+).trim();
+const PUBLIC_ANDROID_RELEASE_URL = String(process.env.PUBLIC_ANDROID_RELEASE_URL || DEFAULT_PUBLIC_ANDROID_RELEASE_URL).trim();
+
+function getPortalAndroidReleaseFallback() {
+  if (!PUBLIC_ANDROID_RELEASE_VERSION || !PUBLIC_ANDROID_RELEASE_URL) {
+    return null;
+  }
+
+  return {
+    version: PUBLIC_ANDROID_RELEASE_VERSION,
+    content: PUBLIC_ANDROID_RELEASE_CONTENT || "例行更新，修复已知问题并优化使用体验",
+    url: PUBLIC_ANDROID_RELEASE_URL,
+  };
+}
+
+function sendPortalAndroidReleaseFallback(res: express.Response) {
+  const fallback = getPortalAndroidReleaseFallback();
+  if (!fallback) {
+    return false;
+  }
+
+  res.json(fallback);
+  return true;
+}
+
+function redirectToPortalAndroidReleaseFallback(res: express.Response) {
+  const fallback = getPortalAndroidReleaseFallback();
+  if (!fallback) {
+    return false;
+  }
+
+  res.redirect(302, fallback.url);
+  return true;
+}
 
 async function startServer() {
   const app = express();
@@ -71,16 +114,26 @@ async function startServer() {
   app.get("/api/public/mobile-app-update", async (_req, res) => {
     try {
       // 门户前端只通过本站同源接口取最新包信息，避免把后台域名和跨域细节散落到 React 组件里。
-      // 这里转发后台统一公开更新接口，保证门户下载按钮和移动端更新弹窗消费的是同一份版本数据。
+      // 这里优先转发后台统一公开更新接口，保证门户下载按钮和移动端更新弹窗消费的是同一份版本数据。
+      // Vercel Function 偶发无法从门户项目访问后台自定义域名时，允许回退到公开 GitHub Release 变量；
+      // 这三个变量不是密钥，只作为“下载入口保底”，避免后台代理短暂异常时官网直接隐藏 Android 下载按钮。
       const response = await fetch(`${PUBLIC_ADMIN_API_BASE_URL}/api/public/mobile-app-update`);
       const payload = await response.json().catch(() => null);
 
       if (!response.ok || !payload || typeof payload !== "object") {
+        if (sendPortalAndroidReleaseFallback(res)) {
+          return;
+        }
+
         return res.status(response.status).json(payload || { error: "Unable to load mobile app update" });
       }
 
       res.json(payload);
     } catch (error: any) {
+      if (sendPortalAndroidReleaseFallback(res)) {
+        return;
+      }
+
       res.status(502).json({ error: error.message || "Unable to load mobile app update" });
     }
   });
@@ -104,6 +157,10 @@ async function startServer() {
       });
 
       if (!response.ok) {
+        if (redirectToPortalAndroidReleaseFallback(res)) {
+          return;
+        }
+
         const payload = await response.text();
         return res.status(response.status).send(payload);
       }
@@ -153,6 +210,10 @@ async function startServer() {
 
       Readable.fromWeb(response.body as any).pipe(res);
     } catch (error: any) {
+      if (redirectToPortalAndroidReleaseFallback(res)) {
+        return;
+      }
+
       res.status(502).json({ error: error.message || "Unable to download mobile app" });
     }
   }

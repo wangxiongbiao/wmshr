@@ -558,7 +558,7 @@ verify_mobile_release_downloads() {
   echo "Version: ${release_version}"
   echo "URL: ${release_url}"
   assert_apk_response "$release_url" "Portal direct Android APK"
-  assert_apk_response "${HOME_CUSTOM_ORIGIN}/api/public/mobile-app-download" "Portal proxied Android APK" "wms-${release_version}.apk"
+  assert_apk_response "${HOME_CUSTOM_ORIGIN}/api/public/mobile-app-download" "Portal proxied Android APK"
 }
 
 verify_home_production() {

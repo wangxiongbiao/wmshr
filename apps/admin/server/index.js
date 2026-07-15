@@ -440,6 +440,15 @@ function buildMobileDownloadFilename(version) {
   return `wms-${normalizedVersion || "latest"}.apk`;
 }
 
+function shouldRedirectMobileDownloadSource(url) {
+  try {
+    const parsed = new URL(String(url || ""));
+    return parsed.hostname === "github.com" && parsed.pathname.includes("/releases/download/");
+  } catch {
+    return false;
+  }
+}
+
 async function getMobileAndroidReleaseRecord() {
   const { data, error } = await supabase
     .from("mobile_app_releases")
@@ -3369,6 +3378,13 @@ app.get("/api/public/mobile-app-update", async (_req, res) => {
 async function handleMobileAppDownload(req, res) {
   try {
     const release = await getMobileAndroidReleaseRecord();
+    // GitHub Release 资产已经是公开、带 attachment 头的下载源；这里直接 302，
+    // 避免 Vercel Function 代理 68MB APK 时因跨项目出站网络或函数流式传输限制返回 fetch failed。
+    if (shouldRedirectMobileDownloadSource(release.url)) {
+      res.setHeader("Cache-Control", "no-store");
+      return res.redirect(302, release.url);
+    }
+
     const requestHeaders = {};
     const range = String(req.headers.range || "").trim();
     const ifRange = String(req.headers["if-range"] || "").trim();
