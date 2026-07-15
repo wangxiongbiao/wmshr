@@ -119,4 +119,4 @@
 - 导致的问题：第一次生产发布已完成 Supabase up-to-date 检查、GitHub `main` 提交推送和两个 Vercel 构建，但生产验证未完成，脚本退出码为 1 并触发自动回滚；工作区短暂留下门户版 `vercel.json` 和空 APK 临时文件。
 - 原计划验证入口：执行 `npm run deploy:prod -- -m "release production rebuild supabase and remove admin bootstrap"`，由脚本完成 lint/build/db push/commit/push/Vercel 发布/正式域名验证。
 - 解决方式：恢复根 `vercel.json` 为 admin 配置并删除临时下载目录；更新发布脚本，让空库未配置 Android release 或门户代理返回移动更新 `fetch failed` 时跳过 APK staging 和 APK 下载验证，同时把 Vercel portal 生产部署的自动 alias 标记为可回滚，并确保临时文件清理不会阻断 `vercel.json` 恢复。
-- 验收结果：已通过 `bash -n scripts/deploy-production.sh` 静态校验；下一步重跑完整发布脚本验证生产发布闭环。
+- 验收结果：已通过 `bash -n scripts/deploy-production.sh` 静态校验，并重跑完整 `npm run deploy:prod -- -m "fix production deploy for empty mobile release"` 成功；发布脚本退出码为 0，GitHub release HEAD 为 `c9218ee9fe31737e6e0d8c40ea38a62034f8eab9`，`admin.dutylix.com` 指向 `dutylix-admin-7bo4um1rg-wang-lins-projects.vercel.app`，`dutylix.com` 指向 `dutylix-45ss8pq1h-wang-lins-projects.vercel.app`。空库未配置 APK 被明确跳过，页面和核心 API 仍完成生产验证。
