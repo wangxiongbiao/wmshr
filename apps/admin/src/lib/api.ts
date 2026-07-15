@@ -40,8 +40,6 @@ import {
   SalaryAdjustmentItem,
   SalaryAdjustmentPayload,
   SopDocument,
-  WorkspaceBootstrapResponse,
-  WorkspaceBootstrapStatusResponse,
   EmployeeUpsertPayload
 } from "../types";
 import { formatLocalDatePart } from "./utils";
@@ -778,22 +776,6 @@ export async function deleteSalaryAdjustmentItem(itemId: number): Promise<{ succ
   });
   clearPayrollCaches();
   return data;
-}
-
-export async function initializeWorkspace(): Promise<WorkspaceBootstrapResponse> {
-  return request<WorkspaceBootstrapResponse>("/api/admin/workspace/bootstrap", {
-    method: "POST"
-  });
-}
-
-export async function fetchWorkspaceBootstrapStatus(): Promise<WorkspaceBootstrapStatusResponse> {
-  return request<WorkspaceBootstrapStatusResponse>("/api/admin/workspace/bootstrap-status");
-}
-
-export async function ensureWorkspaceBootstrap(): Promise<WorkspaceBootstrapResponse> {
-  return request<WorkspaceBootstrapResponse>("/api/admin/workspace/ensure-bootstrap", {
-    method: "POST"
-  });
 }
 
 export async function updateAttendanceRecord(recordId: number, payload: AttendanceRecordUpdatePayload): Promise<AttendanceCalculationResult> {

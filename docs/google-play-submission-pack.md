@@ -102,6 +102,42 @@ WMSHR App is designed for organizations that need a simple employee-side mobile 
 - `wmshr-play-icon.png`
 - `wmshr-feature-graphic-ready.png`
 
+## 7. Google Play Console 中文上传
+
+如果要把 AAB 上传到 Google Play Console，先看中文步骤：
+
+```text
+docs/google-play-console-zh-upload-guide.md
+```
+
+标准检查入口：
+
+```bash
+npm run mobile:google-play:check
+```
+
+权限通过后上传到内部测试草稿：
+
+```bash
+npm run mobile:google-play -- --upload --commit --track internal --status draft
+```
+
+上传后复核内部测试轨道：
+
+```bash
+npm run mobile:google-play -- --verify-track --track internal
+```
+
+提交审核 / 发布内部测试：
+
+```bash
+npm run mobile:google-play:submit-review -- --version-code 129 --track internal
+```
+
+若中文后台提示 `REQUEST_INSTALL_PACKAGES` 未声明，先在「应用内容」/「敏感应用权限」中补充该权限声明，再重试提交。
+
+本次实际提交结果：已构建 Play 专用 AAB，移除 `REQUEST_INSTALL_PACKAGES`，使用 `versionCode=130` 提交内部测试和正式版 production；Google 复核两个轨道均为 `completed versionCodes=130 name=WMSHR Android 130`。
+
 ## 8. 还需要你最终补的唯一业务内容
 
 下面这项我没法替你凭空生成真实值，需要你后面补进 Play Console：

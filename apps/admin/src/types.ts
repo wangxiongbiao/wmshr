@@ -596,21 +596,6 @@ export interface AdminLeaveRequestApprovalPayload {
   approvalNote?: string;
 }
 
-export interface WorkspaceBootstrapResponse {
-  created: boolean;
-  yearMonth: string;
-  employeesCreated: number;
-  rulesCreated: number;
-  message: string;
-}
-
-export interface WorkspaceBootstrapStatusResponse {
-  ready: boolean;
-  hasData: boolean;
-  hasBootstrapState: boolean;
-  createdDemoData: boolean;
-}
-
 export interface AttendanceRecordUpdatePayload {
   date: string;
   type: AttendanceType;

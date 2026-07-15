@@ -43,7 +43,7 @@ import {
 } from "./types";
 import { INITIAL_EMPLOYEES } from "./constants";
 import { motion } from "motion/react";
-import { CheckCircle, Sparkles } from "lucide-react";
+import { CheckCircle } from "lucide-react";
 import {
   createAttendanceRule,
   createEmployee,
@@ -52,15 +52,12 @@ import {
   fetchAttendanceRuleDetail,
   fetchAttendanceRuleOptions,
   fetchAttendanceRuleRelatedEmployees,
-  fetchAttendanceRules,
   fetchCustomers,
   fetchEmployeeAppAccount,
   fetchEmployeeDetail,
   fetchEmployees,
   fetchGoodsSnapshot,
   fetchExpenseSnapshot,
-  fetchWorkspaceBootstrapStatus,
-  initializeWorkspace,
   resetEmployeeAppPassword,
   saveCustomersSnapshot,
   saveGoodsSnapshot,
@@ -77,37 +74,6 @@ import { useDialog } from "./components/DialogProvider";
 import { ADMIN_TABS, buildAdminRoute, parseAdminRoute } from "./lib/adminRoute";
 import { GOOGLE_POPUP_QUERY_KEY, GOOGLE_POPUP_QUERY_VALUE } from "../../../packages/shared/src/google-auth";
 import { useAdminAuth } from "./lib/useAdminAuth";
-
-function getWorkspaceBootstrapStorageKey(userId?: string) {
-  return userId ? `wmshr-admin-workspace-bootstrapped:${userId}` : "";
-}
-
-function readWorkspaceBootstrapFlag(userId?: string) {
-  const storageKey = getWorkspaceBootstrapStorageKey(userId);
-  if (!storageKey) {
-    return true;
-  }
-
-  try {
-    const storedValue = window.localStorage.getItem(storageKey);
-    return storedValue === "1";
-  } catch {
-    return true;
-  }
-}
-
-function writeWorkspaceBootstrapFlag(userId?: string) {
-  const storageKey = getWorkspaceBootstrapStorageKey(userId);
-  if (!storageKey) {
-    return;
-  }
-
-  try {
-    window.localStorage.setItem(storageKey, "1");
-  } catch {
-    // 本地体验标记写失败时保持静默；不要影响真实初始化流程。
-  }
-}
 
 const ADMIN_DEV_LAST_CAUSE_KEY = "wmshr-admin-dev-last-cause";
 const ADMIN_DEV_ROUTE_COUNT_KEY = "wmshr-admin-dev-route-normalize-count";
@@ -176,17 +142,12 @@ export default function App() {
   const [expensesLoading, setExpensesLoading] = useState(false);
   const [attendanceRuleList, setAttendanceRuleList] = useState<AttendanceRule[]>([]);
   const [employeesLoading, setEmployeesLoading] = useState(false);
-  const [attendanceRulesLoading, setAttendanceRulesLoading] = useState(false);
   const [employeeSaving, setEmployeeSaving] = useState(false);
   const [attendanceRuleSaving, setAttendanceRuleSaving] = useState(false);
   const [attendanceRuleToggleSaving, setAttendanceRuleToggleSaving] = useState(false);
   const [relatedEmployeesLoading, setRelatedEmployeesLoading] = useState(false);
-  const [workspaceBootstrapping, setWorkspaceBootstrapping] = useState(false);
-  const [workspaceBootstrapChecking, setWorkspaceBootstrapChecking] = useState(false);
-  const [workspaceBootstrapDismissed, setWorkspaceBootstrapDismissed] = useState(true);
   const [globalLoadingMessage, setGlobalLoadingMessage] = useState("");
   const [employeeListReloadKey, setEmployeeListReloadKey] = useState(0);
-  const bootstrapCheckedSessionRef = useRef<string | null>(null);
   const employeeDetailRequestIdRef = useRef(0);
   const customersLoadedRef = useRef(false);
   const goodsLoadedRef = useRef(false);
@@ -427,58 +388,9 @@ export default function App() {
       goodsLoadedRef.current = false;
       expensesLoadedRef.current = false;
       setAttendanceRuleList([]);
-      setWorkspaceBootstrapChecking(false);
-      setWorkspaceBootstrapDismissed(true);
-      bootstrapCheckedSessionRef.current = null;
       return;
     }
-
-    if (bootstrapCheckedSessionRef.current === sessionUserId) {
-      return;
-    }
-
-    bootstrapCheckedSessionRef.current = sessionUserId;
-    setWorkspaceBootstrapDismissed(readWorkspaceBootstrapFlag(sessionUserId));
-    setWorkspaceBootstrapChecking(false);
   }, [session?.user?.id]);
-
-  useEffect(() => {
-    const sessionUserId = session?.user?.id;
-    if (!session?.access_token || !sessionUserId) {
-      return;
-    }
-
-    let cancelled = false;
-    setWorkspaceBootstrapChecking(true);
-
-    void fetchWorkspaceBootstrapStatus()
-      .then((status) => {
-        if (cancelled) return;
-
-        if (status.ready) {
-          writeWorkspaceBootstrapFlag(sessionUserId);
-          setWorkspaceBootstrapDismissed(true);
-          return;
-        }
-
-        // 登录后只检查空间是否已初始化，不自动创建默认员工/规则；新账号必须由用户点击“一键初始化”后才写入初始化数据。
-        setWorkspaceBootstrapDismissed(readWorkspaceBootstrapFlag(sessionUserId));
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        setWorkspaceBootstrapDismissed(false);
-        addToast(error instanceof Error ? error.message : tAdmin("后台空间初始化检查失败"));
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setWorkspaceBootstrapChecking(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [session?.access_token, session?.user?.id]);
 
   useEffect(() => {
     // 一级模块缓存只保留已经真正访问过的页面实例，避免首次进入后台时把 5 个模块全部冷启动挂载。
@@ -524,42 +436,10 @@ export default function App() {
     }
   };
 
-  const loadAttendanceRuleModuleData = async () => {
-    setAttendanceRulesLoading(true);
-    try {
-      const rules = await fetchAttendanceRules();
-      setAttendanceRuleList(rules);
-    } catch (error) {
-      addToast(error instanceof Error ? error.message : tAdmin("考勤规则模块数据加载失败"));
-    } finally {
-      setAttendanceRulesLoading(false);
-    }
-  };
-
   const handleSignOutAndResetWorkspace = async () => {
     await handleSignOut();
     setEmployees([]);
     setAttendanceRuleList([]);
-    setWorkspaceBootstrapDismissed(true);
-  };
-  const handleBootstrapWorkspace = async () => {
-    setWorkspaceBootstrapping(true);
-    try {
-      const result = await initializeWorkspace();
-      writeWorkspaceBootstrapFlag(session?.user?.id);
-      setWorkspaceBootstrapDismissed(true);
-      navigateToTab("attendance");
-      addToast(result.message || tAdmin("已为当前账号初始化后台业务数据"));
-    } catch (error) {
-      addToast(error instanceof Error ? error.message : tAdmin("初始化后台失败"));
-    } finally {
-      setWorkspaceBootstrapping(false);
-    }
-  };
-
-  const handleDismissWorkspaceBootstrap = () => {
-    writeWorkspaceBootstrapFlag(session?.user?.id);
-    setWorkspaceBootstrapDismissed(true);
   };
 
   const openCreateEmployee = () => {
@@ -837,15 +717,6 @@ export default function App() {
     return titles[activeTab];
   }, [activeTab, t]);
 
-  const showWorkspaceBootstrapCard =
-    Boolean(session?.access_token) &&
-    !workspaceBootstrapChecking &&
-    !workspaceBootstrapDismissed &&
-    !employeesLoading &&
-    !attendanceRulesLoading &&
-    employees.length === 0 &&
-    attendanceRuleList.length === 0;
-
   if (isGooglePopupCallback) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#f8fafc] text-slate-500 text-sm">{t("正在打开 Google 授权...")}</div>
@@ -886,33 +757,6 @@ export default function App() {
         />
 
         <div className="flex-1 overflow-y-auto p-6 scroll-smooth relative">
-          {showWorkspaceBootstrapCard && (
-            <div className="mb-6 rounded-2xl border border-brand-200 bg-[linear-gradient(135deg,rgba(37,99,235,0.08),rgba(14,165,233,0.04))] p-6">
-              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                <div className="max-w-2xl">
-                  <div className="flex items-center gap-2 text-brand-700 mb-2">
-                    <Sparkles className="w-5 h-5" />
-                    <span className="text-sm font-semibold">{tAdmin("首次进入当前账号后台")}</span>
-                  </div>
-                  <h3 className="text-xl font-bold text-slate-900">{tAdmin("一键初始化当前管理员账号的独立后台数据")}</h3>
-                  <p className="mt-2 text-sm text-slate-600 leading-6">{tAdmin("初始化后会为当前账号创建默认考勤规则、员工资料、当月考勤记录和薪酬数据。它们只属于你当前登录的管理员账号，不会和其他账号共享。")}</p>
-                </div>
-                <div className="flex flex-wrap items-center gap-3">
-                  <button
-                    onClick={handleDismissWorkspaceBootstrap}
-                    className="px-4 py-2.5 rounded-lg border border-slate-300 bg-white text-sm text-slate-700 hover:bg-slate-50"
-                  >{tAdmin("以后不再提醒")}</button>
-                  <button
-                    onClick={() => void handleBootstrapWorkspace()}
-                    disabled={workspaceBootstrapping}
-                    className="px-5 py-2.5 rounded-lg bg-brand-600 text-white text-sm font-medium hover:bg-brand-700 disabled:opacity-60"
-                  >
-                    {workspaceBootstrapping ? tAdmin("正在初始化...") : tAdmin("立即初始化当前后台")}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
           <div className="relative h-full min-h-0">
             {ADMIN_TABS.filter((tab) => visitedTabs.includes(tab)).map((tab) => {
               const isTabActive = tab === activeTab;

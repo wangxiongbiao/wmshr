@@ -3,6 +3,16 @@ apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
+def uploadKeystorePropertiesFile = rootProject.file('keystore.properties')
+def uploadKeystoreProperties = new Properties()
+if (uploadKeystorePropertiesFile.exists()) {
+    uploadKeystoreProperties.load(new FileInputStream(uploadKeystorePropertiesFile))
+}
+def hasUploadKeystore = uploadKeystorePropertiesFile.exists()
+    && uploadKeystoreProperties['storeFile']
+    && uploadKeystoreProperties['storePassword']
+    && uploadKeystoreProperties['keyAlias']
+    && uploadKeystoreProperties['keyPassword']
 
 /**
  * This is the configuration block to customize your React Native Android app.
@@ -94,8 +104,9 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         // Android 原生版本号必须与发布脚本同步维护：EAS/本地 release 产物最终读取这里，
         // 不能只改 app.json/package.json，否则官网记录、App 内更新提示与 APK 内部版本会再次分叉。
-        versionCode 129
-        versionName "0.1.29"
+        // Play 专用 AAB 会通过 wmshrVersionCodeOverride 提升 versionCode，避免重复上传已进 Play 的 129。
+        versionCode ((findProperty('wmshrVersionCodeOverride') ?: '129') as Integer)
+        versionName (findProperty('wmshrVersionNameOverride') ?: "0.1.29")
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
 
@@ -118,6 +129,14 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        if (hasUploadKeystore) {
+            uploadRelease {
+                storeFile rootProject.file(uploadKeystoreProperties['storeFile'])
+                storePassword uploadKeystoreProperties['storePassword']
+                keyAlias uploadKeystoreProperties['keyAlias']
+                keyPassword uploadKeystoreProperties['keyPassword']
+            }
+        }
     }
     buildTypes {
         debug {
@@ -125,9 +144,9 @@ android {
         }
         release {
             // 当前仓库的“本地 production 打包”入口依赖这里的 release 变体；
-            // 在接入正式 keystore 前，它仍沿用 debug keystore，适合本机验收/侧载，不适合直接作为 Play 正式上架签名产物。
-            // 若后续切到正式 keystore，务必同时复核本地 production 脚本、线上 EAS profile 与发布说明，避免本地/线上两条链路的签名语义再次混淆。
-            signingConfig signingConfigs.debug
+            // 本机存在 android/keystore.properties 时使用 Play upload keystore，生成可提交 Play Console 的 AAB。
+            // 缺少该本地私密文件时仍回退 debug keystore，保留历史侧载/本机验收流程；但这种产物不能上传 Google Play。
+            signingConfig hasUploadKeystore ? signingConfigs.uploadRelease : signingConfigs.debug
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds

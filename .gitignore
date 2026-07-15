@@ -20,6 +20,10 @@ yarn-error.log*
 .metro-cache/
 apps/mobile/dist-web/
 apps/mobile/google-service-account.json
+apps/mobile/android/keystore.properties
+apps/mobile/android/app/*.jks
+apps/mobile/android/app/*.p12
+apps/mobile/android/app/*.keystore
 
 supabase/.temp/
 

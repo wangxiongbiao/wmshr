@@ -159,9 +159,9 @@ enabled = true
 site_url = "https://admin.dutylix.com"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
 # external_url = ""
-# Keep both production and local admin URLs in the Auth redirect allow-list so Google OAuth works
-# after config sync without breaking the local admin popup callback used during development.
-additional_redirect_urls = ["https://admin.dutylix.com", "http://localhost:3000"]
+# Keep production and local admin URLs, including popup callback variants, in the Auth redirect
+# allow-list so Google OAuth keeps working after config sync and during local development.
+additional_redirect_urls = ["https://admin.dutylix.com", "https://admin.dutylix.com/?auth_popup=google", "http://localhost:3000", "http://localhost:3000/?auth_popup=google"]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to auth.external_url.
@@ -333,6 +333,15 @@ url = ""
 # If enabled, the nonce check will be skipped. Required for local sign in with Google auth.
 skip_nonce_check = false
 # If enabled, it will allow the user to successfully authenticate when the provider does not return an email address.
+email_optional = false
+
+[auth.external.google]
+enabled = true
+client_id = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID)"
+# The Google OAuth secret is provided only by local/deployment environment, never by committed files.
+secret = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_SECRET)"
+redirect_uri = ""
+skip_nonce_check = false
 email_optional = false
 
 # Allow Solana wallet holders to sign in to your project via the Sign in with Solana (SIWS, EIP-4361) standard.
