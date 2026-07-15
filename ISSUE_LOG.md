@@ -113,3 +113,10 @@
 - 原计划验证入口：`npm --workspace @wmshr/admin run lint`、`npm --workspace @wmshr/admin run build` 后检索源码和 `apps/admin/dist` 中的初始化入口文案与接口路径。
 - 解决方式：删除 i18n admin namespace 中已无代码引用的初始化相关 key，再重新执行 admin lint/build。
 - 验收结果：`npm --workspace @wmshr/admin run lint` 与 `npm --workspace @wmshr/admin run build` 均通过；重启本地服务后，`/api/health` 返回 `{"ok":true}`，Admin 根页面返回 `200 text/html`，源码和构建产物均不再含一键初始化入口文案或 `/workspace/bootstrap*` 路径。
+
+## 2026-07-15 问题 17：生产发布脚本在空库 APK 验证阶段失败并触发回滚
+- 原因：新 Supabase 空库没有 `mobile_app_releases` 记录，`/api/public/mobile-app-update` 返回“Android 更新信息未配置完整”；发布脚本仍把当前 APK 作为强制发布前置条件。失败路径里 `staged_mobile_release` 退化为 `apps/home/public/downloads/` 目录，`rm -f` 目录失败又阻断了 `vercel.json` 的 RETURN trap 恢复。
+- 导致的问题：第一次生产发布已完成 Supabase up-to-date 检查、GitHub `main` 提交推送和两个 Vercel 构建，但生产验证未完成，脚本退出码为 1 并触发自动回滚；工作区短暂留下门户版 `vercel.json` 和空 APK 临时文件。
+- 原计划验证入口：执行 `npm run deploy:prod -- -m "release production rebuild supabase and remove admin bootstrap"`，由脚本完成 lint/build/db push/commit/push/Vercel 发布/正式域名验证。
+- 解决方式：恢复根 `vercel.json` 为 admin 配置并删除临时下载目录；更新发布脚本，让空库未配置 Android release 或门户代理返回移动更新 `fetch failed` 时跳过 APK staging 和 APK 下载验证，同时把 Vercel portal 生产部署的自动 alias 标记为可回滚，并确保临时文件清理不会阻断 `vercel.json` 恢复。
+- 验收结果：已通过 `bash -n scripts/deploy-production.sh` 静态校验；下一步重跑完整发布脚本验证生产发布闭环。

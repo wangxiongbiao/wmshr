@@ -196,6 +196,45 @@ download_with_retry() {
   done
 }
 
+fetch_http_body_with_status() {
+  local url="$1"
+  local output_file="$2"
+  local status
+  local curl_status
+
+  set +e
+  status="$(curl -L -sS --connect-timeout 10 --max-time 30 -o "$output_file" -w '%{http_code}' "$url")"
+  curl_status=$?
+  set -e
+
+  if [[ "$curl_status" != "0" ]]; then
+    echo "curl failed for $url (exit ${curl_status})." >&2
+    return "$curl_status"
+  fi
+
+  printf '%s' "$status"
+}
+
+is_mobile_release_unconfigured_payload() {
+  local payload="$1"
+
+  python3 - "$payload" <<'PY'
+import json
+import sys
+
+try:
+    payload = json.loads(sys.argv[1] or "{}")
+except json.JSONDecodeError:
+    raise SystemExit(1)
+
+message = str(payload.get("error", ""))
+normalized = message.lower()
+if "未配置完整" in message or "not configured" in normalized or "fetch failed" in normalized:
+    raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
 
 assert_vercel_config() {
   local config_path="$1"
@@ -445,10 +484,31 @@ PY
 }
 
 stage_current_mobile_release_for_home_deploy() {
-  local api_json metadata_line release_version release_url release_filename tmp_apk staged_apk
-  api_json="$(curl -fsS --connect-timeout 10 --max-time 30 "${CUSTOM_ORIGIN}/api/public/mobile-app-update")"
+  local api_json metadata_line release_version release_url release_filename tmp_apk staged_apk api_body_file api_status
+  api_body_file="$(mktemp -t wmshr-current-mobile-release.XXXXXX.json)"
+  api_status="$(fetch_http_body_with_status "${CUSTOM_ORIGIN}/api/public/mobile-app-update" "$api_body_file")" || {
+    rm -f "$api_body_file"
+    return 1
+  }
+  api_json="$(cat "$api_body_file")"
+  rm -f "$api_body_file"
+
+  if [[ "$api_status" != "200" ]]; then
+    if is_mobile_release_unconfigured_payload "$api_json"; then
+      echo "No configured Android release found; portal deploy will skip staging APK." >&2
+      return 0
+    fi
+    echo "Mobile update API returned HTTP ${api_status} before portal deploy." >&2
+    echo "$api_json" >&2
+    return 1
+  fi
+
   metadata_line="$(read_mobile_release_metadata "$api_json")"
   IFS=$'\t' read -r release_version release_url release_filename <<< "$metadata_line"
+  if [[ -z "$release_url" || -z "$release_filename" || "$release_filename" == "." || "$release_filename" == "/" ]]; then
+    echo "Mobile update API returned unsafe release metadata: ${metadata_line}" >&2
+    return 1
+  fi
   tmp_apk="$(mktemp -t wmshr-current-mobile-release.XXXXXX.apk)"
 
   # 门户官网的 APK 资产不是长期落在仓库里；如果后续再发一次 portal，
@@ -473,8 +533,25 @@ PY
 }
 
 verify_mobile_release_downloads() {
-  local api_json metadata_line release_version release_url release_filename
-  api_json="$(curl -fsS --connect-timeout 10 --max-time 30 "${HOME_CUSTOM_ORIGIN}/api/public/mobile-app-update")"
+  local api_json metadata_line release_version release_url release_filename api_body_file api_status
+  api_body_file="$(mktemp -t wmshr-portal-mobile-release.XXXXXX.json)"
+  api_status="$(fetch_http_body_with_status "${HOME_CUSTOM_ORIGIN}/api/public/mobile-app-update" "$api_body_file")" || {
+    rm -f "$api_body_file"
+    return 1
+  }
+  api_json="$(cat "$api_body_file")"
+  rm -f "$api_body_file"
+
+  if [[ "$api_status" != "200" ]]; then
+    if is_mobile_release_unconfigured_payload "$api_json"; then
+      echo "No configured Android release found; skip portal APK verification."
+      return 0
+    fi
+    echo "Portal mobile update API returned HTTP ${api_status}." >&2
+    echo "$api_json" >&2
+    return 1
+  fi
+
   metadata_line="$(read_mobile_release_metadata "$api_json")"
   IFS=$'\t' read -r release_version release_url release_filename <<< "$metadata_line"
   echo "== Portal mobile release verification =="
@@ -540,7 +617,7 @@ deploy_home_production() {
   # remote build, and can fail the release on upload size alone.
   assert_vercel_config "${REPO_ROOT}/vercel.json" admin
   cp "${REPO_ROOT}/vercel.json" "$admin_config_backup"
-  trap 'rm -f "$staged_mobile_release"; cp "$admin_config_backup" "${REPO_ROOT}/vercel.json"; rm -f "$admin_config_backup"; trap - RETURN' RETURN
+  trap 'if [[ -n "${staged_mobile_release:-}" && -f "$staged_mobile_release" ]]; then rm -f "$staged_mobile_release"; fi; cp "$admin_config_backup" "${REPO_ROOT}/vercel.json"; rm -f "$admin_config_backup"; trap - RETURN' RETURN
 
   cat >"${REPO_ROOT}/vercel.json" <<'JSON'
 {
@@ -569,7 +646,15 @@ JSON
   deploy_status=${PIPESTATUS[0]}
   set -e
 
-  rm -f "$staged_mobile_release"
+  if [[ "$deploy_status" == "0" ]]; then
+    # `vercel deploy --prod --project dutylix` can auto-alias dutylix.com before
+    # the explicit alias step below; mark it rollback-eligible immediately so any
+    # later parse or verification failure restores the domain to the pre-release URL.
+    HOME_ALIAS_UPDATED=1
+  fi
+  if [[ -n "$staged_mobile_release" && -f "$staged_mobile_release" ]]; then
+    rm -f "$staged_mobile_release"
+  fi
   cp "$admin_config_backup" "${REPO_ROOT}/vercel.json"
   rm -f "$admin_config_backup"
   trap - RETURN
