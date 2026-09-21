@@ -11,4 +11,7 @@ packages/*/node_modules
 dist
 admin-v4/dist
 apps/admin/dist
-.vercel
+.vercel.git
+.git-backups
+.codex-tmp
+.dev-logs
