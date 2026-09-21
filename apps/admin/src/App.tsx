@@ -330,6 +330,7 @@ export default function App() {
             onEditEmployee={(employee) => void openEditEmployee(employee)}
             onManageAppAccount={(employee) => void openEmployeeAppAccountModal(employee)}
             onDeleteEmployee={(employee) => void handleDeleteEmployee(employee)}
+            onOpenAttendanceSettings={() => navigateToTab("attendance")}
           />
         );
       case "attendance":

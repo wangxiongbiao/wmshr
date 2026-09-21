@@ -10,6 +10,9 @@
   "scripts": {
     "dev:home": "npm --workspace @wmshr/home run dev",
     "dev:admin": "npm --workspace @wmshr/admin run dev",
+    "dev:admin:v4": "bash scripts/start-admin-v4.sh",
+    "dev:admin:v4:api": "bash scripts/start-admin-v4-api.sh",
+    "test:admin:v4:service": "node apps/admin/server-v4/test-service-boundary.mjs && node apps/admin/server-v4/test-registration-fast-path.mjs",
     "dev:admin:api": "npm --workspace @wmshr/admin run dev:api",
     "dev:mobile": "npm --workspace @wmshr/mobile run start",
     "prepare:desktop:config:local": "cp electron/runtime-config.local.json electron/runtime-config.json",
@@ -39,6 +42,7 @@
     "mobile:install:android:release": "bash scripts/adb-install-mobile-release.sh",
     "mobile:launch:android": "bash scripts/adb-launch-mobile-app.sh",
     "mobile:log:android": "bash scripts/adb-log-mobile-app.sh",
+    "import:june2026-attendance": "env -u NODE_OPTIONS node scripts/import-june-2026-attendance.mjs",
     "lint": "npm run lint --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
     "check:i18n": "node scripts/check-i18n-hardcoded.mjs",

@@ -30,3 +30,13 @@ supabase/.temp/
 .codex-tmp/
 .git-backups/
 .vercel
+
+*.zip
+.temp*
+.agents/
+.codegraph/
+.refactor/
+admin-v4/dist/
+admin-v4/node_modules/
+vercel.*.json
+src/

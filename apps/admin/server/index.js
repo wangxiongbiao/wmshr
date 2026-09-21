@@ -6,6 +6,7 @@ import { createClient } from "@supabase/supabase-js";
 import { Readable } from "node:stream";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { DEFAULT_ATTENDANCE_CONFIG, calculateDailyAttendanceRow as calculateV2DailyAttendanceRow } from "./attendance-v2.js";
+import { createAuthV4Controller, verifyToken as verifyAdminV4Token } from "./auth-v4.js";
 
 // Vercel Node Functions import this file from the repository root, while local
 // admin API development runs it from apps/admin. Load both locations without
@@ -185,7 +186,7 @@ async function resolveCanonicalOwnerUserIdForEmail(email, fallbackUserId) {
   return candidateIds[0] || fallbackUserId;
 }
 
-async function ensureAdminOwnerIdentity(authUser) {
+async function ensureAdminOwnerIdentity(authUser, { skipLegacyLookup = false } = {}) {
   const email = normalizeAdminAuthEmail(authUser.email);
   if (!email) {
     return buildResolvedAdminAuthUser(authUser, authUser.id);
@@ -227,7 +228,11 @@ async function ensureAdminOwnerIdentity(authUser) {
     return buildResolvedAdminAuthUser(authUser, existingIdentity.owner_user_id);
   }
 
-  const preferredOwnerUserId = await resolveCanonicalOwnerUserIdForEmail(email, authUser.id);
+  // A successful registration already gives us the authoritative Auth user ID.
+  // Keep the expensive same-email scan only for legacy login recovery.
+  const preferredOwnerUserId = skipLegacyLookup
+    ? authUser.id
+    : await resolveCanonicalOwnerUserIdForEmail(email, authUser.id);
   const { error: emailLinkInsertError } = await supabase
     .from("admin_owner_email_links")
     .upsert({
@@ -280,10 +285,180 @@ async function ensureAdminOwnerIdentity(authUser) {
   return buildResolvedAdminAuthUser(authUser, ownerUserId);
 }
 
+async function resolveAdminIdentity(authUser, intent = "login") {
+  const email = normalizeAdminAuthEmail(authUser?.email);
+  if (!email) {
+    const error = new Error("认证身份缺少有效邮箱");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const [{ data: identity, error: identityError }, { data: emailLink, error: emailError }] = await Promise.all([
+    supabase.from("admin_owner_identity_links").select("owner_user_id").eq("auth_user_id", authUser.id).maybeSingle(),
+    supabase.from("admin_owner_email_links").select("owner_user_id").eq("email", email).maybeSingle()
+  ]);
+  if (identityError) throw identityError;
+  if (emailError) throw emailError;
+
+  const isAutoRegister = intent === "register" || intent === "login_or_register";
+  if (!identity && !emailLink && !isAutoRegister) {
+    const [presence, bootstrap] = await Promise.all([
+      fetchWorkspaceDataPresence(authUser.id),
+      fetchWorkspaceBootstrapState(authUser.id)
+    ]);
+    if (!bootstrap && !presence.hasEmployees && !presence.hasRules) {
+      const error = new Error("该账号尚未注册，请先创建新企业");
+      error.statusCode = 404;
+      throw error;
+    }
+  }
+
+  return ensureAdminOwnerIdentity(authUser, { skipLegacyLookup: intent === "register" });
+}
+
+const DEFAULT_WORKSPACE_NODES = [
+  ["Asia", "韩国", "KR", "🇰🇷", "KRW"], ["Asia", "日本", "JP", "🇯🇵", "JPY"],
+  ["Asia", "中国香港", "HK", "🇭🇰", "HKD"], ["Asia", "中国澳门", "MO", "🇲🇴", "MOP"],
+  ["Asia", "马来西亚", "MY", "🇲🇾", "MYR"], ["Asia", "新加坡", "SG", "🇸🇬", "SGD"],
+  ["Asia", "泰国", "TH", "🇹🇭", "THB"], ["Asia", "越南", "VN", "🇻🇳", "VND"],
+  ["Asia", "文莱", "BN", "🇧🇳", "BND"], ["Asia", "印度尼西亚", "ID", "🇮🇩", "IDR"],
+  ["Asia", "菲律宾", "PH", "🇵🇭", "PHP"], ["Europe", "英国", "GB", "🇬🇧", "GBP"],
+  ["Europe", "法国", "FR", "🇫🇷", "EUR"], ["Europe", "德国", "DE", "🇩🇪", "EUR"],
+  ["Americas", "美国", "US", "🇺🇸", "USD"], ["Africa", "埃及", "EG", "🇪🇬", "EGP"],
+  ["Middle East", "阿曼", "OM", "🇴🇲", "OMR"], ["Middle East", "迪拜 (阿联酋)", "AE", "🇦🇪", "AED"]
+];
+
+async function ensureTenantBootstrap(authUser, { registrationMode = "email", name, passwordHash } = {}) {
+  const ownerUserId = authUser.adminOwnerUserId || authUser.id;
+  const email = normalizeAdminAuthEmail(authUser.email);
+  const now = new Date().toISOString();
+  const { data: existing, error: stateError } = await supabase.from("workspace_bootstrap_states").select("status").eq("owner_user_id", ownerUserId).maybeSingle();
+  if (stateError) throw stateError;
+  if (existing?.status === "complete") return;
+
+  const state = { owner_user_id: ownerUserId, bootstrap_mode: "tenant_init", bootstrap_source: "auto", status: "pending", registration_mode: registrationMode, bootstrapped_by_email: email, last_error: null, updated_at: now };
+  const { error: pendingError } = await supabase.from("workspace_bootstrap_states").upsert(state, { onConflict: "owner_user_id" });
+  if (pendingError) throw pendingError;
+
+  try {
+    const { data: account, error: accountError } = await supabase.from("workspace_accounts").upsert({ owner_user_id: ownerUserId, employee_id: null, account: email, password_hash: passwordHash || null, account_type: "superadmin", status: "active", updated_at: now }, { onConflict: "owner_user_id,account" }).select("id").single();
+    if (accountError) throw accountError;
+    const operations = await Promise.all([
+      supabase.from("workspace_members").upsert({ owner_user_id: ownerUserId, account_id: account.id, display_name: String(name || authUser.user_metadata?.full_name || email), role_name: "超级管理员", permissions: ["*"], allowed_warehouses: ["*"], updated_at: now }, { onConflict: "owner_user_id,account_id" }),
+      supabase.from("workspace_nodes").upsert(DEFAULT_WORKSPACE_NODES.map(([continent, country_name, country_code, flag_emoji, currency]) => ({ owner_user_id: ownerUserId, continent, country_name, country_code, flag_emoji, currency })), { onConflict: "owner_user_id,country_code" }),
+      supabase.from("attendance_config").upsert({ owner_user_id: ownerUserId, currency: "THB", updated_at: now }, { onConflict: "owner_user_id" })
+    ]);
+    const operationError = operations.find((result) => result.error)?.error;
+    if (operationError) throw operationError;
+    const { error: completeError } = await supabase.from("workspace_bootstrap_states").update({ status: "complete", completed_at: now, last_error: null, updated_at: now }).eq("owner_user_id", ownerUserId);
+    if (completeError) throw completeError;
+  } catch (error) {
+    await supabase.from("workspace_bootstrap_states").update({ status: "failed", last_error: String(error.message || error), updated_at: new Date().toISOString() }).eq("owner_user_id", ownerUserId);
+    throw error;
+  }
+}
+
+function adminSessionError(message, statusCode) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
+function firstWorkspaceMember(account) {
+  return Array.isArray(account?.workspace_members)
+    ? account.workspace_members[0]
+    : account?.workspace_members;
+}
+
+async function resolveAdminV4SessionContext(session) {
+  const ownerUserId = String(session?.ownerUserId || session?.adminOwnerUserId || "");
+  if (!ownerUserId) throw adminSessionError("登录状态已失效，请重新登录", 401);
+
+  let accountQuery = supabase
+    .from("workspace_accounts")
+    .select("id, owner_user_id, account, account_type, status, workspace_members!workspace_members_owner_account_fkey(id, owner_user_id, display_name, role_name, permissions, allowed_warehouses)")
+    .eq("owner_user_id", ownerUserId);
+
+  if (session.accountId) {
+    accountQuery = accountQuery.eq("id", String(session.accountId));
+  } else if (session.account) {
+    accountQuery = accountQuery.eq("account", normalizeAdminAuthEmail(session.account));
+  } else if (session.userId) {
+    accountQuery = accountQuery.eq("id", String(session.userId));
+  } else {
+    throw adminSessionError("登录状态缺少账号信息，请重新登录", 401);
+  }
+
+  const { data: account, error: accountError } = await accountQuery.maybeSingle();
+  if (accountError) throw accountError;
+  if (!account || account.status !== "active") throw adminSessionError("账号已停用或登录状态已失效", 401);
+
+  const member = firstWorkspaceMember(account);
+  if (!member || member.owner_user_id !== ownerUserId) throw adminSessionError("账号成员关系无效或已被移除", 403);
+
+  const permissions = Array.isArray(member.permissions) ? member.permissions : [];
+  const allowedWarehouses = Array.isArray(member.allowed_warehouses) ? member.allowed_warehouses : [];
+  const countryCode = String(session.countryCode || "").trim().toUpperCase();
+  if (countryCode) {
+    if (!allowedWarehouses.includes("*") && !allowedWarehouses.includes(countryCode)) {
+      throw adminSessionError("当前账号已失去该海外仓权限，请重新选择", 403);
+    }
+    const { data: node, error: nodeError } = await supabase
+      .from("workspace_nodes")
+      .select("country_code")
+      .eq("owner_user_id", ownerUserId)
+      .eq("country_code", countryCode)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (nodeError) throw nodeError;
+    if (!node) throw adminSessionError("当前海外仓已停用，请重新选择", 403);
+  }
+
+  return {
+    id: ownerUserId,
+    adminOwnerUserId: ownerUserId,
+    adminAuthUserId: session.authUserId || session.adminAuthUserId || session.userId || account.id,
+    accountId: account.id,
+    account: account.account,
+    email: session.email || session.account || account.account,
+    name: member.display_name,
+    role: member.role_name,
+    permissions,
+    allowedWarehouses,
+    country: session.country,
+    countryCode: countryCode || undefined,
+    currency: session.currency,
+    member
+  };
+}
+
+async function resolveWorkspaceAuthContext(authUser) {
+  return resolveAdminV4SessionContext({
+    ownerUserId: authUser.adminOwnerUserId || authUser.ownerUserId || authUser.id,
+    authUserId: authUser.adminAuthUserId || authUser.authUserId || authUser.id,
+    account: normalizeAdminAuthEmail(authUser.email || authUser.account),
+    email: normalizeAdminAuthEmail(authUser.email || authUser.account)
+  });
+}
+
 async function requireAdminAuth(req, res, next) {
   const accessToken = getAccessToken(req);
   if (!accessToken) {
     return res.status(401).json({ error: "未登录，请先登录管理员账号" });
+  }
+
+  const v4Session = verifyAdminV4Token(accessToken);
+  if (v4Session?.stage === "authenticated" && v4Session.ownerUserId) {
+    try {
+      req.authUser = await resolveAdminV4SessionContext(v4Session);
+      return next();
+    } catch (sessionError) {
+      const status = Number(sessionError?.statusCode || 500);
+      if (status >= 500) console.error("Resolve admin v4 session failed", sessionError);
+      return res.status(status === 401 || status === 403 ? status : 500).json({
+        error: status >= 500 ? "管理员会话验证失败，请稍后重试" : sessionError.message
+      });
+    }
   }
 
   const now = Date.now();
@@ -312,6 +487,29 @@ async function requireAdminAuth(req, res, next) {
     expiresAt: now + ADMIN_AUTH_CACHE_TTL_MS
   });
   next();
+}
+
+function requireEmployeePermission(req, res, ...permissions) {
+  const granted = req.authUser?.permissions;
+  // Legacy Supabase sessions predate v4 RBAC; preserve their current behavior.
+  if (!Array.isArray(granted) || granted.includes("*") || permissions.some((permission) => granted.includes(permission))) return true;
+  res.status(403).json({ error: "无权执行该员工操作" });
+  return false;
+}
+
+async function requireEmployeeScope(req, res, employeeId) {
+  const { data, error } = await supabase
+    .from("employees")
+    .select("id, country")
+    .eq("owner_user_id", req.authUser.id)
+    .eq("id", Number(employeeId))
+    .maybeSingle();
+  if (error) throw error;
+  if (!data || (req.authUser.adminV4CountryCode && data.country !== req.authUser.adminV4CountryCode)) {
+    res.status(404).json({ error: "员工不存在或不属于当前仓库" });
+    return false;
+  }
+  return true;
 }
 
 const app = express();
@@ -420,10 +618,18 @@ function validateGoogleAuthRedirectUrl(redirectTo) {
 
   const allowedOrigins = new Set([
     "http://localhost:3000",
+    "http://localhost:3004",
     "https://admin.dutylix.com"
   ]);
 
-  if (!allowedOrigins.has(url.origin)) {
+  const hostname = url.hostname;
+  const isLocalOrTailscale =
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname.endsWith(".ts.net") ||
+    hostname.startsWith("100.");
+
+  if (!allowedOrigins.has(url.origin) && !isLocalOrTailscale) {
     return "redirectTo 不在允许的后台域名范围内";
   }
 
@@ -550,7 +756,8 @@ function mapEmployeeRow(row, ruleMap = new Map()) {
     serviceFeeRate: row.service_fee_rate === null || row.service_fee_rate === undefined ? 0 : Number(row.service_fee_rate),
     currency: row.currency,
     photo: row.photo,
-    isDeleted: row.is_deleted
+    isDeleted: row.is_deleted,
+    updatedAt: row.updated_at
   };
 }
 
@@ -567,7 +774,7 @@ function didEmployeePayrollFieldsChange(existingEmployee, payload) {
 
 function mapEmployeeAppAccountRow(row) {
   return {
-    id: Number(row.id),
+    id: String(row.id),
     employeeId: Number(row.employee_id),
     employeeName: row.employee_name || "",
     account: row.account,
@@ -641,11 +848,12 @@ async function requireEmployeeAppAuth(req, res, next) {
 
     const payload = verifyEmployeeAppToken(token);
     const { data: accountRow, error } = await supabase
-      .from("employee_app_accounts")
+      .from("workspace_accounts")
       .select("*, employees(*)")
-      .eq("id", Number(payload.accountId))
+      .eq("id", String(payload.accountId))
       .eq("owner_user_id", payload.ownerUserId)
       .eq("employee_id", Number(payload.employeeId))
+      .eq("account_type", "employee")
       .maybeSingle();
 
     if (error) {
@@ -657,7 +865,7 @@ async function requireEmployeeAppAuth(req, res, next) {
 
     // 移动端业务接口统一从 req.employeeApp 取 owner/employee，禁止相信请求体里的员工 ID，避免越权读取 SOP 或代打卡。
     req.employeeApp = {
-      accountId: Number(accountRow.id),
+      accountId: String(accountRow.id),
       ownerUserId: accountRow.owner_user_id,
       employeeId: Number(accountRow.employee_id),
       employee: accountRow.employees
@@ -673,7 +881,7 @@ function generateEmployeeAppToken(accountRow) {
   // token 只承载员工账号定位字段；所有敏感状态仍以后端数据库为准，后续需要鉴权接口时必须复查 account status。
   return {
     token: signEmployeeAppToken({
-      accountId: Number(accountRow.id),
+      accountId: String(accountRow.id),
       ownerUserId: accountRow.owner_user_id,
       employeeId: Number(accountRow.employee_id),
       expiresAt
@@ -685,8 +893,9 @@ function generateEmployeeAppToken(accountRow) {
 async function buildNextEmployeeAppAccountName() {
   // 员工端登录入口没有先选择租户，因此账号本身必须全局唯一；继续使用 wms0001 这种短编号，隔离仍由 token 和 owner_user_id 绑定保护。
   const { data, error } = await supabase
-    .from("employee_app_accounts")
+    .from("workspace_accounts")
     .select("account")
+    .eq("account_type", "employee")
     .like("account", "wms%")
     .order("account", { ascending: false })
     .limit(1)
@@ -704,12 +913,13 @@ async function ensureEmployeeAppAccount(employeeRow, ownerUserId) {
   const now = new Date().toISOString();
   const account = await buildNextEmployeeAppAccountName();
   const { data, error } = await supabase
-    .from("employee_app_accounts")
+    .from("workspace_accounts")
     .upsert({
       owner_user_id: ownerUserId,
       employee_id: Number(employeeRow.id),
       account,
       password_hash: hashEmployeeAppPassword(EMPLOYEE_APP_DEFAULT_PASSWORD),
+      account_type: "employee",
       status: employeeRow.status === "disabled" || employeeRow.status === "resigned" ? "disabled" : "active",
       password_updated_at: now,
       updated_at: now
@@ -740,10 +950,11 @@ async function fetchEmployeeAppAccount(employeeId, ownerUserId) {
   }
 
   const { data: accountRow, error: accountError } = await supabase
-    .from("employee_app_accounts")
+    .from("workspace_accounts")
     .select("*, employees(name)")
     .eq("owner_user_id", ownerUserId)
     .eq("employee_id", employeeId)
+    .eq("account_type", "employee")
     .maybeSingle();
 
   if (accountError) {
@@ -761,7 +972,7 @@ async function resetEmployeeAppPassword(employeeId, ownerUserId) {
   await fetchEmployeeAppAccount(employeeId, ownerUserId);
   const now = new Date().toISOString();
   const { data, error } = await supabase
-    .from("employee_app_accounts")
+    .from("workspace_accounts")
     .update({
       password_hash: hashEmployeeAppPassword(EMPLOYEE_APP_DEFAULT_PASSWORD),
       password_updated_at: now,
@@ -789,7 +1000,7 @@ async function setEmployeeAppAccountStatus(employeeId, ownerUserId, status) {
 
   await fetchEmployeeAppAccount(employeeId, ownerUserId);
   const { data, error } = await supabase
-    .from("employee_app_accounts")
+    .from("workspace_accounts")
     .update({ status, updated_at: new Date().toISOString() })
     .eq("owner_user_id", ownerUserId)
     .eq("employee_id", employeeId)
@@ -806,9 +1017,10 @@ async function setEmployeeAppAccountStatus(employeeId, ownerUserId, status) {
 async function authenticateEmployeeAppAccount(account, password) {
   const normalizedAccount = String(account || "").trim();
   const { data: rows, error } = await supabase
-    .from("employee_app_accounts")
+    .from("workspace_accounts")
     .select("*, employees(*)")
-    .eq("account", normalizedAccount);
+    .eq("account", normalizedAccount)
+    .eq("account_type", "employee");
 
   if (error) {
     throw error;
@@ -830,7 +1042,7 @@ async function authenticateEmployeeAppAccount(account, password) {
   }
 
   const { error: updateError } = await supabase
-    .from("employee_app_accounts")
+    .from("workspace_accounts")
     .update({ last_login_at: new Date().toISOString(), updated_at: new Date().toISOString() })
     .eq("id", row.id);
 
@@ -2991,6 +3203,7 @@ function normalizeEmployeePayload(body, authUser) {
     salaryEffectiveStartDate: body.salaryEffectiveStartDate || body.joinDate,
     currency: body.currency,
     photo: Object.prototype.hasOwnProperty.call(body || {}, "photo") ? (body.photo || null) : undefined,
+    updatedAt: body.updatedAt || null,
     createdBy: authUser?.email || null
   };
 }
@@ -3113,22 +3326,30 @@ async function updateEmployeeRecord(employeeId, payload, authUser) {
     social_security: payload.socialSecurity,
     meal_allowance: payload.mealAllowance,
     service_fee_rate: payload.serviceFeeRate,
-    currency: payload.currency
+    currency: payload.currency,
+    updated_at: new Date().toISOString()
   };
   if (payload.photo !== undefined) {
     updatePayload.photo = payload.photo;
   }
 
-  const { data: employeeRow, error: updateError } = await supabase
+  let updateQuery = supabase
     .from("employees")
     .update(updatePayload)
     .eq("owner_user_id", ownerUserId)
-    .eq("id", employeeId)
-    .select("id, employee_no, name, nickname, gender, country, phone, role, dept, join_date, status, attendance_rule_id, salary_type, hourly_rate, fixed_salary, is_dispatch_personnel, attendance_bonus, social_security, meal_allowance, service_fee_rate, currency, photo, is_deleted")
-    .single();
+    .eq("id", employeeId);
+  if (payload.updatedAt) updateQuery = updateQuery.eq("updated_at", payload.updatedAt);
+  const { data: employeeRow, error: updateError } = await updateQuery
+    .select("id, employee_no, name, nickname, gender, country, phone, role, dept, join_date, status, attendance_rule_id, salary_type, hourly_rate, fixed_salary, is_dispatch_personnel, attendance_bonus, social_security, meal_allowance, service_fee_rate, currency, photo, is_deleted, updated_at")
+    .maybeSingle();
 
   if (updateError) {
     throw updateError;
+  }
+  if (!employeeRow) {
+    const conflict = new Error("员工档案已被其他用户修改，请刷新后重试");
+    conflict.statusCode = 409;
+    throw conflict;
   }
 
   // 员工 v2 保存不再改变考勤规则关系；旧 attendance_rule_id 仅由创建时的后端兼容值维护。
@@ -3325,6 +3546,26 @@ app.post("/api/mobile/auth/login", async (req, res) => {
     res.status(401).json({ error: error.message || "员工端登录失败" });
   }
 });
+
+// --- Auth v4 & RBAC New Routes ---
+const authV4Controller = createAuthV4Controller({
+  supabase,
+  publicAuthClient,
+  resolveAdminIdentity,
+  ensureTenantBootstrap,
+  resolveWorkspaceAuthContext,
+  resolveSessionContext: resolveAdminV4SessionContext,
+  validatePasswordRedirect: validateGoogleAuthRedirectUrl
+});
+app.post("/api/admin/auth/login", authV4Controller.handleLogin);
+app.post("/api/admin/auth/register", authV4Controller.handleRegister);
+app.post("/api/admin/auth/forgot-password", authV4Controller.handleForgotPassword);
+app.post("/api/admin/auth/reset-password", authV4Controller.handleResetAdminPassword);
+app.post("/api/admin/auth/google/complete", authV4Controller.handleGoogleComplete);
+app.post("/api/admin/auth/select-country", authV4Controller.handleSelectCountry);
+app.post("/api/admin/auth/switch-country", authV4Controller.handleSwitchCountry);
+app.get("/api/admin/auth/me", authV4Controller.handleMe);
+app.post("/api/admin/employees/:id/reset-password", authV4Controller.handleResetEmployeePassword);
 
 app.post("/api/public/mobile-debug-log", async (req, res) => {
   const payload = {
@@ -7062,6 +7303,58 @@ app.put("/api/admin/goods", async (req, res) => {
   }
 });
 
+// --- Products Snapshot Routes ---
+app.get("/api/admin/products", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser?.id || "00000000-0000-0000-0000-000000000001";
+    const { data } = await supabase.from("admin_product_snapshots").select("products").eq("owner_user_id", ownerUserId).maybeSingle();
+    res.json(data?.products || []);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "商品列表加载失败" });
+  }
+});
+
+app.put("/api/admin/products", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser?.id || "00000000-0000-0000-0000-000000000001";
+    const products = Array.isArray(req.body?.products) ? req.body.products : [];
+    await supabase.from("admin_product_snapshots").upsert({
+      owner_user_id: ownerUserId,
+      products,
+      updated_at: new Date().toISOString()
+    }, { onConflict: "owner_user_id" });
+    res.json(products);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "商品列表保存失败" });
+  }
+});
+
+// --- Customer Orders Snapshot Routes ---
+app.get("/api/admin/orders", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser?.id || "00000000-0000-0000-0000-000000000001";
+    const { data } = await supabase.from("admin_order_snapshots").select("orders").eq("owner_user_id", ownerUserId).maybeSingle();
+    res.json(data?.orders || []);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "订单列表加载失败" });
+  }
+});
+
+app.put("/api/admin/orders", async (req, res) => {
+  try {
+    const ownerUserId = req.authUser?.id || "00000000-0000-0000-0000-000000000001";
+    const orders = Array.isArray(req.body?.orders) ? req.body.orders : [];
+    await supabase.from("admin_order_snapshots").upsert({
+      owner_user_id: ownerUserId,
+      orders,
+      updated_at: new Date().toISOString()
+    }, { onConflict: "owner_user_id" });
+    res.json(orders);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "订单列表保存失败" });
+  }
+});
+
 app.get("/api/admin/expenses", async (req, res) => {
   try {
     const snapshot = await fetchExpenseSnapshot(req.authUser.id);
@@ -7230,12 +7523,13 @@ app.post("/api/admin/sops/:id/read", async (req, res) => {
 
 app.get("/api/admin/employees", async (req, res) => {
   try {
+    if (!requireEmployeePermission(req, res, "employees_view", "employees_manage")) return;
     const requestStartedAt = Date.now();
     const ownerUserId = req.authUser.id;
     const includeInactive = req.query.includeInactive === "true";
     const keyword = String(req.query.keyword || "").trim().toLowerCase();
     const status = String(req.query.status || "all");
-    const country = String(req.query.country || "all");
+    const country = String(req.authUser.adminV4CountryCode || req.query.country || "all");
     const salaryType = String(req.query.salaryType || "all");
     const role = String(req.query.role || "all");
     const usePagination = req.query.page !== undefined || req.query.pageSize !== undefined;
@@ -7357,6 +7651,7 @@ app.get("/api/admin/employees", async (req, res) => {
       "service_fee_rate",
       "currency",
       "is_deleted"
+      ,"updated_at"
     ].join(",");
 
     const applyEmployeeListFilters = (query) => {
@@ -7496,6 +7791,7 @@ app.get("/api/admin/employees", async (req, res) => {
 
 app.get("/api/admin/employees/count", async (req, res) => {
   try {
+    if (!requireEmployeePermission(req, res, "employees_view", "employees_manage")) return;
     const ownerUserId = req.authUser.id;
     const includeInactive = req.query.includeInactive === "true";
     const keyword = String(req.query.keyword || "").trim().toLowerCase();
@@ -7587,6 +7883,7 @@ app.get("/api/admin/employees/count", async (req, res) => {
 
 app.get("/api/admin/employees/avatars", async (req, res) => {
   try {
+    if (!requireEmployeePermission(req, res, "employees_view", "employees_manage")) return;
     const ownerUserId = req.authUser.id;
     const ids = String(req.query.ids || "")
       .split(",")
@@ -7645,6 +7942,8 @@ app.get("/api/admin/employees/avatars", async (req, res) => {
 
 app.get("/api/admin/employees/:id", async (req, res) => {
   try {
+    if (!requireEmployeePermission(req, res, "employees_view", "employees_manage")) return;
+    if (!await requireEmployeeScope(req, res, req.params.id)) return;
     const detail = await fetchEmployeeDetail(Number(req.params.id), req.authUser.id);
     res.json(detail);
   } catch (error) {
@@ -7652,10 +7951,50 @@ app.get("/api/admin/employees/:id", async (req, res) => {
   }
 });
 
+app.get("/api/admin/employees/:id/permissions", async (req, res) => {
+  try {
+    if (!Array.isArray(req.authUser.permissions) || (!req.authUser.permissions.includes("*") && !req.authUser.permissions.includes("employees_permissions"))) return res.status(403).json({ error: "无权管理员工权限" });
+    if (!await requireEmployeeScope(req, res, req.params.id)) return;
+    const { data, error } = await supabase.from("workspace_accounts").select("id, workspace_members!workspace_members_owner_account_fkey(permissions)").eq("owner_user_id", req.authUser.id).eq("employee_id", Number(req.params.id)).maybeSingle();
+    if (error) throw error;
+    res.json({ permissions: data?.workspace_members?.[0]?.permissions || [], assignable: Boolean(data) });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "员工权限加载失败" });
+  }
+});
+
+app.put("/api/admin/employees/:id/permissions", async (req, res) => {
+  try {
+    if (!Array.isArray(req.authUser.permissions) || (!req.authUser.permissions.includes("*") && !req.authUser.permissions.includes("employees_permissions"))) return res.status(403).json({ error: "无权管理员工权限" });
+    if (!await requireEmployeeScope(req, res, req.params.id)) return;
+    const permissions = [...new Set((Array.isArray(req.body?.permissions) ? req.body.permissions : []).filter(item => typeof item === "string" && item.length <= 80))];
+    if (permissions.length > 100) return res.status(400).json({ error: "权限数量不合法" });
+    const granted = req.authUser.permissions || [];
+    if (!granted.includes("*") && permissions.some(permission => !granted.includes(permission))) return res.status(403).json({ error: "不能授予超出自身范围的权限" });
+    const { data: account, error: accountError } = await supabase.from("workspace_accounts").select("id, workspace_members!workspace_members_owner_account_fkey(id, permissions)").eq("owner_user_id", req.authUser.id).eq("employee_id", Number(req.params.id)).maybeSingle();
+    if (accountError) throw accountError;
+    const member = account?.workspace_members?.[0];
+    if (!member) return res.status(404).json({ error: "该员工尚未绑定管理端账号" });
+    const previousPermissions = member.permissions || [];
+    const { error: updateError } = await supabase.from("workspace_members").update({ permissions, updated_at: new Date().toISOString() }).eq("owner_user_id", req.authUser.id).eq("id", member.id);
+    if (updateError) throw updateError;
+    const { error: auditError } = await supabase.from("employee_permission_audits").insert({ owner_user_id: req.authUser.id, actor_id: String(req.authUser.adminAuthUserId || req.authUser.id), target_employee_id: Number(req.params.id), previous_permissions: previousPermissions, next_permissions: permissions, metadata: { source: "admin-v4" } });
+    if (auditError) {
+      await supabase.from("workspace_members").update({ permissions: previousPermissions, updated_at: new Date().toISOString() }).eq("owner_user_id", req.authUser.id).eq("id", member.id);
+      throw auditError;
+    }
+    res.json({ permissions, assignable: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "员工权限更新失败" });
+  }
+});
+
 app.get("/api/admin/employees/:id/app-account", async (req, res) => {
   try {
+    if (!requireEmployeePermission(req, res, "employees_reset_pwd", "employees_manage")) return;
+    if (!await requireEmployeeScope(req, res, req.params.id)) return;
     const account = await fetchEmployeeAppAccount(Number(req.params.id), req.authUser.id);
-    res.json({ account, defaultPassword: EMPLOYEE_APP_DEFAULT_PASSWORD });
+    res.json({ account });
   } catch (error) {
     res.status(500).json({ error: error.message || "员工 App 账号加载失败" });
   }
@@ -7663,9 +8002,11 @@ app.get("/api/admin/employees/:id/app-account", async (req, res) => {
 
 app.post("/api/admin/employees/:id/app-account/reset-password", async (req, res) => {
   try {
+    if (!requireEmployeePermission(req, res, "employees_reset_pwd", "employees_manage")) return;
+    if (!await requireEmployeeScope(req, res, req.params.id)) return;
     // 重置密码固定回到第一版初始密码，方便 Admin 在弹窗里一键复制账号密码给员工。
     const result = await resetEmployeeAppPassword(Number(req.params.id), req.authUser.id);
-    res.json(result);
+    res.json({ account: result.account });
   } catch (error) {
     res.status(500).json({ error: error.message || "重置员工 App 密码失败" });
   }
@@ -7673,8 +8014,10 @@ app.post("/api/admin/employees/:id/app-account/reset-password", async (req, res)
 
 app.patch("/api/admin/employees/:id/app-account/status", async (req, res) => {
   try {
+    if (!requireEmployeePermission(req, res, "employees_reset_pwd", "employees_manage")) return;
+    if (!await requireEmployeeScope(req, res, req.params.id)) return;
     const account = await setEmployeeAppAccountStatus(Number(req.params.id), req.authUser.id, req.body?.status);
-    res.json({ account, defaultPassword: EMPLOYEE_APP_DEFAULT_PASSWORD });
+    res.json({ account });
   } catch (error) {
     res.status(500).json({ error: error.message || "更新员工 App 账号状态失败" });
   }
@@ -7682,7 +8025,9 @@ app.patch("/api/admin/employees/:id/app-account/status", async (req, res) => {
 
 app.post("/api/admin/employees", async (req, res) => {
   try {
+    if (!requireEmployeePermission(req, res, "employees_edit", "employees_manage")) return;
     const payload = normalizeEmployeePayload(req.body, req.authUser);
+    if (req.authUser.adminV4CountryCode) payload.country = req.authUser.adminV4CountryCode;
     const validationError = validateEmployeeAmountPayload(payload);
     if (validationError) {
       return res.status(400).json({ error: validationError });
@@ -7699,7 +8044,10 @@ app.post("/api/admin/employees", async (req, res) => {
 
 app.put("/api/admin/employees/:id", async (req, res) => {
   try {
+    if (!requireEmployeePermission(req, res, "employees_edit", "employees_manage")) return;
+    if (!await requireEmployeeScope(req, res, req.params.id)) return;
     const payload = normalizeEmployeePayload(req.body, req.authUser);
+    if (req.authUser.adminV4CountryCode) payload.country = req.authUser.adminV4CountryCode;
     const validationError = validateEmployeeAmountPayload(payload);
     if (validationError) {
       return res.status(400).json({ error: validationError });
@@ -7710,12 +8058,14 @@ app.put("/api/admin/employees/:id", async (req, res) => {
       ruleHistory: []
     });
   } catch (error) {
-    res.status(500).json({ error: error.message || "更新员工失败" });
+    res.status(error.statusCode || 500).json({ error: error.message || "更新员工失败" });
   }
 });
 
 app.patch("/api/admin/employees/:id/status", async (req, res) => {
   try {
+    if (!requireEmployeePermission(req, res, "employees_delete", "employees_manage")) return;
+    if (!await requireEmployeeScope(req, res, req.params.id)) return;
     const { targetStatus } = req.body;
     if (targetStatus !== "resigned") {
       return res.status(400).json({ error: "员工状态不合法" });
@@ -7732,6 +8082,8 @@ app.patch("/api/admin/employees/:id/status", async (req, res) => {
 
 app.patch("/api/admin/employees/:id/hide", async (req, res) => {
   try {
+    if (!requireEmployeePermission(req, res, "employees_delete", "employees_manage")) return;
+    if (!await requireEmployeeScope(req, res, req.params.id)) return;
     const employeeRow = await hideEmployeeRecord(Number(req.params.id), req.authUser.id);
     res.json({
       employee: mapEmployeeRow(employeeRow),

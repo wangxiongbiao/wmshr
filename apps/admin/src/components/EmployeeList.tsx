@@ -5,10 +5,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { tAdmin } from "../lib/i18nText";
-import { Edit, KeyRound, Plus, Search, Trash2, UserRoundMinus } from "lucide-react";
+import { CalendarDays, Edit, Eye, KeyRound, Plus, Search, Settings, Trash2, UserRoundMinus } from "lucide-react";
 import { Employee } from "../types";
-import { fetchEmployeeAvatars, fetchEmployeesCount, fetchEmployeesPage } from "../lib/api";
+import { fetchEmployeeAvatars, fetchEmployeeDetail, fetchEmployeesCount, fetchEmployeesPage } from "../lib/api";
 import { cn, COUNTRY_FLAGS, formatCurrency, getCountryName } from "../lib/utils";
+import { ModalShell } from "./ModalShell";
 import { Pagination } from "./Pagination";
 
 interface EmployeeListProps {
@@ -18,6 +19,7 @@ interface EmployeeListProps {
   onEditEmployee: (emp: Employee) => void;
   onManageAppAccount: (emp: Employee) => void;
   onDeleteEmployee: (emp: Employee) => void;
+  onOpenAttendanceSettings: () => void;
 }
 
 function getV2StatusLabel(employee: Employee) {
@@ -40,9 +42,9 @@ function getV2HourlyRate(employee: Employee) {
   return monthlyWage !== null && monthlyWage > 0 ? (monthlyWage / 30) / 8 : null;
 }
 
-export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, onEditEmployee, onManageAppAccount, onDeleteEmployee }: EmployeeListProps) {
+export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, onEditEmployee, onManageAppAccount, onDeleteEmployee, onOpenAttendanceSettings }: EmployeeListProps) {
   const [query, setSearchQuery] = useState("");
-  const [resignedOnly, setResignedOnly] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<"active" | "resigned">("active");
   const [page, setPage] = useState(1);
   const pageSize = 12;
   const loadRequestIdRef = useRef(0);
@@ -53,11 +55,31 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
   const [pageLoading, setPageLoading] = useState(false);
   const [error, setError] = useState("");
   const [avatarMap, setAvatarMap] = useState<Record<number, string | null>>({});
+  const detailRequestIdRef = useRef(0);
+  const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
+
+  const openEmployeeDetail = (employee: Employee) => {
+    const requestId = ++detailRequestIdRef.current;
+    setSelectedEmployee(employee);
+    setDetailLoading(true);
+    setDetailError("");
+    void fetchEmployeeDetail(employee.id).then((detail) => {
+      if (requestId === detailRequestIdRef.current) setSelectedEmployee(detail.employee);
+    }).catch((nextError) => {
+      if (requestId === detailRequestIdRef.current) {
+        setDetailError(nextError instanceof Error ? nextError.message : tAdmin("员工详情加载失败"));
+      }
+    }).finally(() => {
+      if (requestId === detailRequestIdRef.current) setDetailLoading(false);
+    });
+  };
 
   useEffect(() => {
     // 搜索词或“只看离职”筛选变化后必须回到第一页；真实后端分页下，旧页码继续请求会直接跳到深页，和用户当前筛选意图不一致。
     setPage(1);
-  }, [query, resignedOnly]);
+  }, [query, statusFilter]);
 
   useEffect(() => {
     const requestId = ++loadRequestIdRef.current;
@@ -66,7 +88,7 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
 
     void fetchEmployeesPage({
       keyword: query,
-      status: resignedOnly ? "resigned" : "all",
+      status: statusFilter === "resigned" ? "resigned" : "all",
       page,
       pageSize
     }).then((result) => {
@@ -90,7 +112,7 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
       }
     });
   // 员工页只依赖自己的分页参数与显式刷新信号；避免父层全量 employees 变更把同一分页请求重复打一遍。
-  }, [page, pageSize, query, reloadKey, resignedOnly]);
+  }, [page, pageSize, query, reloadKey, statusFilter]);
 
   useEffect(() => {
     let cancelled = false;
@@ -99,7 +121,7 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
 
     void fetchEmployeesCount({
       keyword: query,
-      status: resignedOnly ? "resigned" : "all"
+      status: statusFilter === "resigned" ? "resigned" : "all"
     }).then((nextTotal) => {
       if (cancelled) {
         return;
@@ -116,7 +138,7 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
     return () => {
       cancelled = true;
     };
-  }, [query, reloadKey, resignedOnly]);
+  }, [query, reloadKey, statusFilter]);
 
   useEffect(() => {
     const visibleIds = rows.map((row) => row.id).filter((id) => !(id in avatarMap));
@@ -157,7 +179,7 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
     <div className="h-full min-h-0 flex flex-col">
       <div className="shrink-0 pb-4 space-y-3">
         {/* 员工列表顶部工具栏与客户管理统一为同款卡片式布局：左侧收口搜索/筛选，右侧保留新增入口，避免不同列表页在响应式断点和控件密度上继续分叉。 */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200/80 p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="sticky top-0 z-20 bg-white/95 backdrop-blur rounded-xl shadow-sm border border-slate-200/80 p-4 flex flex-col lg:flex-row items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
             <div className="relative w-full sm:w-72">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -169,23 +191,25 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
                 className="w-full pl-9 pr-4 py-1.5 border border-slate-200 rounded-lg outline-none text-xs focus:ring-1 focus:ring-brand-500 text-slate-700 bg-slate-50 transition placeholder:text-slate-400 font-medium"
               />
             </div>
-            <label className="inline-flex min-h-[30px] items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 select-none leading-tight hover:bg-slate-50 transition">
-              <input
-                type="checkbox"
-                checked={resignedOnly}
-                onChange={(event) => setResignedOnly(event.target.checked)}
-                className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-              />
-              <span className="whitespace-nowrap">{tAdmin("只看离职人员")}</span>
-            </label>
+            <div className="flex rounded-lg bg-slate-100 p-1 text-xs font-semibold text-slate-600" role="tablist" aria-label={tAdmin("员工状态")}>
+              {(["active", "resigned"] as const).map((status) => (
+                <button key={status} type="button" role="tab" aria-selected={statusFilter === status} onClick={() => setStatusFilter(status)} className={cn("rounded-md px-3 py-1.5 transition", statusFilter === status && "bg-white text-slate-900 shadow-sm")}>
+                  {status === "active" ? tAdmin("在职员工") : tAdmin("离职员工")}
+                </button>
+              ))}
+            </div>
           </div>
-          <button
-            onClick={onAddEmployee}
-            className="w-full sm:w-auto bg-brand-600 hover:bg-brand-700 text-white px-4 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>{tAdmin("新增员工")}</span>
-          </button>
+          <div className="flex w-full flex-wrap gap-2 lg:w-auto lg:justify-end">
+            <button type="button" onClick={onOpenAttendanceSettings} className="flex-1 lg:flex-none border border-slate-200 bg-white text-slate-700 px-3 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 hover:bg-slate-50">
+              <CalendarDays className="w-3.5 h-3.5" /><span>{tAdmin("节假日设置")}</span>
+            </button>
+            <button type="button" onClick={onOpenAttendanceSettings} className="flex-1 lg:flex-none border border-slate-200 bg-white text-slate-700 px-3 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 hover:bg-slate-50">
+              <Settings className="w-3.5 h-3.5" /><span>{tAdmin("考勤设置")}</span>
+            </button>
+            <button type="button" onClick={onAddEmployee} className="flex-1 lg:flex-none bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer">
+              <Plus className="w-3.5 h-3.5" /><span>{tAdmin("新增员工")}</span>
+            </button>
+          </div>
         </div>
         {showRefreshing ? (
           <div className="rounded-xl border border-brand-100 bg-brand-50/80 px-4 py-2 text-xs text-brand-700">
@@ -211,24 +235,25 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
             const statusActionLabel = isResignedEmployee ? tAdmin("删除") : tAdmin("离职");
 
             return (
-              <div key={emp.id} className="glass-panel rounded-xl p-5 hover:shadow-md transition-all duration-300 flex flex-col relative group">
+              <div key={emp.id} role="button" tabIndex={0} onClick={() => openEmployeeDetail(emp)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") openEmployeeDetail(emp); }} className="glass-panel rounded-xl p-5 hover:shadow-md hover:border-slate-300 transition-all duration-300 flex flex-col relative group cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand-500">
                 <div className="absolute top-4 right-4 flex gap-2 z-10 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                  <button type="button" onClick={(event) => { event.stopPropagation(); openEmployeeDetail(emp); }} className="p-1.5 bg-white rounded-lg shadow-sm border border-brand-200 hover:bg-brand-50 text-brand-600" title={tAdmin("查看详情")} aria-label={tAdmin("查看详情")}><Eye className="w-4 h-4" /></button>
                   <button
-                    onClick={() => onManageAppAccount(emp)}
+                    onClick={(event) => { event.stopPropagation(); onManageAppAccount(emp); }}
                     className="p-1.5 bg-white rounded-lg shadow-sm border border-brand-200 hover:bg-brand-50 text-brand-600"
                     title={tAdmin("账号管理")}
                   >
                     <KeyRound className="w-4 h-4" />
                   </button>
                   <button
-                    onClick={() => onEditEmployee(emp)}
+                    onClick={(event) => { event.stopPropagation(); onEditEmployee(emp); }}
                     className="p-1.5 bg-white rounded-lg shadow-sm border border-slate-200 hover:bg-slate-50 text-slate-600"
                     title={tAdmin("编辑")}
                   >
                     <Edit className="w-4 h-4" />
                   </button>
                   <button
-                    onClick={() => onDeleteEmployee(emp)}
+                    onClick={(event) => { event.stopPropagation(); onDeleteEmployee(emp); }}
                     className={cn(
                       "p-1.5 rounded-lg shadow-sm border bg-white text-red-500",
                       isResignedEmployee
@@ -342,6 +367,24 @@ export function EmployeeList({ loading = false, reloadKey = 0, onAddEmployee, on
             : tAdmin("员工总数统计中，当前先显示已加载列表")}
         </div>
       </div>
+      <ModalShell isOpen={Boolean(selectedEmployee)} onClose={() => { detailRequestIdRef.current += 1; setSelectedEmployee(null); }} title={selectedEmployee ? tAdmin("员工详情：{{name}}", { name: selectedEmployee.name }) : tAdmin("员工详情")} className="max-w-3xl" bodyClassName="overflow-y-auto">
+        {selectedEmployee ? (
+          <div className="space-y-5">
+            {detailLoading ? <div className="rounded-lg bg-brand-50 px-4 py-2 text-xs text-brand-700">{tAdmin("正在加载员工详情...")}</div> : null}
+            {detailError ? <div className="rounded-lg bg-red-50 px-4 py-2 text-xs text-red-600">{detailError}</div> : null}
+            <section className="grid grid-cols-2 gap-4 rounded-xl border border-slate-200 p-4 md:grid-cols-4">
+              {[[tAdmin("员工编号"), selectedEmployee.employeeNo], [tAdmin("职位"), selectedEmployee.role], [tAdmin("区域"), selectedEmployee.dept || "-"], [tAdmin("入职"), selectedEmployee.joinDate], [tAdmin("国家"), getCountryName(selectedEmployee.country)], [tAdmin("性别"), selectedEmployee.gender === "female" ? tAdmin("女") : tAdmin("男")], [tAdmin("状态"), getV2StatusLabel(selectedEmployee)], [tAdmin("考勤规则"), selectedEmployee.attendanceRuleName || "-"]].map(([label, value]) => <div key={label}><p className="text-[10px] uppercase tracking-wide text-slate-400">{label}</p><p className="mt-1 break-words text-sm font-semibold text-slate-700">{value}</p></div>)}
+            </section>
+            <section className="grid grid-cols-2 gap-4 rounded-xl border border-slate-200 p-4 md:grid-cols-4">
+              {[[tAdmin("计薪方式"), selectedEmployee.salaryType === "fixed" ? tAdmin("月薪") : tAdmin("时薪")], [tAdmin("基础工资 (月薪)"), selectedEmployee.fixedSalary ? formatCurrency(selectedEmployee.fixedSalary, selectedEmployee.currency) : "-"], [tAdmin("时薪"), selectedEmployee.hourlyRate ? formatCurrency(selectedEmployee.hourlyRate, selectedEmployee.currency) : "-"], [tAdmin("考勤奖金"), formatCurrency(selectedEmployee.attendanceBonus, selectedEmployee.currency)], [tAdmin("社保"), formatCurrency(selectedEmployee.socialSecurity, selectedEmployee.currency)], [tAdmin("餐补费用"), formatCurrency(selectedEmployee.mealAllowance, selectedEmployee.currency)], [tAdmin("服务费比例"), `${selectedEmployee.serviceFeeRate.toFixed(2)}%`], [tAdmin("币种"), selectedEmployee.currency]].map(([label, value]) => <div key={label}><p className="text-[10px] uppercase tracking-wide text-slate-400">{label}</p><p className="mt-1 break-words text-sm font-semibold text-slate-700">{value}</p></div>)}
+            </section>
+            <div className="flex flex-wrap justify-end gap-2">
+              <button type="button" onClick={() => { const employee = selectedEmployee; setSelectedEmployee(null); onManageAppAccount(employee); }} className="rounded-lg border border-brand-200 px-4 py-2 text-xs font-semibold text-brand-700 hover:bg-brand-50"><KeyRound className="mr-1.5 inline h-4 w-4" />{tAdmin("账号管理")}</button>
+              <button type="button" onClick={() => { const employee = selectedEmployee; setSelectedEmployee(null); onEditEmployee(employee); }} className="rounded-lg bg-brand-600 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-700"><Edit className="mr-1.5 inline h-4 w-4" />{tAdmin("编辑")}</button>
+            </div>
+          </div>
+        ) : null}
+      </ModalShell>
     </div>
   );
 }
