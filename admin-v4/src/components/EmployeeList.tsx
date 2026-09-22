@@ -8,7 +8,7 @@ import { Search, Plus, Edit, Trash2, Key, Copy, Check, Eye, EyeOff, RefreshCw, X
 import { Employee, HolidayRecord } from "../types";
 import type { EmployeePageResult } from "../lib/employeeApi";
 import { INITIAL_HOLIDAYS } from "../constants";
-import { cn, formatCurrency, COUNTRY_FLAGS, COUNTRY_NAMES, WAREHOUSE_FLAGS, WAREHOUSE_NAMES } from "../lib/utils";
+import { cn, formatCurrency, formatDate, COUNTRY_FLAGS, COUNTRY_NAMES, WAREHOUSE_FLAGS, WAREHOUSE_NAMES } from "../lib/utils";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getTranslation, Language } from "../lib/i18n";
 import { Button } from "./ui/button";
