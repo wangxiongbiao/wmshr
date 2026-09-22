@@ -1,4 +1,4 @@
-import { Pagination } from "./Pagination";
+﻿import { Pagination } from "./Pagination";
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -564,7 +564,7 @@ export function EmployeeList({
               </div>
               <div>
                 <p className="text-[10px] text-slate-400 uppercase tracking-wide">{getTranslation("emp_join_date", lang)}</p>
-                <p className="font-medium text-slate-700 text-xs">{emp.joinDate}</p>
+                <p className="font-medium text-slate-700 text-xs font-mono tabular-nums">{formatDate(emp.joinDate)}</p>
               </div>
               <div>
                 <p className="text-[10px] text-slate-400 uppercase tracking-wide">{getTranslation("emp_attendance_bonus", lang)}</p>
@@ -1172,7 +1172,7 @@ export function EmployeeList({
                   </div>
                   <div>
                     <span className="text-slate-400 font-medium block">{getTranslation("emp_join_date", lang)}</span>
-                    <span className="font-bold text-slate-800 text-sm block mt-1">{selectedDetailEmployee.joinDate}</span>
+                    <span className="font-bold text-slate-800 text-sm block mt-1 font-mono tabular-nums">{formatDate(selectedDetailEmployee.joinDate)}</span>
                   </div>
                   <div>
                     <span className="text-slate-400 font-medium block">{getTranslation("emp_source_type", lang)}</span>

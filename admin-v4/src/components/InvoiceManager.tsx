@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -33,7 +33,7 @@ import {
   DialogFooter,
 } from "./ui/dialog";
 import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
-import { cn, formatCurrency } from "../lib/utils";
+import { cn, formatCurrency, formatDate, getNowDateStr } from "../lib/utils";
 
 import { Invoice, InvoiceItem, Customer, InvoiceManagerProps, InvoiceStatsData } from "./invoice/types";
 import {
@@ -261,7 +261,7 @@ export function InvoiceManager({ customers, addToast, lang, warehouseCode = "TH"
   // Form Field States
   const [formCustomerId, setFormCustomerId] = useState("");
   const [formInvoiceNo, setFormInvoiceNo] = useState("");
-  const [formIssueDate, setFormIssueDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [formIssueDate, setFormIssueDate] = useState(() => getNowDateStr());
   const [formDueDate, setFormDueDate] = useState("");
   const [formInvoiceType, setFormInvoiceType] = useState<string>("增值税专用发票");
   const [formCopyText, setFormCopyText] = useState<string>("ต้นฉบับ / ORIGINAL");
@@ -620,7 +620,7 @@ export function InvoiceManager({ customers, addToast, lang, warehouseCode = "TH"
   // Generate unique invoice number
   const handleGenerateInvoiceNo = () => {
     const prefix = "INV-";
-    const dateStr = new Date().toISOString().split("T")[0].replace(/-/g, "");
+    const dateStr = getNowDateStr().replace(/-/g, "");
     const random = Math.floor(1000 + Math.random() * 9000);
     setFormInvoiceNo(`${prefix}${dateStr}${random}`);
   };
@@ -778,7 +778,7 @@ export function InvoiceManager({ customers, addToast, lang, warehouseCode = "TH"
     setEditingInvoice(null);
     setFormCustomerId("");
     setFormInvoiceNo("");
-    setFormIssueDate(new Date().toISOString().split("T")[0]);
+    setFormIssueDate(getNowDateStr());
     setFormDueDate("");
     setFormInvoiceType("增值税专用发票");
     setFormCopyText("ต้นฉบับ / ORIGINAL");
@@ -878,7 +878,7 @@ export function InvoiceManager({ customers, addToast, lang, warehouseCode = "TH"
     let invoiceNoToSave = formInvoiceNo.trim();
     if (!invoiceNoToSave) {
       const prefix = "INV-";
-      const dateStr = new Date().toISOString().split("T")[0].replace(/-/g, "");
+      const dateStr = getNowDateStr().replace(/-/g, "");
       const random = Math.floor(1000 + Math.random() * 9000);
       invoiceNoToSave = `${prefix}${dateStr}${random}`;
     }
@@ -1224,8 +1224,8 @@ export function InvoiceManager({ customers, addToast, lang, warehouseCode = "TH"
                           </span>
                         </td>
                         <td className="px-2.5 py-3 text-slate-500 font-mono text-[11px]">
-                          <div>{inv.issueDate}</div>
-                          {inv.dueDate && <div className="text-[10px] text-slate-400">{getInvoiceTrans("due_date_lbl", lang)}: {inv.dueDate}</div>}
+                          <div>{formatDate(inv.issueDate)}</div>
+                          {inv.dueDate && <div className="text-[10px] text-slate-400">{getInvoiceTrans("due_date_lbl", lang)}: {formatDate(inv.dueDate)}</div>}
                         </td>
                         <td className="px-3 py-3 text-right font-mono font-bold text-slate-900">
                           {formatCurrency(inv.amount, inv.currency as any)}

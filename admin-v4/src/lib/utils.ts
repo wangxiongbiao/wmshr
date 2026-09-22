@@ -228,3 +228,119 @@ export function calcOvertimePay(
   const amount = otHours * baseHourlyRate * multiplier;
   return { amount, multiplier, label };
 }
+
+// ==========================================
+// Standardized Date & Time Formatting Utilities
+// ==========================================
+
+function pad2(num: number): string {
+  return String(num).padStart(2, "0");
+}
+
+export function getNowDateStr(date: Date = new Date()): string {
+  const y = date.getFullYear();
+  const m = pad2(date.getMonth() + 1);
+  const d = pad2(date.getDate());
+  return `${y}-${m}-${d}`;
+}
+
+export function getNowMonthStr(date: Date = new Date()): string {
+  const y = date.getFullYear();
+  const m = pad2(date.getMonth() + 1);
+  return `${y}-${m}`;
+}
+
+export function getNowDateTimeStr(date: Date = new Date()): string {
+  const y = date.getFullYear();
+  const m = pad2(date.getMonth() + 1);
+  const d = pad2(date.getDate());
+  const h = pad2(date.getHours());
+  const min = pad2(date.getMinutes());
+  return `${y}-${m}-${d} ${h}:${min}`;
+}
+
+export function formatDate(value?: string | number | Date | null, fallback = "-"): string {
+  if (!value) return fallback;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return fallback;
+    if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
+      return trimmed.slice(0, 10);
+    }
+    if (/^\d{4}\/\d{2}\/\d{2}/.test(trimmed)) {
+      return trimmed.slice(0, 10).replace(/\//g, "-");
+    }
+  }
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return fallback;
+  return getNowDateStr(d);
+}
+
+export function formatTime(value?: string | Date | null, fallback = "-"): string {
+  if (!value) return fallback;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return fallback;
+    const match = trimmed.match(/(\d{1,2}):(\d{2})/);
+    if (match) {
+      return `${pad2(parseInt(match[1], 10))}:${match[2]}`;
+    }
+  }
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return fallback;
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+export function formatDateTime(value?: string | number | Date | null, fallback = "-"): string {
+  if (!value) return fallback;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return fallback;
+    const match = trimmed.match(/^(\d{4}[-/]\d{2}[-/]\d{2})[ T](\d{2}:\d{2})/);
+    if (match) {
+      return `${match[1].replace(/\//g, "-")} ${match[2]}`;
+    }
+  }
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return fallback;
+  return getNowDateTimeStr(d);
+}
+
+export function formatDateTimeSeconds(value?: string | number | Date | null, fallback = "-"): string {
+  if (!value) return fallback;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return fallback;
+    const match = trimmed.match(/^(\d{4}[-/]\d{2}[-/]\d{2})[ T](\d{2}:\d{2}:\d{2})/);
+    if (match) {
+      return `${match[1].replace(/\//g, "-")} ${match[2]}`;
+    }
+  }
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return fallback;
+  return `${getNowDateStr(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
+
+export function formatTimeRange(start?: string | null, end?: string | null, fallback = "-"): string {
+  const s = formatTime(start, "");
+  const e = formatTime(end, "");
+  if (s && e) return `${s} - ${e}`;
+  if (s) return s;
+  if (e) return e;
+  return fallback;
+}
+
+export function formatMonthLabel(yearMonth?: string | null, lang = "zh-CN"): string {
+  if (!yearMonth || !/^\d{4}-\d{2}$/.test(yearMonth.trim())) return yearMonth || "-";
+  const [yStr, mStr] = yearMonth.trim().split("-");
+  const m = parseInt(mStr, 10);
+  if (lang === "en") {
+    const enMonths = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return `${enMonths[m - 1] || mStr} ${yStr}`;
+  }
+  if (lang === "th") {
+    const thMonths = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+    return `${thMonths[m - 1] || mStr} ${yStr}`;
+  }
+  return `${yStr}年${mStr}月`;
+}

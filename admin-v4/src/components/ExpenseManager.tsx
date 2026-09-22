@@ -1,4 +1,4 @@
-import { DatePicker } from "./ui/date-picker";
+﻿import { DatePicker } from "./ui/date-picker";
 import { Pagination } from "./Pagination";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -31,7 +31,7 @@ import {
   BadgeAlert, BadgeCheck, BadgeHelp, Upload, Settings, RotateCcw,
   FileCheck, FileX, Loader2, RefreshCw
 } from "lucide-react";
-import { calcAttendanceDetails, calcOvertimePay, formatCurrency, cn } from "../lib/utils";
+import { calcAttendanceDetails, calcOvertimePay, formatCurrency, cn, formatDate, formatDateTime, getNowDateStr, getNowDateTimeStr, getNowMonthStr, formatMonthLabel } from "../lib/utils";
 
 interface ExpenseManagerProps {
   employees: Employee[];
@@ -264,7 +264,7 @@ export function ExpenseManager({ employees, addToast, attendance = [], config, h
         attachments: [],
         targetType: "specific",
         targetEmployeeIds: [empId],
-        createdAt: new Date().toISOString().replace("T", " ").slice(0, 16),
+        createdAt: getNowDateTimeStr(),
         creator: "财务薪资部 · Admin",
         status: "published",
         reads: {},
@@ -304,7 +304,7 @@ export function ExpenseManager({ employees, addToast, attendance = [], config, h
         attachments: [],
         targetType: "specific",
         targetEmployeeIds: [empId],
-        createdAt: new Date().toISOString().replace("T", " ").slice(0, 16),
+        createdAt: getNowDateTimeStr(),
         creator: "财务薪资部 · Admin",
         status: "published",
         reads: {},
@@ -521,7 +521,7 @@ export function ExpenseManager({ employees, addToast, attendance = [], config, h
     setReceiptName(RECEIPT_PRESETS[1].name + ".png");
     setPayerId(employees[0]?.id || -1);
     setPayerName(employees[0]?.name || "");
-    setPaymentTime(new Date().toISOString().split('T')[0]);
+    setPaymentTime(getNowDateStr());
     setNote("");
     setTargetApproverId(employees[0]?.id || -1);
     setTargetApproverName(employees[0]?.name || "");
@@ -703,7 +703,7 @@ export function ExpenseManager({ employees, addToast, attendance = [], config, h
             ...item,
             status: approveStatus,
             approvedBy: finalActualApproverName,
-            approvedTime: new Date().toISOString().replace("T", " ").slice(0, 16),
+            approvedTime: getNowDateTimeStr(),
             approvalNote: approvalNote.trim() || (approveStatus === "approved" ? "审核资料齐全，支出账实相符，准予核销。" : "由于发票不合规或流程越级，被审核人驳回。")
           } as ExpenseRecord;
         }
@@ -720,7 +720,7 @@ export function ExpenseManager({ employees, addToast, attendance = [], config, h
         ...prev,
         status: approveStatus,
         approvedBy: finalActualApproverName,
-        approvedTime: new Date().toISOString().replace("T", " ").slice(0, 16),
+        approvedTime: getNowDateTimeStr(),
         approvalNote: approvalNote.trim() || (approveStatus === "approved" ? "审核资料齐全，准予核销/发放。" : "单据已驳回。")
       } : null);
     }
@@ -2080,8 +2080,8 @@ export function ExpenseManager({ employees, addToast, attendance = [], config, h
                     </h4>
                     {(activeExpense.status === 'approved' || activeExpense.status === 'rejected') && (
                       <p className="text-[11px] text-slate-500 mt-1">
-                        {activeExpense.status === 'approved' ? `经办审批人：${activeExpense.approvedBy || "WMS管理员"} (${activeExpense.approvedTime})` :
-                         `经办理领班：${activeExpense.approvedBy || "WMS管理审核"} (${activeExpense.approvedTime})`}
+                        {activeExpense.status === 'approved' ? `经办审批人：${activeExpense.approvedBy || "WMS管理员"} (${formatDateTime(activeExpense.approvedTime)})` :
+                         `经办理领班：${activeExpense.approvedBy || "WMS管理审核"} (${formatDateTime(activeExpense.approvedTime)})`}
                       </p>
                     )}
                   </div>
@@ -2171,7 +2171,7 @@ export function ExpenseManager({ employees, addToast, attendance = [], config, h
                                 )}
                                 {sIdx === steps.length - 1 && activeExpense.status === 'approved' && (
                                   <span className="text-[10px] text-slate-400 font-mono font-medium">
-                                    {activeExpense.approvedTime || activeExpense.paymentTime}
+                                    {formatDateTime(activeExpense.approvedTime) || formatDate(activeExpense.paymentTime)}
                                   </span>
                                 )}
                               </div>

@@ -1,11 +1,11 @@
-/**
+﻿/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
 
 import { Settings, Edit, Download, Eye, X, MapPin, Search, Calendar, User, SlidersHorizontal, ChevronLeft, ChevronRight, RefreshCw, Loader2 } from "lucide-react";
 import { AppConfig, AttendanceRecord, Employee, HolidayRecord, LeaveRequest } from "../types";
-import { cn, calcAttendanceDetails, formatCurrency, formatDuration, calcOvertimePay } from "../lib/utils";
+import { cn, calcAttendanceDetails, formatCurrency, formatDuration, calcOvertimePay, formatTime, formatTimeRange, formatMonthLabel, formatDate, getNowDateStr, getNowMonthStr } from "../lib/utils";
 import { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { fetchAttendanceCalculations, type AttendanceCalculationRow } from "../lib/attendanceApi";
 import { CheckCircle, XCircle, AlertCircle, Clock } from "lucide-react";
@@ -181,7 +181,7 @@ export function AttendanceTable({
   // Manual Attendance Record Add States
   const [isManualAddOpen, setIsManualAddOpen] = useState<boolean>(false);
   const [manualEmpId, setManualEmpId] = useState<number | ''>('');
-  const [manualDate, setManualDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [manualDate, setManualDate] = useState<string>(() => getNowDateStr());
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [isTableLoading, setIsTableLoading] = useState<boolean>(true);
   const [serverRows, setServerRows] = useState<AttendanceCalculationRow[] | null>(null);
@@ -823,11 +823,7 @@ export function AttendanceTable({
                   className="px-2.5 py-1 border border-slate-200 rounded-lg hover:border-slate-300 transition-colors bg-white shadow-xs flex items-center justify-between text-xs font-mono text-slate-700 h-[32px] w-[130px] cursor-pointer focus:ring-1 focus:ring-brand-500 outline-none animate-fade-in"
                 >
                 <span>
-                  {(() => {
-                    if (!selectedMonth) return "全部";
-                    const [y, m] = selectedMonth.split('-');
-                    return `${y}年${m}月`;
-                  })()}
+                  {selectedMonth ? formatMonthLabel(selectedMonth, lang) : "全部"}
                 </span>
                 <Calendar className="w-3.5 h-3.5 text-slate-400" />
               </button>
@@ -1186,7 +1182,7 @@ export function AttendanceTable({
                       <td className="px-4 py-4.5 text-sm text-slate-700 text-center font-mono whitespace-nowrap">
                         {isAbsentOrLeave ? '-' : (
                           <div className="flex flex-col items-center justify-center">
-                            <span>{rec?.inTime || '-'}</span>
+                            <span>{formatTime(rec?.inTime)}</span>
                             {rec && rec.inLat != null && (
                               <div className={cn(
                                 "text-[10px] mt-0.5 flex items-center justify-center gap-0.5 font-semibold leading-none",
@@ -1203,7 +1199,7 @@ export function AttendanceTable({
                       <td className="px-4 py-4.5 text-sm text-slate-700 text-center font-mono whitespace-nowrap">
                         {isAbsentOrLeave ? '-' : (
                           <div className="flex flex-col items-center justify-center">
-                            <span>{rec?.outTime || '-'}</span>
+                            <span>{formatTime(rec?.outTime)}</span>
                             {rec && rec.outLat != null && (
                               <div className={cn(
                                 "text-[10px] mt-0.5 flex items-center justify-center gap-0.5 font-semibold leading-none",
@@ -1413,7 +1409,7 @@ export function AttendanceTable({
                 <div className="p-3 bg-slate-50/60 rounded-lg border border-slate-100 text-center flex flex-col justify-center min-h-[72px]">
                   <span className="text-xs text-slate-400 font-semibold block mb-1">打卡时间</span>
                   <span className="text-xs font-mono font-bold text-slate-700">
-                    {detailRecord.rec ? `${detailRecord.rec.inTime} - ${detailRecord.rec.outTime}` : '-'}
+                    {detailRecord.rec ? formatTimeRange(detailRecord.rec.inTime, detailRecord.rec.outTime) : '-'}
                   </span>
                 </div>
 

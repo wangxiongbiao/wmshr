@@ -1,10 +1,10 @@
-/**
+﻿/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
 
 import { AppConfig, AttendanceRecord, Employee, HolidayRecord, PayrollSummary } from "../types";
-import { cn, calcAttendanceDetails, formatCurrency, formatDuration, calcOvertimePay } from "../lib/utils";
+import { cn, calcAttendanceDetails, formatCurrency, formatDuration, calcOvertimePay, formatMonthLabel, getNowMonthStr, formatDate } from "../lib/utils";
 import { useMemo, useState, useEffect, useRef } from "react";
 import { Calendar, DollarSign, CheckCircle2, AlertCircle, TrendingUp, Download, Receipt, Check, RotateCcw, RefreshCw, Search, Filter, Clock, ChevronLeft, ChevronRight, X, Loader2 } from "lucide-react";
 import { getTranslation, Language } from "../lib/i18n";
@@ -32,7 +32,7 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
     const unique = [...new Set(list)];
     
     // Ensure current month is always present as a safety choice
-    const currentMonthStr = new Date().toISOString().slice(0, 7);
+    const currentMonthStr = getNowMonthStr();
     if (!unique.includes(currentMonthStr)) {
       unique.push(currentMonthStr);
     }
@@ -44,15 +44,10 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
   const [selectedMonth, setSelectedMonth] = useState<string>(() => {
     const dates = attendance.map(r => r.date.slice(0, 7)).filter(Boolean);
     const unique = [...new Set(dates)].sort().reverse();
-    return unique.length > 0 ? unique[0] : new Date().toISOString().slice(0, 7);
+    return unique.length > 0 ? unique[0] : getNowMonthStr();
   });
 
-  const defaultMonth = useMemo(() => {
-    const now = new Date();
-    const yyyy = now.getFullYear();
-    const mm = String(now.getMonth() + 1).padStart(2, '0');
-    return `${yyyy}-${mm}`;
-  }, []);
+  const defaultMonth = useMemo(() => getNowMonthStr(), []);
 
   const [isMonthPickerOpen, setIsMonthPickerOpen] = useState<boolean>(false);
   const [pickerYear, setPickerYear] = useState<number>(() => {
@@ -702,13 +697,7 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
                 onClick={() => setIsMonthPickerOpen(!isMonthPickerOpen)}
                 className="px-2.5 py-1.5 border border-slate-200 rounded-lg hover:border-slate-300 transition-colors bg-white shadow-xs flex items-center justify-between text-xs font-mono text-slate-700 h-[34px] w-[140px] cursor-pointer focus:ring-1 focus:ring-brand-500 outline-none"
               >
-                <span>
-                  {(() => {
-                    if (!selectedMonth) return "全部";
-                    const [y, m] = selectedMonth.split('-');
-                    return `${y}年${m}月`;
-                  })()}
-                </span>
+                <span>{selectedMonth ? formatMonthLabel(selectedMonth, lang) : "全部"}</span>
                 <Calendar className="w-3.5 h-3.5 text-slate-400" />
               </button>
 

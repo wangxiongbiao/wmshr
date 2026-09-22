@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -6,7 +6,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { Search, Clock, CheckCircle, XCircle, User, Trash2, Plus, Loader2, RefreshCw, AlertCircle, X } from "lucide-react";
 import { Employee, LeaveRequest } from "../types";
-import { cn } from "../lib/utils";
+import { cn, formatDate } from "../lib/utils";
 import { useStickyMirrorHeader } from "../lib/useStickyMirrorHeader";
 import { Pagination } from "./Pagination";
 import {
@@ -425,10 +425,10 @@ export function LeaveTable({
                           {typeDisplayName}
                         </span>
                       </td>
-                      <td className="px-5 py-4 font-mono text-slate-600">
+                      <td className="px-5 py-4 font-mono tabular-nums text-slate-600">
                         <div className="space-y-0.5">
-                          <p className="font-semibold text-slate-700">{req.startDate}</p>
-                          <p className="text-[10px] text-slate-400">至 {req.endDate}</p>
+                          <p className="font-semibold text-slate-700">{formatDate(req.startDate)}</p>
+                          <p className="text-[10px] text-slate-400">至 {formatDate(req.endDate)}</p>
                         </div>
                       </td>
                       <td className="px-5 py-4 text-center font-bold text-slate-700">
