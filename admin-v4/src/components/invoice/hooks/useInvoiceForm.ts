@@ -1,4 +1,5 @@
-﻿import { useState, useMemo, useEffect, useCallback } from "react";
+﻿import type React from 'react';
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { Customer, Invoice, InvoiceItem, InvoiceStatus } from "../types";
 import { CUSTOMER_PRESETS } from "../constants";
 

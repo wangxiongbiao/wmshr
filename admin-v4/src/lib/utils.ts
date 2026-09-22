@@ -195,8 +195,8 @@ export function calcOvertimePay(
 
   // Check if dateStr is in holidays list
   const holidayDateSet = new Set([
-    ...(config.holidayDates || []).map(h => typeof h === "string" ? h.split("::")[0].trim() : (h as any)?.date),
-    ...(holidays || []).map(h => typeof h === "string" ? h.split("::")[0].trim() : h?.date)
+    ...((config as any)?.holidayDates || []).map((h: any) => typeof h === "string" ? h.split("::")[0].trim() : h?.date),
+    ...((holidays as any[]) || []).map((h: any) => typeof h === "string" ? h.split("::")[0].trim() : h?.date)
   ].filter(Boolean));
   const isHoliday = holidayDateSet.has(dateStr);
   

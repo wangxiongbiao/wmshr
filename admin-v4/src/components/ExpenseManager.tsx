@@ -848,7 +848,7 @@ export function ExpenseManager({ employees, addToast, attendance = [], config, h
       employees.forEach(emp => {
         if (emp.joinDate && emp.joinDate.slice(0, 7) > targetMonth) return;
         const empAtt = filteredAtt.filter(r => r.empId === emp.id);
-        if (emp.status === "resigned" && empAtt.length === 0) return;
+        if ((emp.status as any) === "resigned" && empAtt.length === 0) return;
 
         let valid = 0, ot = 0, otPay = 0, basePay = 0;
         let workingDays = 0;
@@ -2515,7 +2515,7 @@ export function ExpenseManager({ employees, addToast, attendance = [], config, h
                    {/* 费用用途 */}
                    <div>
                      <Label className="block text-slate-550 font-medium mb-1.5 uppercase tracking-wide text-xs text-brand-750">费用用途 <span className="text-rose-500">*</span></Label>
-                     <Select value={expensePurpose} onValueChange={(val) => setExpensePurpose(val as advance | payout | income)}>
+                     <Select value={expensePurpose} onValueChange={(val) => setExpensePurpose(val as 'advance' | 'payout' | 'income')}>
                        <SelectTrigger className="w-full bg-white font-normal text-slate-750 text-sm">
                          <SelectValue />
                        </SelectTrigger>

@@ -1282,10 +1282,10 @@ export function InvoiceManager({ customers, addToast, lang, warehouseCode = "TH"
                     : `显示第 ${(page - 1) * pageSize + 1} 至 ${Math.min(page * pageSize, filteredInvoices.length)} 条，共 ${filteredInvoices.length} 条发票`}
                 </span>
                 <Pagination
-                  currentPage={page}
-                  totalPages={totalPages}
+                  page={page}
+                  pageSize={pageSize}
+                  total={filteredInvoices.length}
                   onPageChange={setPage}
-                  lang={lang}
                 />
               </div>
             )}

@@ -1,4 +1,4 @@
-import { Customer } from "../../types";
+﻿import { Customer } from "../../types";
 
 export interface ExpressManagerProps {
   customers: Customer[];
@@ -67,7 +67,6 @@ export interface ReconciledItem {
   insuranceFee?: number;
   packageFee?: number;
   systemWeight?: number;
-  customerCode?: string;
   orderNo?: string;
   matchMethod?: "waybill" | "alt_key";
   sysRawValues?: Record<string, string>;

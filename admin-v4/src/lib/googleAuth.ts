@@ -1,4 +1,4 @@
-export const GOOGLE_POPUP_NAME = "wmshr-admin-google-auth";
+﻿export const GOOGLE_POPUP_NAME = "wmshr-admin-google-auth";
 export const GOOGLE_POPUP_POLL_MS = 500;
 export const GOOGLE_POPUP_QUERY_KEY = "auth_popup";
 export const GOOGLE_POPUP_QUERY_VALUE = "google";
@@ -46,7 +46,7 @@ export function closePopupWindow(target: Window | null | undefined) {
   } catch {}
 }
 
-export function buildGooglePopupCallbackUrl(currentOrigin: string, attemptId: string, intent: "login" | "register") {
+export function buildGooglePopupCallbackUrl(currentOrigin: string, attemptId: string, intent: "login" | "register" | "login_or_register") {
   const url = new URL(currentOrigin);
   url.searchParams.set(GOOGLE_POPUP_QUERY_KEY, GOOGLE_POPUP_QUERY_VALUE);
   url.searchParams.set("attempt", attemptId);

@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useEffect, type RefObject } from "react";
+﻿import { useRef, useState, useCallback, useEffect, type RefObject } from "react";
 
 export interface UseStickyMirrorHeaderOptions {
   tableContainerRef?: RefObject<HTMLDivElement | null>;
@@ -23,7 +23,7 @@ export function useStickyMirrorHeader(options: UseStickyMirrorHeaderOptions = {}
     if (!realTheadRef.current || !realTableRef.current) return;
     const thElements = realTheadRef.current.querySelectorAll("th");
     if (thElements.length > 0) {
-      const widths = Array.from(thElements).map((th) => th.getBoundingClientRect().width);
+      const widths = Array.from(thElements).map((th) => (th as HTMLElement).getBoundingClientRect().width);
       setColWidths(widths);
       setRealTableWidth(realTableRef.current.getBoundingClientRect().width);
     }

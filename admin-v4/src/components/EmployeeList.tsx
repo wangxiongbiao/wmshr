@@ -156,9 +156,9 @@ export function EmployeeList({
     if (!matchesQuery) return false;
 
     if (statusFilter === 'active') {
-      return emp.status !== '离职' && emp.status !== 'resigned';
+      return emp.status !== '离职' && (emp.status as any) !== 'resigned';
     } else if (statusFilter === 'resigned') {
-      return emp.status === '离职' || emp.status === 'resigned';
+      return emp.status === '离职' || (emp.status as any) === 'resigned';
     }
     return true;
   }), [employees, warehouseCode, query, statusFilter]);
@@ -172,7 +172,7 @@ export function EmployeeList({
       const updatedRows = remoteRows.map(r => empMap.get(r.id) || r);
       const validRows = updatedRows.filter(emp => {
         if (statusFilter === "active") {
-          return emp.status !== "离职" && emp.status !== "resigned";
+          return emp.status !== "离职" && (emp.status as any) !== "resigned";
         } else if (statusFilter === "resigned") {
           return emp.status === "离职" || emp.status === "resigned";
         }

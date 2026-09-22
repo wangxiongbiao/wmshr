@@ -386,6 +386,7 @@ export function useExpressReconciliation(params: {
     editingSurcharge,
     expandedCustomers,
     customerDetailsSearch,
+    setCustomerDetailsSearch,
 
     // Computed
     reconciledData,

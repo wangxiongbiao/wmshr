@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useMemo, useState, useEffect } from "react";
+import type React from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { Search, Clock, CheckCircle, XCircle, User, Trash2, Plus, Loader2, RefreshCw, AlertCircle, X } from "lucide-react";
 import { Employee, LeaveRequest } from "../types";
 import { cn, formatDate } from "../lib/utils";

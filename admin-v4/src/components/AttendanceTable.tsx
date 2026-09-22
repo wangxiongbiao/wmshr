@@ -542,7 +542,7 @@ export function AttendanceTable({
     if (!realTheadRef.current || !realTableRef.current) return;
     const thElements = realTheadRef.current.querySelectorAll("th");
     if (thElements.length > 0) {
-      const widths = Array.from(thElements).map((th) => th.getBoundingClientRect().width);
+      const widths = Array.from(thElements).map((th) => (th as HTMLElement).getBoundingClientRect().width);
       setColWidths(widths);
       setRealTableWidth(realTableRef.current.getBoundingClientRect().width);
     }
@@ -823,7 +823,7 @@ export function AttendanceTable({
                   className="px-2.5 py-1 border border-slate-200 rounded-lg hover:border-slate-300 transition-colors bg-white shadow-xs flex items-center justify-between text-xs font-mono text-slate-700 h-[32px] w-[130px] cursor-pointer focus:ring-1 focus:ring-brand-500 outline-none animate-fade-in"
                 >
                 <span>
-                  {selectedMonth ? formatMonthLabel(selectedMonth, lang) : "全部"}
+                  {selectedMonth ? formatMonthLabel(selectedMonth) : "全部"}
                 </span>
                 <Calendar className="w-3.5 h-3.5 text-slate-400" />
               </button>
