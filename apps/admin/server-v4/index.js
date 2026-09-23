@@ -1,4 +1,4 @@
-import dotenv from "dotenv";
+﻿import dotenv from "dotenv";
 import express from "express";
 import pg from "pg";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -9,6 +9,11 @@ import { createEmployeeRouter } from "./employees.js";
 import { createAttendanceRouter } from "./attendance.js";
 import { createInvoiceRouter } from "./invoices.js";
 import { runDailyAttendanceMaintenance, isAuthorizedCronRequest } from "./cron-attendance.js";
+import { createMobileRouter } from "./mobile.js";
+import { createPayrollRouter } from "./payroll.js";
+import { createExpenseRouter } from "./expenses.js";
+import { createSopRouter } from "./sop.js";
+import { createResourceRouter } from "./resources.js";
 
 dotenv.config();
 dotenv.config({ path: fileURLToPath(new URL("../.env", import.meta.url)), override: false });
@@ -33,7 +38,7 @@ const directDbPool = DATABASE_URL ? new pg.Pool({
   max: 10,
   min: 2,
   idleTimeoutMillis: 300_000,
-  connectionTimeoutMillis: 10_000,
+  connectionTimeoutMillis: 1_500,
   keepAlive: true,
   ssl: DATABASE_URL.includes("supabase.co") ? { rejectUnauthorized: false } : undefined
 }) : null;
@@ -186,12 +191,42 @@ app.get("/api/v4/public/google-auth-url", async (req, res) => {
   }
 });
 
+// --- Mobile App Router: 移动端员工门户专有路由 (支持 /api/v4/mobile 和 /api/mobile) ---
+const mobileRouter = createMobileRouter({ express, supabase, directDbPool, authSecret: AUTH_SECRET });
+app.use("/api/v4/mobile", mobileRouter);
+app.use("/api/mobile", mobileRouter);
+
+// --- Admin Management Routers: 管理端路由 (/api/v4/admin 与 /api/admin) ---
+const employeeRouter = createEmployeeRouter({ express, supabase, directDbPool, identity });
+const attendanceRouter = createAttendanceRouter({ express, supabase });
+const invoiceRouter = createInvoiceRouter({ express, directDbPool, supabase });
+const payrollRouter = createPayrollRouter({ express, supabase, directDbPool, identity });
+const expenseRouter = createExpenseRouter({ express, supabase, directDbPool });
+const sopRouter = createSopRouter({ express, supabase, directDbPool });
+
 app.use("/api/v4/admin", requireV4Auth);
 app.post("/api/v4/admin/employees/:id/reset-password", auth.handleResetEmployeePassword);
-app.use("/api/v4/admin", createEmployeeRouter({ express, supabase, directDbPool, identity }));
-app.use("/api/v4/admin", createAttendanceRouter({ express, supabase }));
+app.use("/api/v4/admin", employeeRouter);
+app.use("/api/v4/admin", attendanceRouter);
 app.post("/api/v4/admin/attendance-calculations/run-daily-maintenance", handleAttendanceNightlyCron);
-app.use("/api/v4/admin", createInvoiceRouter({ express, directDbPool, supabase }));
+app.use("/api/v4/admin", invoiceRouter);
+app.use("/api/v4/admin", payrollRouter);
+app.use("/api/v4/admin", expenseRouter);
+app.use("/api/v4/admin", sopRouter);
+
+app.use("/api/admin", requireV4Auth);
+app.post("/api/admin/employees/:id/reset-password", auth.handleResetEmployeePassword);
+app.use("/api/admin", employeeRouter);
+app.use("/api/admin", attendanceRouter);
+app.use("/api/admin", invoiceRouter);
+app.use("/api/admin", payrollRouter);
+app.use("/api/admin", expenseRouter);
+app.use("/api/admin", sopRouter);
+
+// --- Flutter REST Resource & State Client: /api/v4/* 与 /api/* ---
+const resourceRouter = createResourceRouter({ express, supabase, directDbPool, authSecret: AUTH_SECRET, identity });
+app.use("/api/v4", resourceRouter);
+app.use("/api", resourceRouter);
 
 app.use("/api/v4", (_req, res) => res.status(404).json({ error: "V4 API 路径不存在" }));
 

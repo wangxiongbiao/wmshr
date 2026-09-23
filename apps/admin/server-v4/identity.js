@@ -1,4 +1,4 @@
-const DEFAULT_WORKSPACE_NODES = [
+﻿const DEFAULT_WORKSPACE_NODES = [
   ["Asia", "韩国", "KR", "🇰🇷", "KRW"], ["Asia", "日本", "JP", "🇯🇵", "JPY"],
   ["Asia", "中国香港", "HK", "🇭🇰", "HKD"], ["Asia", "中国澳门", "MO", "🇲🇴", "MOP"],
   ["Asia", "马来西亚", "MY", "🇲🇾", "MYR"], ["Asia", "新加坡", "SG", "🇸🇬", "SGD"],
@@ -33,6 +33,7 @@ function resolvedUser(authUser, ownerUserId) {
 }
 
 export function createV4IdentityService({ supabase, directDbPool }) {
+  let isPoolHealthy = true;
   async function fetchBootstrapState(ownerUserId) {
     const { data, error } = await supabase.from("workspace_bootstrap_states").select("*").eq("owner_user_id", ownerUserId).maybeSingle();
     if (error) throw error;
@@ -52,7 +53,7 @@ export function createV4IdentityService({ supabase, directDbPool }) {
   async function listAuthUserIdsByEmail(email) {
     const normalized = normalizeEmail(email);
     if (!normalized) return [];
-    if (directDbPool) {
+    if (directDbPool && isPoolHealthy) {
       try {
         const result = await directDbPool.query("select id from auth.users where lower(email) = $1 order by created_at asc, id asc", [normalized]);
         return result.rows.map(row => String(row.id)).filter(Boolean);
@@ -235,8 +236,9 @@ export function createV4IdentityService({ supabase, directDbPool }) {
       return cached.context;
     }
 
-    if (directDbPool) {
-      let whereClause = "a.owner_user_id = $1";
+    if (directDbPool && isPoolHealthy) {
+      try {
+        let whereClause = "a.owner_user_id = $1";
       const params = [ownerUserId];
       if (session.accountId) {
         whereClause += " AND a.id = $2";
@@ -299,7 +301,11 @@ export function createV4IdentityService({ supabase, directDbPool }) {
       if (sessionCache.size > 500) sessionCache.clear();
       sessionCache.set(cacheKey, { expiresAt: Date.now() + SESSION_CACHE_TTL_MS, context });
       return context;
+    } catch (poolErr) {
+      isPoolHealthy = false;
+console.warn("[admin-v4/identity] directDbPool unavailable, switched directly to REST:", poolErr.message);
     }
+  }
 
     let query = supabase.from("workspace_accounts").select("id, owner_user_id, account, account_type, status, employee_id, workspace_members!workspace_members_owner_account_fkey(id, owner_user_id, display_name, role_name, permissions, allowed_warehouses)").eq("owner_user_id", ownerUserId);
     if (session.accountId) query = query.eq("id", String(session.accountId));
