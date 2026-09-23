@@ -52,13 +52,13 @@
 ## 一、全局规范与通信协议
 
 ### 1.1 服务基准与网络地址
-- **通信协议**: HTTP / 1.1 与 HTTPS (生产环境强制启用 TLS 1.3 加密传输)
+- **通信协议**: HTTPS (线上强制启用 TLS 1.3 证书加密传输)
 - **数据交互格式**: 请求体与响应体正文均强制使用 `application/json; charset=utf-8`
-- **微服务基准端口**: `8789`
-- **Base URL 环境区分**:
-  - 本地开发环境 (Dev): `http://127.0.0.1:8789/api/v4`
-  - 测试联调环境 (Staging): `https://staging-api.wmshr.internal/api/v4`
-  - 生产发布环境 (Prod): `https://api.wmshr.com/api/v4`
+- **线上生产基准服务地址 (Online Production Base URL)**:
+  - **线上生产主域名 (推荐)**: `https://v4.dutylix.com/api/v4`
+  - **管理端后台生产域名**: `https://admin-v4.dutylix.com/api/v4`
+  - **Vercel 直通镜像节点**: `https://dutylix-admin-v4.vercel.app/api/v4`
+  - **本地开发调试服务**: `http://127.0.0.1:8789/api/v4`
   - *注：服务内置了路由兼容层，访问 `http://127.0.0.1:8789/api` 与 `/api/v4` 完全等价。*
 
 ### 1.2 双轨 Token 认证体系
@@ -1238,7 +1238,7 @@ Flutter App 内部广泛封装了 `ApiResourceClient`（位于 `lib/core/network
 
 #### 1. 移动端员工登录
 ```bash
-curl -X POST http://127.0.0.1:8789/api/v4/mobile/auth/login \
+curl -X POST https://v4.dutylix.com/api/v4/mobile/auth/login \
   -H "Content-Type: application/json" \
   -d '{
     "account": "wms0004",
@@ -1248,7 +1248,7 @@ curl -X POST http://127.0.0.1:8789/api/v4/mobile/auth/login \
 
 #### 2. 员工上班打卡 (带经纬度与测距)
 ```bash
-curl -X POST http://127.0.0.1:8789/api/v4/mobile/attendance/check-in \
+curl -X POST https://v4.dutylix.com/api/v4/mobile/attendance/check-in \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <EMPLOYEE_TOKEN>" \
   -d '{
@@ -1262,14 +1262,14 @@ curl -X POST http://127.0.0.1:8789/api/v4/mobile/attendance/check-in \
 
 #### 3. 管理端确认发放薪资条 (关键发布动作)
 ```bash
-curl -X PATCH http://127.0.0.1:8789/api/v4/admin/payroll-results/501/confirm \
+curl -X PATCH https://v4.dutylix.com/api/v4/admin/payroll-results/501/confirm \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <ADMIN_TOKEN>"
 ```
 
 #### 4. 员工端签名确认工资条
 ```bash
-curl -X POST http://127.0.0.1:8789/api/v4/mobile/payroll-results/501/sign-off \
+curl -X POST https://v4.dutylix.com/api/v4/mobile/payroll-results/501/sign-off \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <EMPLOYEE_TOKEN>" \
   -d '{
