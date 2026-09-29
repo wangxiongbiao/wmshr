@@ -38,6 +38,7 @@ type ApiEmployee = {
   attendanceBonus?: number;
   socialSecurity?: number;
   mealAllowance?: number;
+  licenseFee?: number | null;
   serviceFeeRate?: number;
   currency: Employee["currency"];
   bankCardNumber?: string | null;
@@ -62,10 +63,10 @@ type EmployeeDetail = { employee: ApiEmployee };
 export type EmployeeAccount = { account: string; status: string; lastLoginAt?: string | null; passwordUpdatedAt?: string | null };
 
 const statusFromApi = (status: ApiEmployee["status"]): Employee["status"] =>
-  status === "resigned" ? "离职" : status === "on_leave" ? "休假" : "在职";
+  status === "resigned" ? "离职" : status === "on_leave" ? "休假" : status === "probation" ? "试用" : "在职";
 
 const statusToApi = (status: Employee["status"]): ApiEmployee["status"] =>
-  status === "离职" ? "resigned" : status === "休假" ? "on_leave" : "active";
+  status === "离职" ? "resigned" : status === "休假" ? "on_leave" : status === "试用" ? "probation" : "active";
 
 export function fromApiEmployee(employee: ApiEmployee): Employee {
   const isHourly = employee.salaryType === "hourly" || (!employee.fixedSalary && Boolean(employee.hourlyRate));
@@ -88,6 +89,7 @@ export function fromApiEmployee(employee: ApiEmployee): Employee {
     attendanceBonus: employee.attendanceBonus,
     socialSecurity: employee.socialSecurity,
     mealAllowanceDaily: employee.mealAllowance,
+    licenseFee: employee.licenseFee != null ? Number(employee.licenseFee) : 0,
     currency: employee.currency,
     joinDate: employee.joinDate,
     status: statusFromApi(employee.status),
@@ -143,6 +145,7 @@ function toApiEmployee(employee: Partial<Employee>) {
     attendanceBonus: Number(employee.attendanceBonus || 0),
     socialSecurity: Number(employee.socialSecurity || 0),
     mealAllowance: Number(employee.mealAllowanceDaily || 0),
+    licenseFee: Number(employee.licenseFee || 0),
     serviceFeeRate: Number(employee.dispatchCommissionRate || 0),
     currency: employee.currency,
     bankCardNumber: employee.bankCardNumber || null,
@@ -193,6 +196,10 @@ export async function updateEmployee(employee: Partial<Employee> & Pick<Employee
 
 export async function resignEmployee(id: number) {
   return fromApiEmployee((await request<EmployeeDetail>(`/api/v4/admin/employees/${id}/status`, { method: "PATCH", body: JSON.stringify({ targetStatus: "resigned" }) })).employee);
+}
+
+export async function deleteEmployee(id: number) {
+  return request<{ success: boolean; employee: ApiEmployee }>(`/api/v4/admin/employees/${id}`, { method: "DELETE" });
 }
 
 export async function fetchEmployeeAccount(id: number) {

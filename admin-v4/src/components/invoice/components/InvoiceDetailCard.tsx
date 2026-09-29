@@ -1,6 +1,6 @@
 ﻿import React from "react";
 import { Invoice, Language } from "../types";
-import { getInvoiceTrans, getInvoiceTypeLabel } from "../constants";
+import { getInvoiceTrans, getInvoiceTypeLabel, getCurrencyDisplayName } from "../constants";
 import { formatCurrency, cn } from "../../../lib/utils";
 
 interface InvoiceDetailCardProps {
@@ -76,20 +76,6 @@ export const InvoiceDetailCard: React.FC<InvoiceDetailCardProps> = ({ invoice, l
           <h1 className="text-lg md:text-xl font-extrabold text-indigo-950 tracking-tight font-sans">
             {getInvoiceTypeLabel(invoice.invoiceType, lang)}
           </h1>
-          <div className="text-[11px] mt-0.5 pt-1 border-t border-indigo-100 w-full flex flex-col items-end">
-            <div className="grid grid-cols-[auto_auto] gap-x-1.5 gap-y-0.5 text-left leading-snug">
-              <span className="text-slate-500 font-semibold">{getInvoiceTrans("doc_no_lbl", lang)}</span>
-              <div className="text-slate-500 flex items-center">
-                <span className="mr-1.5 font-semibold text-slate-500">:</span>
-                <span className="font-mono font-medium text-slate-700">{invoice.invoiceNo}</span>
-              </div>
-              <span className="text-slate-500 font-semibold">{getInvoiceTrans("date_lbl", lang)}</span>
-              <div className="text-slate-500 flex items-center">
-                <span className="mr-1.5 font-semibold text-slate-500">:</span>
-                <span className="font-medium text-slate-700">{invoice.issueDate}</span>
-              </div>
-            </div>
-          </div>
           {invoice.copyText && (
             <span className="inline-block text-[9px] font-extrabold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-sm border border-indigo-200 mt-1 uppercase tracking-wider">
               {invoice.copyText}
@@ -165,19 +151,34 @@ export const InvoiceDetailCard: React.FC<InvoiceDetailCardProps> = ({ invoice, l
         </div>
 
         {/* Invoice metadata columns on the right - 5 cols */}
-        <div className={`col-span-5 flex justify-end items-start ${invoice.customerName ? "pt-[28px]" : "pt-1.5"}`}>
-          <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-[11px] leading-snug">
+        <div className={`col-span-12 sm:col-span-5 md:col-span-4 flex justify-end items-start ${invoice.customerName ? "pt-1 sm:pt-[28px]" : "pt-1.5"}`}>
+          <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-[11px] leading-snug">
             <div className="text-slate-400 font-medium text-right whitespace-nowrap">
-              {getInvoiceTrans("due_date_lbl", lang)}{lang === "zh-CN" || lang === "zh-TW" ? "：" : ": "}
+              {getInvoiceTrans("doc_no_lbl", lang)}:
             </div>
-            <div className="font-bold text-slate-700 text-left">
+            <div className="font-mono font-bold text-slate-800 text-left">
+              {invoice.invoiceNo}
+            </div>
+
+            <div className="text-slate-400 font-medium text-right whitespace-nowrap">
+              {getInvoiceTrans("date_lbl", lang)}:
+            </div>
+            <div className="font-bold text-slate-800 text-left">
+              {invoice.issueDate}
+            </div>
+
+            <div className="text-slate-400 font-medium text-right whitespace-nowrap">
+              {getInvoiceTrans("due_date_lbl", lang)}:
+            </div>
+            <div className="font-bold text-slate-800 text-left">
               {invoice.dueDate || getInvoiceTrans("unlimited_lbl", lang)}
             </div>
+
             <div className="text-slate-400 font-medium text-right whitespace-nowrap">
-              {getInvoiceTrans("currency_lbl", lang)}{lang === "zh-CN" || lang === "zh-TW" ? "：" : ": "}
+              {getInvoiceTrans("currency_lbl", lang)}:
             </div>
-            <div className="font-bold text-slate-700 font-mono text-left">
-              {invoice.currency}
+            <div className="font-bold text-slate-800 text-left">
+              {getCurrencyDisplayName(invoice.currency, lang)}
             </div>
           </div>
         </div>

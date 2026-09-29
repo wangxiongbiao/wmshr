@@ -29,8 +29,23 @@ export const getCleanInvoiceType = (type: string): "vat" | "ordinary" | "proform
 };
 
 export const getInvoiceTypeLabel = (type: string, lang: Language) => {
-  const cleanType = getCleanInvoiceType(type);
-  return INVOICE_TYPE_TRANSLATIONS[cleanType][lang] || INVOICE_TYPE_TRANSLATIONS[cleanType]["zh-CN"];
+  if (!type || !type.trim()) return lang === "en" ? "Invoice" : "发票";
+  const trimmed = type.trim();
+  if (trimmed === "vat" || trimmed === "ordinary" || trimmed === "proforma") {
+    return INVOICE_TYPE_TRANSLATIONS[trimmed]?.[lang] || INVOICE_TYPE_TRANSLATIONS[trimmed]?.["zh-CN"] || trimmed;
+  }
+  return trimmed;
+};
+
+export const getCurrencyDisplayName = (currency: string, lang: Language): string => {
+  const code = (currency || "CNY").toUpperCase();
+  const names: Record<string, Record<Language, string>> = {
+    CNY: { "zh-CN": "CNY  中国人民币", "zh-TW": "CNY  中國人民幣", "en": "CNY  Chinese Yuan", "th": "CNY  หยวนจีน" },
+    THB: { "zh-CN": "THB  泰铢", "zh-TW": "THB  泰銖", "en": "THB  Thai Baht", "th": "THB  บาทไทย" },
+    USD: { "zh-CN": "USD  美元", "zh-TW": "USD  美元", "en": "USD  US Dollar", "th": "USD  ดอลลาร์สหรัฐ" },
+    EUR: { "zh-CN": "EUR  欧元", "zh-TW": "EUR  歐元", "en": "EUR  Euro", "th": "EUR  ยูโร" },
+  };
+  return names[code]?.[lang] || names[code]?.["zh-CN"] || code;
 };
 
 export const getInvoiceTypeColor = (type: string) => {

@@ -867,6 +867,9 @@ export function createAttendanceRouter({ express, supabase }) {
       if (!isWarehouseAllowed(req.authUser, emp.warehouse_code)) {
         return res.status(403).json({ error: "无权操作该仓库员工的请假" });
       }
+      if (emp.status === "resigned") {
+        return res.status(400).json({ error: "该员工已离职，无法申请请假" });
+      }
 
       const { data: conflicts } = await supabase
         .from("leave_requests")

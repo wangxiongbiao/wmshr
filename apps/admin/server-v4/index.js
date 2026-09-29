@@ -38,9 +38,9 @@ const directDbPool = DATABASE_URL ? new pg.Pool({
   max: 10,
   min: 2,
   idleTimeoutMillis: 300_000,
-  connectionTimeoutMillis: 1_500,
+  connectionTimeoutMillis: 15_000,
   keepAlive: true,
-  ssl: DATABASE_URL.includes("supabase.co") ? { rejectUnauthorized: false } : undefined
+  ssl: DATABASE_URL.includes("supabase") ? { rejectUnauthorized: false } : undefined
 }) : null;
 if (directDbPool) {
   directDbPool.on("error", (err) => {

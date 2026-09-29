@@ -33,7 +33,7 @@ export type CountryCode = 'MM' | 'TH' | 'CN' | 'VN' | 'KH';
 
 export type AttendanceType = 'normal' | 'late' | 'early' | 'absent' | 'leave' | 'sick_leave' | 'overtime' | 'manual_adjusted' | 'checked_in' | 'pending' | 'exception';
 
-export type EmployeeStatus = '在职' | '离职' | '休假';
+export type EmployeeStatus = '在职' | '试用' | '休假' | '离职';
 
 export type CurrencyCode = 'THB' | 'USD' | 'MYR' | 'IDR' | 'CNY' | 'PHP' | 'VND' | 'KRW' | 'JPY' | 'HKD' | 'MOP' | 'SGD' | 'BND' | 'GBP' | 'EUR' | 'EGP' | 'OMR' | 'AED' | 'MMK';
 
@@ -51,6 +51,7 @@ export interface AppConfig {
   companyLat?: number;
   companyLng?: number;
   companyAddress?: string;
+  companyName?: string;
 }
 
 export interface Employee {
@@ -86,6 +87,7 @@ export interface Employee {
   otMultiplierWeekend?: number;
   otMultiplierHoliday?: number;
   mealAllowanceDaily?: number;
+  licenseFee?: number; // 证书补贴/岗位资质费
   permissions?: string[]; // 员工所拥有的具体后台权限
   bankCardNumber?: string; // 发工资的银行卡号
   bankName?: string; // 银行名称
@@ -157,6 +159,7 @@ export interface PayrollSummary {
   basePay: number;
   otPay: number;
   mealAllowance: number;
+  licenseFee?: number;
   gross: number;
   net: number;
   serviceFee?: number;

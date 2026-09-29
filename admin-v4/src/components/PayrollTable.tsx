@@ -11,6 +11,7 @@ import { getTranslation, Language } from "../lib/i18n";
 import { Pagination } from "./Pagination";
 import { TableHorizontalScroller } from "./TableHorizontalScroller";
 import { useStickyMirrorHeader } from "../lib/useStickyMirrorHeader";
+import { exportPayrollExcel } from "../lib/exportPayrollExcel";
 
 interface PayrollTableProps {
   employees: Employee[];
@@ -289,7 +290,8 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
       
       const bonus = workingDays > 0 ? Number(emp.attendanceBonus || 0) : 0;
       const ssSec = workingDays > 0 ? Number(emp.socialSecurity || 0) : 0;
-      const gross = Number(basePay || 0) + Number(otPay || 0) + bonus + Number(mealAllowance || 0);
+      const licenseVal = workingDays > 0 ? Number(emp.licenseFee || 0) : 0;
+      const gross = Number(basePay || 0) + Number(otPay || 0) + bonus + Number(mealAllowance || 0) + licenseVal;
       const taxRate = typeof config?.taxRate === "number" && !isNaN(config.taxRate) ? config.taxRate : 0.05;
       const tax = (Number(basePay || 0) + Number(otPay || 0) + bonus) * taxRate;
       
@@ -306,6 +308,7 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
         basePay, 
         otPay, 
         mealAllowance,
+        licenseFee: licenseVal,
         gross, 
         net,
         serviceFee,
@@ -565,7 +568,29 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
     setSelectedPayslipEmp(null);
   };
 
-  // Export current month payroll to CSV
+  const [isExporting, setIsExporting] = useState<boolean>(false);
+
+  // Export current month payroll to standardized Excel (.xlsx) matching SHUOMAX template
+  const handleExportExcel = async () => {
+    try {
+      setIsExporting(true);
+      await exportPayrollExcel({
+        monthStr: selectedMonth,
+        payrollRows: payrollSummary,
+        config,
+        companyName: "( SHUOMAX Co., LTD. )",
+        approverName: "ZHANYINGLONG"
+      });
+      addToast?.(`成功导出【${selectedMonth}】薪资汇总表 (Excel)`, "success");
+    } catch (err: any) {
+      console.error("Export Excel error:", err);
+      addToast?.(err?.message || "导出薪资报表失败", "error");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  // Export current month payroll to CSV (fallback)
   const handleExportCSV = () => {
     const headers = [
       "年月", "员工", "员工编号", "所属部门", "职位", "计薪方式", 
@@ -810,11 +835,13 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
           </button>
 
           <button
-            onClick={handleExportCSV}
-            className="px-3 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50 transition flex items-center gap-1.5 shadow-sm ml-auto sm:ml-0"
+            onClick={handleExportExcel}
+            disabled={isExporting}
+            className="px-3 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300 transition flex items-center gap-1.5 shadow-2xs ml-auto sm:ml-0 cursor-pointer disabled:opacity-50"
+            title="导出为标准Excel工资汇总表"
           >
-            <Download className="w-4 h-4 text-emerald-500" />
-            <span>导出CSV表</span>
+            <Download className={cn("w-4 h-4 text-emerald-600", isExporting && "animate-bounce")} />
+            <span>{isExporting ? "正在导出..." : "导出工资表 (Excel)"}</span>
           </button>
         </div>
       </div>

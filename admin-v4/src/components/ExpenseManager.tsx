@@ -23,7 +23,8 @@ import { Label } from "./ui/label";
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { TableHorizontalScroller } from "./TableHorizontalScroller";
 import { useStickyMirrorHeader } from "../lib/useStickyMirrorHeader";
-import { ExpenseRecord, Employee, AppConfig, AttendanceRecord, HolidayRecord } from "../types";
+import { ExpenseRecord, Employee, AppConfig, AttendanceRecord, HolidayRecord, PayrollSummary } from "../types";
+import { exportPayrollExcel } from "../lib/exportPayrollExcel";
 import { 
   FileText, Plus, Search, Check, X, Eye, Edit, Trash2, CheckCircle, 
   AlertCircle, Calendar, Wallet, CreditCard, ChevronRight, ChevronDown, User, 
@@ -182,7 +183,7 @@ export function ExpenseManager({ employees, addToast, attendance = [], config, h
       if (savedPayouts) setPayouts(JSON.parse(savedPayouts));
       const savedSigs = localStorage.getItem("payroll_employee_signatures");
       if (savedSigs) setSignatures(JSON.parse(savedSigs));
-      addToast("费用与工资列表已同步刷新", "success");
+      addToast("费用与报销列表已同步刷新", "success");
     } catch (err: any) {
       addToast(err?.message || "刷新失败", "error");
     } finally {
@@ -994,7 +995,80 @@ export function ExpenseManager({ employees, addToast, attendance = [], config, h
     };
   }, [allExpenses, monthFilter, activeCurrency]);
 
-    // Export current selected or current month payroll to CSV matching requested screenshot
+    // Export current selected or current month payroll to Excel (.xlsx) matching SHUOMAX template
+  const handleExportSalaryExcel = async () => {
+    if (!config) {
+      addToast("公司配置数据加载失败，无法导出工资汇总表");
+      return;
+    }
+    const targetMonth = monthFilter === "all" ? new Date().toISOString().slice(0, 7) : monthFilter;
+
+    // Filter attendance
+    const filteredAttendance = attendance.filter(rec => rec.date && rec.date.startsWith(targetMonth));
+
+    const payrollRows: PayrollSummary[] = employees.map(emp => {
+      let valid = 0, ot = 0, otPay = 0, basePay = 0;
+      let workingDays = 0;
+      let otCount = 0;
+      let mealAllowance = 0;
+
+      filteredAttendance.filter(r => String(r.empId) === String(emp.id)).forEach(rec => {
+        const d = calcAttendanceDetails(rec, config);
+        valid += d.valid;
+        ot += d.ot;
+        otPay += calcOvertimePay(emp, rec.date, d.ot, config, holidays).amount;
+
+        const isAbsentOrLeave = emp.status === '休假' || rec.type === 'absent' || rec.type === 'leave';
+        if (!isAbsentOrLeave) {
+          workingDays += 1;
+          mealAllowance += Number(emp.mealAllowanceDaily || 0);
+
+          const hasBaseWage = emp.baseMonthlyWage !== undefined && emp.baseMonthlyWage !== null && emp.baseMonthlyWage > 0;
+          const hasDailyWage = emp.dailyWage !== undefined && emp.dailyWage !== null && emp.dailyWage > 0;
+          if (hasBaseWage) {
+            basePay += emp.baseMonthlyWage / 30;
+          } else if (hasDailyWage) {
+            basePay += (d.valid - d.ot) * (emp.dailyWage / config.standardHours);
+          } else {
+            basePay += (d.valid - d.ot) * (emp.hourlyRate ?? 0);
+          }
+        }
+      });
+
+      const bonus = workingDays > 0 ? Number(emp.attendanceBonus || 0) : 0;
+      const licenseVal = workingDays > 0 ? Number(emp.licenseFee || 0) : 0;
+      const gross = Number(basePay || 0) + Number(otPay || 0) + bonus + Number(mealAllowance || 0) + licenseVal;
+
+      return {
+        emp,
+        valid,
+        ot,
+        basePay,
+        otPay,
+        mealAllowance,
+        licenseFee: licenseVal,
+        gross,
+        net: gross,
+        workingDays,
+        otCount
+      };
+    });
+
+    try {
+      await exportPayrollExcel({
+        monthStr: targetMonth,
+        payrollRows,
+        config,
+        companyName: "( SHUOMAX Co., LTD. )",
+        approverName: "ZHANYINGLONG"
+      });
+      addToast(`工资列表报表 (Excel) 已成功导出 (${targetMonth})`, "success");
+    } catch (err: any) {
+      console.error("Export Excel error in ExpenseManager:", err);
+      addToast(err?.message || "导出工资表失败", "error");
+    }
+  };
+
   const handleExportSalaryCSV = () => {
     if (!config) {
       addToast("公司配置数据加载失败，无法导出工资汇总表");
@@ -1066,7 +1140,7 @@ export function ExpenseManager({ employees, addToast, attendance = [], config, h
       });
 
       const incentiveVal = emp.attendanceBonus ?? 0;
-      const licenseVal = 0;
+      const licenseVal = workingDays > 0 ? Number(emp.licenseFee || 0) : 0;
       const allowancesVal = mealAllowance;
       const otVal = otPay;
       const totalIncomesVal = basePay + incentiveVal + licenseVal + allowancesVal + otVal;
@@ -1173,7 +1247,7 @@ export function ExpenseManager({ employees, addToast, attendance = [], config, h
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    addToast(`工资列表报表已成功导出 (${targetMonth})`);
+    addToast(`报销列表报表已成功导出 (${targetMonth})`);
   };
 
   // Filtered list
@@ -1635,7 +1709,7 @@ export function ExpenseManager({ employees, addToast, attendance = [], config, h
               <span>类型配置</span>
             </Button>
             <Button
-              onClick={handleExportSalaryCSV}
+              onClick={handleExportSalaryExcel}
               id="btn-export-payroll-csv"
               type="button"
               variant="outline"

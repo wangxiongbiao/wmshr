@@ -50,7 +50,7 @@ export function Sidebar({ activeTab, onTabChange, adminUser, hasPermission, lang
       title: "财务管理",
       icon: Coins,
       items: [
-        { id: 'expenses' as TabId, label: '工资列表', icon: Receipt, permission: "expenses_view" },
+        { id: 'expenses' as TabId, label: '报销列表', icon: Receipt, permission: "expenses_view" },
         { id: 'invoices' as TabId, label: '发票列表', icon: FileText, permission: "expenses_view" },
         { id: 'express' as TabId, label: '快递列表', icon: Truck, permission: "expenses_view" },
       ]

@@ -501,12 +501,14 @@ export function EmployeeList({
                       ? (lang === 'en' ? 'Female' : lang === 'th' ? 'หญิง' : lang === 'zh-TW' ? '女' : '女') 
                       : (lang === 'en' ? 'Male' : lang === 'th' ? 'ชาย' : lang === 'zh-TW' ? '男' : '男')}
                   </Badge>
-                  <Badge variant={emp.status === '在职' ? "success" : (emp.status === '离职' ? "destructive" : "secondary")} className="text-[10px]">
+                  <Badge variant={emp.status === '在职' ? "success" : emp.status === '离职' ? "destructive" : emp.status === '试用' ? "warning" : "secondary"} className="text-[10px]">
                     {emp.status === '在职' 
                       ? (lang === 'en' ? 'Active' : lang === 'th' ? 'ทำงานอยู่' : lang === 'zh-TW' ? '在職' : '在职')
                       : emp.status === '离职'
                         ? (lang === 'en' ? 'Resigned' : lang === 'th' ? 'ลาออก' : lang === 'zh-TW' ? '離職' : '离职')
-                        : (lang === 'en' ? 'On Leave' : lang === 'th' ? 'ลาหยุด' : lang === 'zh-TW' ? '休假' : '休假')
+                        : emp.status === '试用'
+                          ? (lang === 'en' ? 'Probation' : lang === 'th' ? 'ทดลองงาน' : lang === 'zh-TW' ? '試用' : '试用')
+                          : (lang === 'en' ? 'On Leave' : lang === 'th' ? 'ลาหยุด' : lang === 'zh-TW' ? '休假' : '休假')
                     }
                   </Badge>
                 </div>
@@ -1140,13 +1142,15 @@ export function EmployeeList({
                   </span>
                   <span className={cn(
                     "text-xs px-2.5 py-0.5 rounded-full font-bold",
-                    selectedDetailEmployee.status === '在职' ? 'bg-green-100 text-green-700' : (selectedDetailEmployee.status === '离职' ? 'bg-rose-100 text-rose-700 border border-rose-200' : 'bg-blue-100 text-blue-700')
+                    selectedDetailEmployee.status === '在职' ? 'bg-green-100 text-green-700' : selectedDetailEmployee.status === '离职' ? 'bg-rose-100 text-rose-700 border border-rose-200' : selectedDetailEmployee.status === '试用' ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-blue-100 text-blue-700'
                   )}>
                     {selectedDetailEmployee.status === '在职' 
                       ? (lang === 'en' ? 'Active' : lang === 'th' ? 'ทำงานอยู่' : '在职')
                       : selectedDetailEmployee.status === '离职'
                         ? (lang === 'en' ? 'Resigned' : lang === 'th' ? 'ลาออก' : '离职')
-                        : (lang === 'en' ? 'On Leave' : lang === 'th' ? 'ลาหยุด' : '休假')
+                        : selectedDetailEmployee.status === '试用'
+                          ? (lang === 'en' ? 'Probation' : lang === 'th' ? 'ทดลองงาน' : '试用')
+                          : (lang === 'en' ? 'On Leave' : lang === 'th' ? 'ลาหยุด' : '休假')
                     }
                   </span>
                 </div>
@@ -1241,6 +1245,16 @@ export function EmployeeList({
                     <span className="font-bold text-amber-600 text-sm block mt-1 font-mono">
                       {selectedDetailEmployee.mealAllowanceDaily !== undefined && selectedDetailEmployee.mealAllowanceDaily > 0 
                         ? formatCurrency(selectedDetailEmployee.mealAllowanceDaily, selectedDetailEmployee.currency) 
+                        : '-'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 font-medium block">
+                      {lang === 'en' ? "License Fee" : lang === 'th' ? "ค่าใบอนุญาต" : "证书/技能补贴"}
+                    </span>
+                    <span className="font-bold text-sky-600 text-sm block mt-1 font-mono">
+                      {selectedDetailEmployee.licenseFee !== undefined && selectedDetailEmployee.licenseFee > 0 
+                        ? formatCurrency(selectedDetailEmployee.licenseFee, selectedDetailEmployee.currency) 
                         : '-'}
                     </span>
                   </div>

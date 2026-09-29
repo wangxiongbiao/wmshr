@@ -4,7 +4,7 @@
  */
 
 import { X, Upload, Trash2, Shield, Key, Lock, Info, UserMinus, Loader2, AlertCircle } from "lucide-react";
-import { AppConfig, Employee, AttendanceRecord, CurrencyCode, CountryCode, Gender } from "../types";
+import { AppConfig, Employee, AttendanceRecord, CurrencyCode, CountryCode, Gender, EmployeeStatus } from "../types";
 import { cn } from "../lib/utils";
 import React, { useState, useEffect, useRef } from "react";
 import { getTranslation, Language } from "../lib/i18n";
@@ -332,7 +332,7 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
     hourlyRate: undefined, baseMonthlyWage: undefined, dailyWage: undefined, attendanceBonus: undefined, socialSecurity: undefined, currency: "THB",
     joinDate: new Date().toISOString().split("T")[0], status: "在职", photo: null, sourceType: "自招", dispatchCommissionRate: undefined,
     otRuleType: "fixed", otFixedRate: undefined, otBaseRate: undefined, otMultiplierWorkday: 1.5, otMultiplierWeekend: 2.0, otMultiplierHoliday: 3.0,
-    mealAllowanceDaily: undefined, idCard: "", username: "", password: ""
+    mealAllowanceDaily: undefined, licenseFee: undefined, idCard: "", username: "", password: ""
   });
   const [errorMsg, setErrorMsg] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -360,6 +360,7 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
       if (employee) {
         setFormData({
           ...employee,
+          status: employee.status || "在职",
           warehouseCode: employee.warehouseCode || defaultWarehouseCode || "TH",
           sourceType: employee.sourceType || "自招",
           otRuleType: employee.otRuleType || "fixed",
@@ -368,6 +369,7 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
           otMultiplierHoliday: employee.otMultiplierHoliday ?? 3.0,
           permissions: employee.permissions || [],
           idCard: employee.idCard || "",
+          licenseFee: employee.licenseFee !== undefined && employee.licenseFee !== null ? Number(employee.licenseFee) : undefined,
           password: ""
         });
       } else {
@@ -378,7 +380,7 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
           joinDate: new Date().toISOString().split("T")[0], status: "在职", photo: null, username: "", password: randomPass,
           sourceType: "自招", dispatchCommissionRate: undefined, otRuleType: "fixed", otFixedRate: undefined, otBaseRate: undefined,
           otMultiplierWorkday: 1.5, otMultiplierWeekend: 2.0, otMultiplierHoliday: 3.0,
-          mealAllowanceDaily: undefined, permissions: [], idCard: ""
+          mealAllowanceDaily: undefined, licenseFee: undefined, permissions: [], idCard: ""
         });
       }
     } else {
@@ -432,7 +434,8 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
       name === "otMultiplierWorkday" ||
       name === "otMultiplierWeekend" ||
       name === "otMultiplierHoliday" ||
-      name === "mealAllowanceDaily"
+      name === "mealAllowanceDaily" ||
+      name === "licenseFee"
     ) {
       finalValue = value === "" ? undefined : parseFloat(value);
       if (finalValue !== undefined && isNaN(finalValue)) {
@@ -576,6 +579,7 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
           setIsSubmitting(true);
           await onSave({
             ...formData,
+            status: formData.status || "在职",
             photo: formData.photo ?? null,
             gender: formData.gender || "female",
             username: finalUsername,
@@ -689,9 +693,23 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
                 </div>
                 <div>
                   <Label className="block text-xs font-semibold text-slate-600 mb-1.5">
-                    {lang === "en" ? "Phone Number" : lang === "th" ? "เบอร์โทรศัพท์" : lang === "zh-TW" ? "聯繫電話" : "联系电话"}
+                    {getTranslation("modal_employee_status", lang)} <span className="text-red-500">*</span>
                   </Label>
-                  <Input type="text" name="phone" value={formData.phone || ""} onChange={handleChange} className="bg-white text-slate-700 font-medium" placeholder={lang === "en" ? "e.g. 0812345678" : lang === "th" ? "เช่น 0812345678" : lang === "zh-TW" ? "例如：0812345678" : "如：0812345678"} />
+                  <Select 
+                    name="status" 
+                    value={formData.status || "在职"} 
+                    onValueChange={(val) => setFormData(prev => ({ ...prev, status: val as EmployeeStatus }))}
+                  >
+                    <SelectTrigger className="w-full bg-white font-medium text-slate-700">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="在职">{lang === "en" ? "Active" : lang === "th" ? "ทำงานอยู่" : lang === "zh-TW" ? "在職" : "在职"}</SelectItem>
+                      <SelectItem value="试用">{lang === "en" ? "Probation" : lang === "th" ? "ทดลองงาน" : lang === "zh-TW" ? "試用" : "试用"}</SelectItem>
+                      <SelectItem value="休假">{lang === "en" ? "On Leave" : lang === "th" ? "ลาหยุด" : lang === "zh-TW" ? "休假" : "休假"}</SelectItem>
+                      <SelectItem value="离职">{lang === "en" ? "Resigned" : lang === "th" ? "ลาออก" : lang === "zh-TW" ? "離職" : "离职"}</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div>
                   <Label className="block text-xs font-semibold text-slate-600 mb-1.5">
@@ -783,6 +801,18 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
               </div>
 
               {/* 3个平行薪资输入项（时薪、固定日薪、固定月薪） */}
+              <div className="col-span-2 pt-1 border-t border-slate-200/60">
+                <span className="text-xs font-semibold text-slate-700 flex items-center gap-1">
+                  <span className="text-red-500 font-bold">*</span>
+                  {lang === "en" 
+                    ? "Wage Standard (Enter at least one: Hourly / Daily / Monthly)" 
+                    : lang === "th" 
+                      ? "เกณฑ์ค่าจ้าง (ระบุอย่างน้อยหนึ่งรายการ: รายชั่วโมง / รายวัน / รายเดือน)" 
+                      : lang === "zh-TW" 
+                        ? "薪資標準（時薪 / 固定日薪 / 固定月薪 至少填一項）" 
+                        : "薪资标准（时薪 / 固定日薪 / 固定月薪 至少填一项）"}
+                </span>
+              </div>
               <div>
                 <Label className="block text-xs font-semibold text-slate-600 mb-1.5">
                   {lang === "en" ? "Hourly Rate (optional)" : lang === "th" ? "อัตราค่าจ้างรายชั่วโมง (ถ้ามี)" : lang === "zh-TW" ? "時薪 (如不輸，則根據日薪或月薪計)" : "时薪 (如不输，则根据日薪或月薪计)"}
@@ -861,6 +891,13 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
                   {getTranslation("modal_employee_meal_allowance", lang)}
                 </Label>
                 <Input type="number" name="mealAllowanceDaily" step="1" value={formData.mealAllowanceDaily !== undefined ? formData.mealAllowanceDaily : ""} onChange={handleChange} className="bg-white font-medium text-slate-900" placeholder={lang === "en" ? "Default: 0" : lang === "th" ? "เริ่มต้น: 0" : lang === "zh-TW" ? "不填則默認為: 0" : "不填则默认为: 0"} />
+              </div>
+
+              <div>
+                <Label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                  {getTranslation("modal_employee_license_fee", lang)}
+                </Label>
+                <Input type="number" name="licenseFee" step="1" min="0" value={formData.licenseFee !== undefined ? formData.licenseFee : ""} onChange={handleChange} className="bg-white font-medium text-slate-900" placeholder={lang === "en" ? "Default: 0" : lang === "th" ? "เริ่มต้น: 0" : lang === "zh-TW" ? "不填則默認為: 0" : "不填则默认为: 0"} />
               </div>
 
               {/* 加班费计算规则设置 */}
@@ -1227,7 +1264,21 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
     </Modal>
   );
 }
-export function DeleteModal({ isOpen, onClose, onConfirm, employeeName, lang = "zh-CN" }: { isOpen: boolean, onClose: () => void, onConfirm: () => Promise<void> | void, employeeName: string, lang?: Language }) {
+export function DeleteModal({ 
+  isOpen, 
+  onClose, 
+  onConfirm, 
+  employeeName, 
+  isResigned = false, 
+  lang = "zh-CN" 
+}: { 
+  isOpen: boolean; 
+  onClose: () => void; 
+  onConfirm: () => Promise<void> | void; 
+  employeeName: string; 
+  isResigned?: boolean; 
+  lang?: Language; 
+}) {
   const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
@@ -1248,29 +1299,23 @@ export function DeleteModal({ isOpen, onClose, onConfirm, employeeName, lang = "
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open && !isDeleting) onClose(); }}>
       <DialogContent className="max-w-md p-6 text-center sm:rounded-2xl">
         <DialogHeader className="flex flex-col items-center">
-          <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center text-amber-600 mx-auto mb-4">
-            <UserMinus className="w-8 h-8" />
+          <div className={cn(
+            "w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-3",
+            isResigned ? "bg-rose-100 text-rose-600" : "bg-amber-100 text-amber-600"
+          )}>
+            {isResigned ? <Trash2 className="w-7 h-7" /> : <UserMinus className="w-7 h-7" />}
           </div>
-          <DialogTitle className="text-lg font-bold text-slate-800 mb-2 text-center">
-            {getTranslation("modal_delete_confirm_title", lang)}
+          <DialogTitle className="text-base font-bold text-slate-800 text-center">
+            {isResigned ? `确认删除员工【${employeeName}】？` : `确认将员工【${employeeName}】办理离职？`}
           </DialogTitle>
-          <DialogDescription className="text-sm text-slate-500 mb-4 leading-relaxed text-center">
-            {lang === 'en' 
-              ? `Are you sure you want to mark ${employeeName} as resigned? Historical attendance logs, work hours, and payroll records will remain securely archived in the system.`
-              : lang === 'th'
-                ? `คุณแน่ใจหรือไม่ว่าต้องการเปลี่ยนสถานะของ ${employeeName} เป็นลาออก? ประวัติการทำงาน เวลาเข้างาน และเงินเดือนทั้งหมดจะถูกเก็บถาวรในหมวดพนักงานลาออกอย่างปลอดภัย`
-                : lang === 'zh-TW'
-                  ? `您確定要將員工 ${employeeName} 辦理離職嗎？系統將完整保留該員工的歷史檔案、考勤打卡與薪資明細，可在「離職員工」列表中隨時查閱。`
-                  : `您确定要将员工 ${employeeName} 办理离职吗？系统将完整保留该员工的系统档案、考勤打卡与薪资明细，可在「离职员工」列表中随时查阅。`}
-          </DialogDescription>
         </DialogHeader>
-        <DialogFooter className="flex flex-row gap-3 justify-center sm:justify-center">
+        <DialogFooter className="flex flex-row gap-3 justify-center sm:justify-center pt-2">
           <Button 
             type="button" 
             variant="outline"
             onClick={onClose} 
             disabled={isDeleting}
-            className="rounded-xl px-5"
+            className="rounded-xl px-5 h-9 text-xs"
           >
             {lang === 'en' ? "Cancel" : lang === 'th' ? "ยกเลิก" : lang === 'zh-TW' ? "取消" : "取消"}
           </Button>
@@ -1278,12 +1323,17 @@ export function DeleteModal({ isOpen, onClose, onConfirm, employeeName, lang = "
             type="button" 
             onClick={handleConfirm} 
             disabled={isDeleting}
-            className="rounded-xl px-5 bg-amber-600 hover:bg-amber-700 text-white font-bold shadow-md flex items-center justify-center gap-2"
+            className={cn(
+              "rounded-xl px-5 h-9 text-xs font-bold text-white shadow-md flex items-center justify-center gap-2",
+              isResigned 
+                ? "bg-rose-600 hover:bg-rose-700" 
+                : "bg-amber-600 hover:bg-amber-700"
+            )}
           >
-            {isDeleting && <Loader2 className="w-4 h-4 animate-spin" />}
+            {isDeleting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
             {isDeleting 
-              ? (lang === 'en' ? "Processing..." : lang === 'th' ? "กำลังดำเนินการ..." : lang === 'zh-TW' ? "處理中..." : "处理中...") 
-              : getTranslation("modal_delete_btn_confirm", lang)}
+              ? (lang === 'en' ? "Processing..." : lang === 'th' ? "กำลังดำเนินการ..." : "处理中...") 
+              : (isResigned ? "确认删除" : "确认离职")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1551,11 +1601,24 @@ export function AttendanceAdjustmentModal({
     }
   }, [isManual, matchedExisting, autoFilledForDate]);
 
+  // 仅在职员工可新增考勤
+  const activeEmployees = React.useMemo(() => {
+    const list = employees.filter(e => e.status === '在职' || (e.status as any) === 'active' || e.status === '试用' || (e.status as any) === 'probation');
+    if (list.length > 0) return list;
+    return employees.filter(e => e.status !== '离职' && (e.status as any) !== 'resigned');
+  }, [employees]);
+
+  useEffect(() => {
+    if (isManual && activeEmployees.length > 0 && (!formData.empId || !activeEmployees.some(e => e.id === Number(formData.empId)))) {
+      setFormData(prev => ({ ...prev, empId: activeEmployees[0].id }));
+    }
+  }, [isManual, activeEmployees, formData.empId]);
+
   // Lifecycle boundary validations
   const todayStr = React.useMemo(() => new Date().toISOString().slice(0, 10), []);
   const isFutureDate = Boolean(formData.date && formData.date > todayStr && formData.type !== 'leave');
   const isBeforeJoinDate = Boolean(emp?.joinDate && formData.date && formData.date < emp.joinDate);
-  const isResignedEmp = emp?.status === '离职';
+  const isResignedEmp = emp?.status === '离职' || (emp?.status as any) === 'resigned';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1650,9 +1713,12 @@ export function AttendanceAdjustmentModal({
           </div>
         ) : (
           <div className="space-y-1">
-            <label className="block text-xs font-semibold text-slate-500 uppercase">
-              {lang === 'en' ? "Select Employee" : lang === 'th' ? "เลือกพนักงาน" : lang === 'zh-TW' ? "選擇員工" : "选择员工"} <span className="text-red-500">*</span>
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-semibold text-slate-500 uppercase">
+                {lang === 'en' ? "Select Employee" : lang === 'th' ? "เลือกพนักงาน" : lang === 'zh-TW' ? "選擇員工" : "选择员工"} <span className="text-red-500">*</span>
+              </label>
+              <span className="text-[10px] text-slate-400">仅限在职员工 ({activeEmployees.length}人)</span>
+            </div>
             <select
               name="empId"
               value={formData.empId || ''}
@@ -1660,10 +1726,10 @@ export function AttendanceAdjustmentModal({
               required
               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-brand-500 outline-none text-slate-800 font-medium"
             >
-              <option value="">{lang === 'en' ? "-- Select Employee --" : lang === 'th' ? "-- เลือกพนักงาน --" : lang === 'zh-TW' ? "-- 請選擇員工 --" : "-- 请选择员工 --"}</option>
-              {employees.map((e) => (
+              <option value="">{activeEmployees.length > 0 ? (lang === 'en' ? "-- Select Active Employee --" : lang === 'th' ? "-- เลือกพนักงาน --" : lang === 'zh-TW' ? "-- 請選擇在職員工 --" : "-- 请选择在职员工 --") : (lang === 'en' ? "-- No Active Employees --" : "-- 无在职员工 --")}</option>
+              {activeEmployees.map((e) => (
                 <option key={e.id} value={e.id}>
-                  {e.name} ({e.dept || '无区域'} · {e.role || '无职位'}) {e.status === '离职' ? '(已离职)' : ''}
+                  {e.name} ({e.dept || '无区域'} · {e.role || '无职位'})
                 </option>
               ))}
             </select>

@@ -24,7 +24,7 @@ import { InvoiceManager } from "./components/InvoiceManager";
 import { ExpressManager } from "./components/ExpressManager";
 import { Login, CONTINENTS } from "./components/Login";
 import { TabId, Employee, AttendanceRecord, AppConfig, GoodsRecord, Customer, Product, CustomerOrder, HolidayRecord, LeaveRequest, AdminUser } from "./types";
-import { createEmployee, fetchEmployeePermissions, fetchEmployees, resignEmployee, resetEmployeePassword, updateEmployee } from "./lib/employeeApi";
+import { createEmployee, fetchEmployeePermissions, fetchEmployees, resignEmployee, deleteEmployee, resetEmployeePassword, updateEmployee } from "./lib/employeeApi";
 import { createAttendanceRecord, updateAttendanceRecord, updateAttendanceConfig, fetchAttendanceConfig, fetchAttendanceRecords, fetchLeaveRequests, fetchHolidays, updateHolidays } from "./lib/attendanceApi";
 import { INITIAL_CONFIG, INITIAL_EMPLOYEES, INITIAL_ATTENDANCE } from "./constants";
 import { motion, AnimatePresence } from "motion/react";
@@ -413,15 +413,23 @@ export default function App() {
 
   const handleConfirmDelete = async () => {
     if (deletingEmployee) {
+      const isResigned = deletingEmployee.status === '离职' || (deletingEmployee.status as any) === 'resigned';
       try {
-        const resigned = await resignEmployee(deletingEmployee.id);
-        setEmployees(prev => prev.map(e => e.id === resigned.id ? resigned : e));
-        setEmployeeReloadKey(k => k + 1);
-        addToast("员工已转为离职，历史记录已保留");
+        if (isResigned) {
+          await deleteEmployee(deletingEmployee.id);
+          setEmployees(prev => prev.filter(e => e.id !== deletingEmployee.id));
+          setEmployeeReloadKey(k => k + 1);
+          addToast("员工已删除");
+        } else {
+          const resigned = await resignEmployee(deletingEmployee.id);
+          setEmployees(prev => prev.map(e => e.id === resigned.id ? resigned : e));
+          setEmployeeReloadKey(k => k + 1);
+          addToast("员工已转为离职");
+        }
         setIsDeleteModalOpen(false);
         setDeletingEmployee(null);
       } catch (error) {
-        addToast(error instanceof Error ? error.message : "员工离职操作失败", "error");
+        addToast(error instanceof Error ? error.message : "操作失败", "error");
         throw error;
       }
     }
@@ -626,8 +634,13 @@ export default function App() {
               }
               if (empId && date) {
                 const emp = employees.find(e => e.id === empId);
-                const isLeave = emp?.status === "休假";
+                const isResigned = emp?.status === '离职' || (emp?.status as any) === 'resigned';
                 const existing = attendance.find(r => Number(r.empId) === Number(empId) && r.date === date);
+                if (!existing && isResigned) {
+                  addToast("该员工已离职，无法新增或补录考勤", "error");
+                  return;
+                }
+                const isLeave = emp?.status === "休假";
                 const newTempRecord: AttendanceRecord = existing || {
                   id: `new-${empId}-${date}`,
                   empId: empId,
@@ -641,7 +654,9 @@ export default function App() {
                 setIsAttAdjustModalOpen(true);
                 return;
               }
-              const defaultEmpId = employees[0]?.id || 0;
+              const activeList = employees.filter(e => e.status === '在职' || (e.status as any) === 'active' || e.status === '试用' || (e.status as any) === 'probation');
+              const activeEmployees = activeList.length > 0 ? activeList : employees.filter(e => e.status !== '离职' && (e.status as any) !== 'resigned');
+              const defaultEmpId = activeEmployees[0]?.id || 0;
               const defaultDate = new Date().toISOString().split("T")[0];
               const newTempRecord: AttendanceRecord = {
                 id: `new-manual`,
@@ -853,6 +868,7 @@ export default function App() {
         onClose={() => setIsDeleteModalOpen(false)}
         onConfirm={handleConfirmDelete}
         employeeName={deletingEmployee?.name || ""}
+        isResigned={deletingEmployee?.status === '离职' || (deletingEmployee?.status as any) === 'resigned'}
         lang={lang}
       />
 

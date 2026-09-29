@@ -1,7 +1,7 @@
 import { hashPassword } from "../server/auth-v4.js";
 
 const DEFAULT_EMPLOYEE_PASSWORD = "Aa123456";
-const EMPLOYEE_COLUMNS = "id, employee_no, name, nickname, gender, warehouse_code, nationality, country, phone, role, dept, join_date, status, attendance_rule_id, salary_type, hourly_rate, fixed_salary, daily_wage, overtime_hourly_fee, overtime_rule_enabled, ot_rule_type, ot_base_rate, ot_multiplier_workday, ot_multiplier_weekend, ot_multiplier_holiday, is_dispatch_personnel, attendance_bonus, social_security, meal_allowance, service_fee_rate, currency, bank_card_number, bank_name, id_card, photo, is_deleted, updated_at";
+const EMPLOYEE_COLUMNS = "id, employee_no, name, nickname, gender, warehouse_code, nationality, country, phone, role, dept, join_date, status, attendance_rule_id, salary_type, hourly_rate, fixed_salary, daily_wage, overtime_hourly_fee, overtime_rule_enabled, ot_rule_type, ot_base_rate, ot_multiplier_workday, ot_multiplier_weekend, ot_multiplier_holiday, is_dispatch_personnel, attendance_bonus, social_security, meal_allowance, service_fee_rate, currency, bank_card_number, bank_name, id_card, photo, is_deleted, updated_at, license_fee";
 
 const normalizeGender = g => (g === "male" || g === "男" ? "male" : "female");
 
@@ -56,6 +56,7 @@ export function mapEmployeeRow(row) {
     attendanceBonus: row.attendance_bonus == null ? 0 : Number(row.attendance_bonus),
     socialSecurity: row.social_security == null ? 0 : Number(row.social_security),
     mealAllowance: row.meal_allowance == null ? 0 : Number(row.meal_allowance),
+    licenseFee: row.license_fee == null ? 0 : Number(row.license_fee),
     serviceFeeRate: row.service_fee_rate == null ? 0 : Number(row.service_fee_rate),
     currency: row.currency,
     bankCardNumber: row.bank_card_number || "",
@@ -131,7 +132,8 @@ function employeePayload(body = {}, authUser = {}) {
     isDispatchPersonnel: Boolean(body.isDispatchPersonnel),
     attendanceBonus: nonNegative(body.attendanceBonus),
     socialSecurity: nonNegative(body.socialSecurity),
-    mealAllowance: nonNegative(body.mealAllowance),
+    mealAllowance: nonNegative(body.mealAllowance !== undefined ? body.mealAllowance : body.mealAllowanceDaily),
+    licenseFee: nonNegative(body.licenseFee),
     serviceFeeRate: nonNegative(body.serviceFeeRate),
     salaryEffectiveStartDate: String(body.salaryEffectiveStartDate || body.joinDate || ""),
     currency: String(body.currency || "THB"),
@@ -153,7 +155,7 @@ function validatePayload(payload) {
   if (payload.joinDate > maxJoinDate()) return "入职日期不能晚于今天";
   if (!/^(active|on_leave|probation|resigned)$/.test(payload.status)) return "员工状态不合法";
   if (payload.hourlyRate === null && payload.fixedSalary === null && payload.dailyWage === null) return "请至少输入时薪、固定日薪或基础月薪中的一项";
-  const amounts = [payload.hourlyRate, payload.fixedSalary, payload.dailyWage, payload.attendanceBonus, payload.socialSecurity, payload.mealAllowance, payload.serviceFeeRate, payload.overtimeHourlyFee, payload.otBaseRate];
+  const amounts = [payload.hourlyRate, payload.fixedSalary, payload.dailyWage, payload.attendanceBonus, payload.socialSecurity, payload.mealAllowance, payload.licenseFee, payload.serviceFeeRate, payload.overtimeHourlyFee, payload.otBaseRate];
   if (amounts.some(value => value !== null && (!Number.isFinite(Number(value)) || Number(value) < 0))) return "金额必须大于等于 0";
   return null;
 }
@@ -646,16 +648,21 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
       if (!employeeId || Number.isNaN(employeeId)) return res.status(400).json({ error: "无效的员工 ID" });
 
       if (directDbPool) {
-        const { rows: empRows } = await directDbPool.query(
-          "SELECT id, name, employee_no, status, warehouse_code, country FROM workspace_employees WHERE owner_user_id = $1 AND id = $2 AND is_deleted = false LIMIT 1",
-          [req.authUser.id, employeeId]
-        );
-        const employee = empRows[0];
-        if (!employee || !isWarehouseAllowed(req.authUser, employee.warehouse_code)) {
-          return res.status(404).json({ error: "员工不存在或不属于当前仓库" });
+        try {
+          const { rows: empRows } = await directDbPool.query(
+            "SELECT id, name, employee_no, status, warehouse_code, country FROM workspace_employees WHERE owner_user_id = $1 AND id = $2 AND is_deleted = false LIMIT 1",
+            [req.authUser.id, employeeId]
+          );
+          const employee = empRows[0];
+          if (!employee || !isWarehouseAllowed(req.authUser, employee.warehouse_code)) {
+            return res.status(404).json({ error: "员工不存在或不属于当前仓库" });
+          }
+          const account = await ensureEmployeeAccountDirect(directDbPool, employee, req.authUser.id);
+          return res.json({ account: accountDto(account, employee) });
+        } catch (err) {
+          if (err.statusCode === 404) throw err;
+          console.warn("[admin-v4/employees] directDbPool get app-account failed, falling back to REST:", err.message);
         }
-        const account = await ensureEmployeeAccountDirect(directDbPool, employee, req.authUser.id);
-        return res.json({ account: accountDto(account, employee) });
       }
 
       const { data: employee, error: employeeError } = await supabase.from("workspace_employees")
@@ -695,8 +702,9 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
       }
 
       if (directDbPool) {
-        const client = await directDbPool.connect();
+        let client;
         try {
+          client = await directDbPool.connect();
           await client.query("BEGIN");
           const ruleId = await compatibilityRuleIdDirect(client, req.authUser.id, payload.warehouseCode);
           const empNo = employeeNo();
@@ -708,7 +716,7 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
               overtime_hourly_fee, ot_rule_type, ot_base_rate, ot_multiplier_workday,
               ot_multiplier_weekend, ot_multiplier_holiday, is_dispatch_personnel,
               attendance_bonus, social_security, meal_allowance, service_fee_rate,
-              currency, bank_card_number, bank_name, id_card, photo, is_deleted,
+              currency, bank_card_number, bank_name, id_card, photo, license_fee, is_deleted,
               created_at, updated_at
             ) VALUES (
               $1, $2, $3, $4, $5, $6,
@@ -717,7 +725,7 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
               $19, $20, $21, $22,
               $23, $24, $25,
               $26, $27, $28, $29,
-              $30, $31, $32, $33, $34, false,
+              $30, $31, $32, $33, $34, $35, false,
               NOW(), NOW()
             ) RETURNING *;
           `, [
@@ -727,7 +735,7 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
             payload.overtimeHourlyFee, payload.otRuleType, payload.otBaseRate, payload.otMultiplierWorkday,
             payload.otMultiplierWeekend, payload.otMultiplierHoliday, payload.isDispatchPersonnel,
             payload.attendanceBonus, payload.socialSecurity, payload.mealAllowance, payload.serviceFeeRate,
-            payload.currency, payload.bankCardNumber, payload.bankName, payload.idCard, payload.photo
+            payload.currency, payload.bankCardNumber, payload.bankName, payload.idCard, payload.photo, payload.licenseFee
           ]);
           const data = insertRes.rows[0];
           await ensureSalaryProfileDirect(client, data, req.authUser.id, payload.salaryEffectiveStartDate);
@@ -738,10 +746,13 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
           if (Array.isArray(payload.permissions)) empDto.permissions = payload.permissions;
           return res.status(201).json({ employee: empDto, ruleHistory: [] });
         } catch (err) {
-          await client.query("ROLLBACK");
-          throw err;
+          if (client) await client.query("ROLLBACK").catch(() => {});
+          if (err.code === "23505" || err.statusCode === 400 || err.statusCode === 403) {
+            throw err;
+          }
+          console.warn("[admin-v4/employees] directDbPool insert failed, falling back to REST:", err.message);
         } finally {
-          client.release();
+          if (client) client.release();
         }
       }
 
@@ -775,6 +786,7 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
         attendance_bonus: payload.attendanceBonus,
         social_security: payload.socialSecurity,
         meal_allowance: payload.mealAllowance,
+        license_fee: payload.licenseFee,
         service_fee_rate: payload.serviceFeeRate,
         currency: payload.currency,
         bank_card_number: payload.bankCardNumber,
@@ -814,8 +826,9 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
       }
 
       if (directDbPool) {
-        const client = await directDbPool.connect();
+        let client;
         try {
+          client = await directDbPool.connect();
           await client.query("BEGIN");
           const scopeRes = await client.query(`
             SELECT id, warehouse_code, updated_at
@@ -849,10 +862,11 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
               is_dispatch_personnel = $21, attendance_bonus = $22, social_security = $23,
               meal_allowance = $24, service_fee_rate = $25, currency = $26,
               bank_card_number = $27, bank_name = $28, id_card = $29,
-              warehouse_code = COALESCE($30, warehouse_code),
-              photo = CASE WHEN $31::boolean THEN $32 ELSE photo END,
+              license_fee = $30,
+              warehouse_code = COALESCE($31, warehouse_code),
+              photo = CASE WHEN $32::boolean THEN $33 ELSE photo END,
               updated_at = NOW()
-            WHERE owner_user_id = $33 AND id = $34
+            WHERE owner_user_id = $34 AND id = $35
             RETURNING *;
           `, [
             payload.name, payload.nickname, payload.gender, payload.nationality, payload.country,
@@ -863,6 +877,7 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
             payload.isDispatchPersonnel, payload.attendanceBonus, payload.socialSecurity,
             payload.mealAllowance, payload.serviceFeeRate, payload.currency,
             payload.bankCardNumber, payload.bankName, payload.idCard,
+            payload.licenseFee,
             payload.warehouseCode || null,
             hasPhoto, photoVal,
             req.authUser.id, employeeId
@@ -880,10 +895,11 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
           }
           return res.json({ employee: empDto, ruleHistory: [] });
         } catch (err) {
-          await client.query("ROLLBACK");
-          throw err;
+          if (client) await client.query("ROLLBACK").catch(() => {});
+          if (err.statusCode === 400 || err.statusCode === 403 || err.statusCode === 404 || err.statusCode === 409 || err.code === "23505") throw err;
+          console.warn("[admin-v4/employees] directDbPool update failed, falling back to REST:", err.message);
         } finally {
-          client.release();
+          if (client) client.release();
         }
       }
 
@@ -913,6 +929,7 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
         attendance_bonus: payload.attendanceBonus,
         social_security: payload.socialSecurity,
         meal_allowance: payload.mealAllowance,
+        license_fee: payload.licenseFee,
         service_fee_rate: payload.serviceFeeRate,
         currency: payload.currency,
         bank_card_number: payload.bankCardNumber,
@@ -944,6 +961,81 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
     } catch (error) { safeFailure(res, error, "更新员工失败"); }
   });
 
+  router.delete("/employees/:id", async (req, res) => {
+    try {
+      if (!permissionAllowed(req, "employees_delete", "employees_manage")) return res.status(403).json({ error: "无权删除员工档案" });
+      const employeeId = Number(req.params.id);
+      if (!employeeId || Number.isNaN(employeeId)) return res.status(400).json({ error: "无效的员工 ID" });
+
+      if (directDbPool) {
+        let client;
+        try {
+          client = await directDbPool.connect();
+          await client.query("BEGIN");
+          const scopeRes = await client.query(
+            "SELECT id, warehouse_code, status FROM workspace_employees WHERE owner_user_id = $1 AND id = $2 AND is_deleted = false FOR UPDATE",
+            [req.authUser.id, employeeId]
+          );
+          if (scopeRes.rows.length === 0 || !isWarehouseAllowed(req.authUser, scopeRes.rows[0].warehouse_code)) {
+            await client.query("ROLLBACK");
+            return res.status(404).json({ error: "员工不存在或不属于当前仓库" });
+          }
+          if (scopeRes.rows[0].status !== "resigned") {
+            await client.query("ROLLBACK");
+            return res.status(400).json({ error: "仅已离职员工可执行软删除，在职员工请先办理离职" });
+          }
+          const { rows } = await client.query(`
+            UPDATE workspace_employees
+            SET is_deleted = true, updated_at = NOW()
+            WHERE owner_user_id = $1 AND id = $2
+            RETURNING *;
+          `, [req.authUser.id, employeeId]);
+          await client.query(`
+            UPDATE workspace_accounts
+            SET status = 'disabled', updated_at = NOW()
+            WHERE owner_user_id = $1 AND employee_id = $2;
+          `, [req.authUser.id, employeeId]);
+          await client.query("COMMIT");
+          return res.json({ success: true, employee: mapEmployeeRow(rows[0]) });
+        } catch (err) {
+          if (client) await client.query("ROLLBACK").catch(() => {});
+          if (err.statusCode === 400 || err.statusCode === 403 || err.statusCode === 404) throw err;
+          console.warn("[admin-v4/employees] directDbPool delete failed, falling back to REST:", err.message);
+        } finally {
+          if (client) client.release();
+        }
+      }
+
+      const { data: existingEmp, error: fetchErr } = await supabase.from("workspace_employees")
+        .select("id, warehouse_code, status")
+        .eq("owner_user_id", req.authUser.id)
+        .eq("id", employeeId)
+        .eq("is_deleted", false)
+        .maybeSingle();
+      if (fetchErr) throw fetchErr;
+      if (!existingEmp || !isWarehouseAllowed(req.authUser, existingEmp.warehouse_code)) {
+        return res.status(404).json({ error: "员工不存在或不属于当前仓库" });
+      }
+      if (existingEmp.status !== "resigned") {
+        return res.status(400).json({ error: "仅已离职员工可执行软删除，在职员工请先办理离职" });
+      }
+
+      const { data, error } = await supabase.from("workspace_employees")
+        .update({ is_deleted: true, updated_at: new Date().toISOString() })
+        .eq("owner_user_id", req.authUser.id)
+        .eq("id", employeeId)
+        .select("*")
+        .single();
+      if (error) throw error;
+      await supabase.from("workspace_accounts")
+        .update({ status: "disabled", updated_at: new Date().toISOString() })
+        .eq("owner_user_id", req.authUser.id)
+        .eq("employee_id", employeeId);
+
+      res.json({ success: true, employee: mapEmployeeRow(data) });
+    } catch (error) { safeFailure(res, error, "删除隐藏员工失败"); }
+  });
+
   router.patch("/employees/:id/status", async (req, res) => {
     try {
       if (!permissionAllowed(req, "employees_delete", "employees_manage")) return res.status(403).json({ error: "无权更新员工状态" });
@@ -953,8 +1045,9 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
       if (targetStatus !== "resigned") return res.status(400).json({ error: "员工状态不合法" });
 
       if (directDbPool) {
-        const client = await directDbPool.connect();
+        let client;
         try {
+          client = await directDbPool.connect();
           await client.query("BEGIN");
           const scopeRes = await client.query(
             "SELECT id, warehouse_code FROM workspace_employees WHERE owner_user_id = $1 AND id = $2 AND is_deleted = false FOR UPDATE",
@@ -978,10 +1071,11 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
           await client.query("COMMIT");
           return res.json({ employee: mapEmployeeRow(rows[0]), ruleHistory: [] });
         } catch (err) {
-          await client.query("ROLLBACK");
-          throw err;
+          if (client) await client.query("ROLLBACK").catch(() => {});
+          if (err.statusCode === 400 || err.statusCode === 403 || err.statusCode === 404) throw err;
+          console.warn("[admin-v4/employees] directDbPool patch status failed, falling back to REST:", err.message);
         } finally {
-          client.release();
+          if (client) client.release();
         }
       }
 

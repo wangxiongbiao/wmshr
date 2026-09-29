@@ -2797,7 +2797,7 @@ export function EmployeeApp({
                 onClick={() => onNavigateToTab("expenses")}
                 className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
               >
-                <Coins className="w-3.5 h-3.5" /> 往返后台「工资列表」
+                <Coins className="w-3.5 h-3.5" /> 往返后台「报销列表」
               </button>
             </div>
           </div>
@@ -2822,7 +2822,7 @@ export function EmployeeApp({
               前往左侧菜单的 <strong className="text-slate-800">“考勤列表”</strong> 选项，您会发现该员工的打卡数据完全实时写入，全勤奖、迟到状态、工作小时数瞬间核算成功！
             </li>
             <li>
-              在员工APP的 <strong className="text-slate-800">“费用报销”</strong> 提交一份物资购买申请，登录后台的 <strong className="text-slate-800">“工资列表”</strong>，可以直接审批。
+              在员工APP的 <strong className="text-slate-800">“费用报销”</strong> 提交一份物资购买申请，登录后台的 <strong className="text-slate-800">“报销列表”</strong>，可以直接审批。
             </li>
           </ol>
         </div>

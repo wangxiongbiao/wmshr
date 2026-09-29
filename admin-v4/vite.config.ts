@@ -14,6 +14,7 @@ export default defineConfig(() => {
     server: {
       port: 3004,
       host: "0.0.0.0",
+      allowedHosts: true,
       proxy: {
         "/api/v4": {
           target: "http://127.0.0.1:8789",
