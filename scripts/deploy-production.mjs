@@ -120,9 +120,28 @@ async function main() {
   const headSha = runCapture("git rev-parse --short HEAD");
   console.log(`当前发布 Commit SHA: ${headSha}`);
 
-  // 4. Vercel 生产部署
+  // 4. Vercel 生产部署 (内置重试机制应对跨国网络波动)
   console.log("\n[步骤 3/4] 执行 Vercel 生产环境部署 (dutylix-admin-v4)...");
-  run("vercel deploy --prod --yes");
+  let deploySuccess = false;
+  let deployAttempts = 0;
+  const maxDeployAttempts = 3;
+
+  while (!deploySuccess && deployAttempts < maxDeployAttempts) {
+    deployAttempts++;
+    try {
+      if (deployAttempts > 1) {
+        console.log(`\n[重试 ${deployAttempts}/${maxDeployAttempts}] 重新执行 Vercel 部署...`);
+      }
+      run("vercel deploy --prod --yes");
+      deploySuccess = true;
+    } catch (err) {
+      if (deployAttempts >= maxDeployAttempts) {
+        throw err;
+      }
+      console.warn(`\n[警告] Vercel 部署遇到网络波动，5秒后自动重试 (${deployAttempts}/${maxDeployAttempts})...`);
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+    }
+  }
   console.log("✓ Vercel 生产发布部署完成！");
 
   // 5. 线上验证
