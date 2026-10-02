@@ -12,6 +12,16 @@ export function isWarehouseAllowed(authUser, warehouseCode) {
 }
 
 export function mapInvoiceRow(row) {
+  const normalizeRowDate = (d) => {
+    if (!d) return "";
+    if (d instanceof Date) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
+    }
+    return String(d).slice(0, 10);
+  };
   return {
     id: String(row.id),
     invoice_no: row.invoice_no,
@@ -24,8 +34,8 @@ export function mapInvoiceRow(row) {
     tax_rate: Number(row.tax_rate || 0),
     tax_amount: Number(row.tax_amount || 0),
     amount: Number(row.amount || 0),
-    issue_date: row.issue_date instanceof Date ? row.issue_date.toISOString().split("T")[0] : String(row.issue_date || ""),
-    due_date: row.due_date ? (row.due_date instanceof Date ? row.due_date.toISOString().split("T")[0] : String(row.due_date)) : "",
+    issue_date: normalizeRowDate(row.issue_date),
+    due_date: normalizeRowDate(row.due_date),
     status: row.status,
     seller_name: row.seller_name,
     seller_tax_no: row.seller_tax_no,
@@ -372,7 +382,7 @@ export function createInvoiceRouter({ express, directDbPool, supabase }) {
         ownerUserId, warehouseCode, body.invoice_no, body.customer_id || "", body.customer_name || "",
         body.invoice_type || "增值税专用发票", body.copy_text || "第一联 记账联", body.currency || "CNY",
         subtotal, taxRate, taxAmount, amount,
-        body.issue_date || new Date().toISOString().split("T")[0], body.due_date || null, body.status || "draft",
+        body.issue_date ? String(body.issue_date).slice(0, 10) : new Date().toISOString().split("T")[0], body.due_date ? String(body.due_date).slice(0, 10) : null, body.status || "draft",
         body.seller_name || "", body.seller_tax_no || "", body.seller_bank_name || "",
         body.seller_bank_account || "", body.seller_address || "", body.seller_phone || "", body.seller_contact || "",
         body.seller_logo || null, body.seller_signature || null, body.seller_stamp || null,
@@ -438,7 +448,7 @@ export function createInvoiceRouter({ express, directDbPool, supabase }) {
       const values = [
         body.customer_id || "", body.customer_name || "", body.invoice_type || "增值税专用发票", body.copy_text || "第一联 记账联",
         body.currency || "CNY", subtotal, taxRate, taxAmount, amount,
-        body.issue_date || new Date().toISOString().split("T")[0], body.due_date || null, body.status || "draft",
+        body.issue_date ? String(body.issue_date).slice(0, 10) : new Date().toISOString().split("T")[0], body.due_date ? String(body.due_date).slice(0, 10) : null, body.status || "draft",
         body.seller_name || "", body.seller_tax_no || "", body.seller_bank_name || "",
         body.seller_bank_account || "", body.seller_address || "", body.seller_phone || "", body.seller_contact || "",
         body.seller_logo || null, body.seller_signature || null, body.seller_stamp || null,

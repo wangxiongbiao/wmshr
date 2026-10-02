@@ -57,6 +57,13 @@ export const DatePicker = React.forwardRef<HTMLInputElement, DatePickerProps>(
       }
     };
 
+    const displayValue = React.useMemo(() => {
+      if (!value) return "";
+      const str = String(value).trim();
+      const match = str.match(/^(\d{4}-\d{2}-\d{2})/);
+      return match ? match[1] : str;
+    }, [value]);
+
     const handleSelect = (selectedDate: string) => {
       triggerChange(selectedDate);
       setOpen(false);
@@ -87,8 +94,8 @@ export const DatePicker = React.forwardRef<HTMLInputElement, DatePickerProps>(
             >
               <div className="flex items-center gap-2 overflow-hidden truncate">
                 <CalendarIcon className="w-4 h-4 text-slate-400 shrink-0" />
-                <span className={cn("truncate", !value ? "text-slate-400" : "text-slate-700 font-medium")}>
-                  {value || placeholder}
+                <span className={cn("truncate", !displayValue ? "text-slate-400" : "text-slate-700 font-medium")}>
+                  {displayValue || placeholder}
                 </span>
               </div>
               {Boolean(value && !disabled) && (
@@ -110,7 +117,7 @@ export const DatePicker = React.forwardRef<HTMLInputElement, DatePickerProps>(
 
           <PopoverContent className="p-0 border-slate-200 shadow-xl rounded-xl w-auto" align="start">
             <Calendar
-              selected={value}
+              selected={displayValue}
               minDate={min}
               maxDate={max}
               onSelect={handleSelect}

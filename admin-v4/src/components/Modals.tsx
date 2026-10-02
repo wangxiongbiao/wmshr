@@ -5,7 +5,7 @@
 
 import { X, Upload, Trash2, Shield, Key, Lock, Info, UserMinus, Loader2, AlertCircle } from "lucide-react";
 import { AppConfig, Employee, AttendanceRecord, CurrencyCode, CountryCode, Gender, EmployeeStatus } from "../types";
-import { cn } from "../lib/utils";
+import { cn, formatDate, getNowDateStr, getCurrencyForCountry } from "../lib/utils";
 import React, { useState, useEffect, useRef } from "react";
 import { getTranslation, Language } from "../lib/i18n";
 import {
@@ -360,6 +360,7 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
       if (employee) {
         setFormData({
           ...employee,
+          joinDate: employee.joinDate ? formatDate(employee.joinDate, getNowDateStr()) : getNowDateStr(),
           status: employee.status || "在职",
           warehouseCode: employee.warehouseCode || defaultWarehouseCode || "TH",
           sourceType: employee.sourceType || "自招",
@@ -377,7 +378,7 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
         setFormData({
           name: "", gender: "female", country: "MM", warehouseCode: defaultWarehouseCode || "TH", role: "拣货员", dept: "",
           hourlyRate: undefined, baseMonthlyWage: undefined, dailyWage: undefined, attendanceBonus: undefined, socialSecurity: undefined, currency: "THB",
-          joinDate: new Date().toISOString().split("T")[0], status: "在职", photo: null, username: "", password: randomPass,
+          joinDate: getNowDateStr(), status: "在职", photo: null, username: "", password: randomPass,
           sourceType: "自招", dispatchCommissionRate: undefined, otRuleType: "fixed", otFixedRate: undefined, otBaseRate: undefined,
           otMultiplierWorkday: 1.5, otMultiplierWeekend: 2.0, otMultiplierHoliday: 3.0,
           mealAllowanceDaily: undefined, licenseFee: undefined, permissions: [], idCard: ""
@@ -569,6 +570,21 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
           formContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
           return;
         }
+
+        const finalJoinDate = formatDate(formData.joinDate, "");
+        if (!finalJoinDate || !/^\d{4}-\d{2}-\d{2}$/.test(finalJoinDate)) {
+          setErrorMsg(
+            lang === "en"
+              ? "Please select a valid hire date!"
+              : lang === "th"
+                ? "กรุณาเลือกวันที่เริ่มงานที่ถูกต้อง!"
+                : lang === "zh-TW"
+                  ? "請選擇有效的入職日期！"
+                  : "请选择有效的入职日期！"
+          );
+          formContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+          return;
+        }
         
         const finalUsername = formData.username?.trim() || formData.name?.trim().toLowerCase().replace(/[^a-z0-9]/g, "") || "emp" + Date.now().toString().slice(-4);
         const finalPassword = formData.password?.trim() || (!employee ? Math.floor(100000 + Math.random() * 900000).toString() : undefined);
@@ -579,6 +595,7 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
           setIsSubmitting(true);
           await onSave({
             ...formData,
+            joinDate: finalJoinDate,
             status: formData.status || "在职",
             photo: formData.photo ?? null,
             gender: formData.gender || "female",
@@ -678,16 +695,30 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
                   <Label className="block text-xs font-semibold text-slate-600 mb-1.5">
                     {getTranslation("modal_employee_country", lang)}
                   </Label>
-                  <Select name="country" value={formData.country || "MM"} onValueChange={(val) => setFormData(prev => ({ ...prev, country: val as CountryCode }))}>
+                  <Select 
+                    name="country" 
+                    value={formData.country || "MM"} 
+                    onValueChange={(val) => {
+                      const nextCountry = val as CountryCode;
+                      setFormData(prev => ({
+                        ...prev,
+                        country: nextCountry,
+                        currency: !employee ? getCurrencyForCountry(nextCountry) : prev.currency
+                      }));
+                    }}
+                  >
                     <SelectTrigger className="w-full bg-white font-medium text-slate-700">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="MM">{lang === "en" ? "Myanmar" : lang === "th" ? "เมียนมา" : lang === "zh-TW" ? "緬甸籍" : "缅甸籍"}</SelectItem>
-                      <SelectItem value="TH">{lang === "en" ? "Thailand" : lang === "th" ? "ไทย" : lang === "zh-TW" ? "泰國籍" : "泰国籍"}</SelectItem>
-                      <SelectItem value="CN">{lang === "en" ? "China" : lang === "th" ? "จีน" : lang === "zh-TW" ? "中國籍" : "中国籍"}</SelectItem>
-                      <SelectItem value="LA">{lang === "en" ? "Laos" : lang === "th" ? "ลาว" : lang === "zh-TW" ? "老撾籍" : "老挝籍"}</SelectItem>
-                      <SelectItem value="KH">{lang === "en" ? "Cambodia" : lang === "th" ? "กัมพูชา" : lang === "zh-TW" ? "柬埔寨籍" : "柬埔寨籍"}</SelectItem>
+                      <SelectItem value="MM">{lang === "en" ? "🇲🇲 Myanmar" : lang === "th" ? "🇲🇲 เมียนมา" : lang === "zh-TW" ? "🇲🇲 緬甸籍" : "🇲🇲 缅甸籍"}</SelectItem>
+                      <SelectItem value="TH">{lang === "en" ? "🇹🇭 Thailand" : lang === "th" ? "🇹🇭 ไทย" : lang === "zh-TW" ? "🇹🇭 泰國籍" : "🇹🇭 泰国籍"}</SelectItem>
+                      <SelectItem value="CN">{lang === "en" ? "🇨🇳 China" : lang === "th" ? "🇨🇳 จีน" : lang === "zh-TW" ? "🇨🇳 中國籍" : "🇨🇳 中国籍"}</SelectItem>
+                      <SelectItem value="PH">{lang === "en" ? "🇵🇭 Philippines" : lang === "th" ? "🇵🇭 ฟิลิปปินส์" : lang === "zh-TW" ? "🇵🇭 菲律賓籍" : "🇵🇭 菲律宾籍"}</SelectItem>
+                      <SelectItem value="ID">{lang === "en" ? "🇮🇩 Indonesia" : lang === "th" ? "🇮🇩 อินโดนีเซีย" : lang === "zh-TW" ? "🇮🇩 印度尼西亞籍" : "🇮🇩 印度尼西亚籍"}</SelectItem>
+                      <SelectItem value="VN">{lang === "en" ? "🇻🇳 Vietnam" : lang === "th" ? "🇻🇳 เวียดนาม" : lang === "zh-TW" ? "🇻🇳 越南籍" : "🇻🇳 越南籍"}</SelectItem>
+                      <SelectItem value="LA">{lang === "en" ? "🇱🇦 Laos" : lang === "th" ? "🇱🇦 ลาว" : lang === "zh-TW" ? "🇱🇦 老撾籍" : "🇱🇦 老挝籍"}</SelectItem>
+                      <SelectItem value="KH">{lang === "en" ? "🇰🇭 Cambodia" : lang === "th" ? "🇰🇭 กัมพูชา" : lang === "zh-TW" ? "🇰🇭 柬埔寨籍" : "🇰🇭 柬埔寨籍"}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -864,10 +895,13 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="THB">泰铢 (฿ THB)</SelectItem>
-                    <SelectItem value="USD">美金 ($ USD)</SelectItem>
-                    <SelectItem value="MYR">马币 (RM MYR)</SelectItem>
-                    <SelectItem value="IDR">印尼盾 (Rp IDR)</SelectItem>
+                    <SelectItem value="THB">{lang === "en" ? "฿ THB (Thai Baht)" : lang === "th" ? "฿ THB (บาทไทย)" : "฿ THB (泰铢)"}</SelectItem>
+                    <SelectItem value="USD">{lang === "en" ? "$ USD (US Dollar)" : lang === "th" ? "$ USD (ดอลลาร์สหรัฐ)" : "$ USD (美元)"}</SelectItem>
+                    <SelectItem value="MYR">{lang === "en" ? "RM MYR (Malaysian Ringgit)" : lang === "th" ? "RM MYR (ริงกิตมาเลเซีย)" : "RM MYR (马币/林吉特)"}</SelectItem>
+                    <SelectItem value="IDR">{lang === "en" ? "Rp IDR (Indonesian Rupiah)" : lang === "th" ? "Rp IDR (รูเปียห์อินโดนีเซีย)" : "Rp IDR (印尼盾)"}</SelectItem>
+                    <SelectItem value="PHP">{lang === "en" ? "₱ PHP (Philippine Peso)" : lang === "th" ? "₱ PHP (เปโซฟิลิปปินส์)" : "₱ PHP (菲律宾比索)"}</SelectItem>
+                    <SelectItem value="VND">{lang === "en" ? "₫ VND (Vietnamese Dong)" : lang === "th" ? "₫ VND (ดงเวียดนาม)" : "₫ VND (越南盾)"}</SelectItem>
+                    <SelectItem value="CNY">{lang === "en" ? "¥ CNY (Chinese Yuan)" : lang === "th" ? "¥ CNY (หยวนจีน)" : "¥ CNY (人民币)"}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -1617,7 +1651,9 @@ export function AttendanceAdjustmentModal({
   // Lifecycle boundary validations
   const todayStr = React.useMemo(() => new Date().toISOString().slice(0, 10), []);
   const isFutureDate = Boolean(formData.date && formData.date > todayStr && formData.type !== 'leave');
-  const isBeforeJoinDate = Boolean(emp?.joinDate && formData.date && formData.date < emp.joinDate);
+  const normalizedFormDate = React.useMemo(() => formatDate(formData.date, ""), [formData.date]);
+  const normalizedEmpJoinDate = React.useMemo(() => emp?.joinDate ? formatDate(emp.joinDate, "") : "", [emp?.joinDate]);
+  const isBeforeJoinDate = Boolean(normalizedEmpJoinDate && normalizedFormDate && normalizedFormDate < normalizedEmpJoinDate);
   const isResignedEmp = emp?.status === '离职' || (emp?.status as any) === 'resigned';
 
   const handleSubmit = async (e: React.FormEvent) => {

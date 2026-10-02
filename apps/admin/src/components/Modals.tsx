@@ -17,7 +17,7 @@ import {
   EmployeeUpsertPayload,
   SalaryType
 } from "../types";
-import { calculateShiftStandardHours, cn, formatCompensation, getEmployeeStatusMeta, getSalaryTypeLabel } from "../lib/utils";
+import { calculateShiftStandardHours, cn, formatCompensation, getEmployeeStatusMeta, getSalaryTypeLabel, formatLocalDatePart, normalizeDateString } from "../lib/utils";
 import { type ChangeEvent, type FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 import { ROLE_OPTIONS } from "../constants";
 import { ModalShell } from "./ModalShell";
@@ -67,7 +67,12 @@ interface EmployeeFormState {
   photo: string | null;
 }
 
-const TODAY_DATE_KEY = new Date().toISOString().split("T")[0];
+const TODAY_DATE_KEY = formatLocalDatePart().date;
+const MAX_JOIN_DATE_KEY = (() => {
+  const d = new Date();
+  d.setDate(d.getDate() + 1); // 允许跨时区（如 UTC+7/UTC+8）当天入职，提供 1 天时区冗余
+  return formatLocalDatePart(d).date;
+})();
 
 const DEFAULT_EMPLOYEE_FORM: EmployeeFormState = {
   name: "",
@@ -106,7 +111,7 @@ function normalizeEmployeeToForm(employee: Employee): EmployeeFormState {
     mealAllowance: employee.mealAllowance,
     serviceFeeRate: employee.serviceFeeRate,
     currency: employee.currency,
-    joinDate: employee.joinDate,
+    joinDate: employee.joinDate ? normalizeDateString(employee.joinDate) : TODAY_DATE_KEY,
     photo: employee.photo
   };
 }
@@ -268,6 +273,12 @@ export function EmployeeModal({
 
     const salaryType = hasBaseWage ? "fixed" : "hourly";
 
+    const finalJoinDate = normalizeDateString(formData.joinDate);
+    if (!finalJoinDate || !/^\d{4}-\d{2}-\d{2}$/.test(finalJoinDate)) {
+      setError(tAdmin("入职日期格式不正确"));
+      return;
+    }
+
     // 员工管理界面完全按 v2 原型展示；phone/status/salaryEffectiveStartDate 是现有后端契约需要的隐藏字段，不允许重新显示到 v2 弹窗里。
     onSave({
       name: formData.name.trim(),
@@ -277,7 +288,7 @@ export function EmployeeModal({
       phone: employee?.phone || tAdmin("未填写"),
       role: formData.role.trim(),
       dept: formData.dept.trim(),
-      joinDate: formData.joinDate,
+      joinDate: finalJoinDate,
       status: formData.status,
       isDispatchPersonnel: formData.isDispatchPersonnel,
       salaryType,
@@ -288,7 +299,7 @@ export function EmployeeModal({
       socialSecurity: formData.socialSecurity ?? 0,
       mealAllowance: formData.mealAllowance ?? 0,
       serviceFeeRate: formData.serviceFeeRate ?? 0,
-      salaryEffectiveStartDate: formData.joinDate,
+      salaryEffectiveStartDate: finalJoinDate,
       currency: formData.currency,
       photo: employee
         ? (formData.photo === employee.photo ? undefined : formData.photo)
@@ -360,7 +371,10 @@ export function EmployeeModal({
                 <option value="MM">{tAdmin("缅甸")}</option>
                 <option value="TH">{tAdmin("泰国")}</option>
                 <option value="CN">{tAdmin("中国")}</option>
+                <option value="PH">{tAdmin("菲律宾")}</option>
+                <option value="ID">{tAdmin("印度尼西亚")}</option>
                 <option value="VN">{tAdmin("越南")}</option>
+                <option value="LA">{tAdmin("老挝")}</option>
                 <option value="KH">{tAdmin("柬埔寨")}</option>
               </select>
             </div>
@@ -468,11 +482,14 @@ export function EmployeeModal({
               <option value="USD">{tAdmin("美金 ($ USD)")}</option>
               <option value="MYR">{tAdmin("马币 (RM MYR)")}</option>
               <option value="IDR">{tAdmin("印尼盾 (Rp IDR)")}</option>
+              <option value="PHP">{tAdmin("菲律宾比索 (₱ PHP)")}</option>
+              <option value="VND">{tAdmin("越南盾 (₫ VND)")}</option>
+              <option value="CNY">{tAdmin("人民币 (¥ CNY)")}</option>
             </select>
           </div>
           <div>
             <FieldLabel>{tAdmin("入职日期")}</FieldLabel>
-            <input type="date" name="joinDate" max={TODAY_DATE_KEY} value={formData.joinDate} onChange={handleChange} required className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
+            <input type="date" name="joinDate" max={MAX_JOIN_DATE_KEY} value={formData.joinDate} onChange={handleChange} required className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
           </div>
         </div>
       </form>

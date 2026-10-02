@@ -10,8 +10,8 @@
   "scripts": {
     "dev:home": "npm --workspace @wmshr/home run dev",
     "dev:admin": "npm --workspace @wmshr/admin run dev",
-    "dev:admin:v4": "bash scripts/start-admin-v4.sh",
-    "dev:admin:v4:api": "bash scripts/start-admin-v4-api.sh",
+    "dev:admin:v4": "npm --prefix admin-v4 run dev",
+    "dev:admin:v4:api": "node apps/admin/server-v4/index.js",
     "test:admin:v4:service": "node apps/admin/server-v4/test-service-boundary.mjs && node apps/admin/server-v4/test-registration-fast-path.mjs",
     "dev:admin:api": "npm --workspace @wmshr/admin run dev:api",
     "dev:mobile": "npm --workspace @wmshr/mobile run start",
@@ -47,7 +47,10 @@
     "build": "npm run build --workspaces --if-present",
     "check:i18n": "node scripts/check-i18n-hardcoded.mjs",
     "restart:dev": "bash scripts/restart-dev-services.sh",
-    "deploy:prod": "node scripts/deploy-production.mjs"
+    "deploy:prod": "node scripts/deploy-production.mjs",
+    "dev:v4": "node scripts/start-v4.mjs",
+    "dev:v4:background": "node scripts/start-v4.mjs --background",
+    "stop:v4": "node scripts/start-v4.mjs --stop"
   },
   "main": "electron/main.cjs",
   "build": {

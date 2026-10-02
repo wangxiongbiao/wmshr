@@ -73,7 +73,7 @@ export async function runDailyAttendanceMaintenance({
 }) {
   const startTime = Date.now();
   const cronDates = getAttendanceCronDates();
-  const dateKey = targetDate || cronDates.previousDate;
+  const dateKey = targetDate ? String(targetDate).slice(0, 10) : cronDates.previousDate;
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
     throw new Error(`结算日期格式无效: ${dateKey}，要求 YYYY-MM-DD`);

@@ -26,7 +26,10 @@ export const CURRENCY_SYMBOLS: Record<CurrencyCode, string> = {
   THB: '฿',
   USD: '$',
   MYR: 'RM',
-  IDR: 'Rp'
+  IDR: 'Rp',
+  PHP: '₱',
+  VND: '₫',
+  CNY: '¥'
 };
 
 export function getCountryName(countryCode: string) {
@@ -37,6 +40,9 @@ export function getCountryName(countryCode: string) {
     case "CN": return tAdmin("中国");
     case "VN": return tAdmin("越南");
     case "KH": return tAdmin("柬埔寨");
+    case "PH": return tAdmin("菲律宾");
+    case "ID": return tAdmin("印度尼西亚");
+    case "LA": return tAdmin("老挝");
     default: return countryCode;
   }
 }
@@ -46,8 +52,37 @@ export const COUNTRY_FLAGS: Record<string, string> = {
   TH: '🇹🇭',
   CN: '🇨🇳',
   VN: '🇻🇳',
-  KH: '🇰🇭'
+  KH: '🇰🇭',
+  PH: '🇵🇭',
+  ID: '🇮🇩',
+  LA: '🇱🇦'
 };
+
+export function normalizeDateString(value: any): string {
+  if (value === null || value === undefined || value === "") return "";
+  if (value instanceof Date) {
+    if (isNaN(value.getTime())) return "";
+    return formatLocalDatePart(value).date;
+  }
+  const str = String(value).trim();
+  if (!str) return "";
+  const isoMatch = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (isoMatch) {
+    return `${isoMatch[1]}-${String(isoMatch[2]).padStart(2, "0")}-${String(isoMatch[3]).padStart(2, "0")}`;
+  }
+  const slashMatch = str.match(/^(\d{4})[/\.年](\d{1,2})[/\.月](\d{1,2})/);
+  if (slashMatch) {
+    return `${slashMatch[1]}-${String(slashMatch[2]).padStart(2, "0")}-${String(slashMatch[3]).padStart(2, "0")}`;
+  }
+  const num = Number(str);
+  if (!isNaN(num) && num > 1000000000) {
+    const d = new Date(num > 10000000000 ? num : num * 1000);
+    if (!isNaN(d.getTime())) return formatLocalDatePart(d).date;
+  }
+  const d = new Date(str);
+  if (!isNaN(d.getTime())) return formatLocalDatePart(d).date;
+  return str;
+}
 
 const EMPLOYEE_STATUS_CLASS_NAMES: Record<EmployeeStatus, string> = {
   active: 'bg-green-100 text-green-700',

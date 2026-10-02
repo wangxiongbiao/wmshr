@@ -2,6 +2,9 @@ import crypto from "node:crypto";
 import dotenv from "dotenv";
 import express from "express";
 import pg from "pg";
+
+// 避免 node-postgres 默认将 date(1082) 解析为本地时区 Date 对象而导致时区偏移和 ISO 时间戳格式
+pg.types.setTypeParser(1082, (val) => val);
 import { createClient } from "@supabase/supabase-js";
 import { Readable } from "node:stream";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -729,6 +732,39 @@ async function fetchWorkspaceDataPresence(ownerUserId) {
   };
 }
 
+function normalizeDateValue(value) {
+  if (value === null || value === undefined || value === "") return "";
+  if (value instanceof Date) {
+    if (isNaN(value.getTime())) return "";
+    const y = value.getFullYear();
+    const m = String(value.getMonth() + 1).padStart(2, "0");
+    const d = String(value.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+  const str = String(value).trim();
+  if (!str) return "";
+  const isoMatch = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (isoMatch) {
+    return `${isoMatch[1]}-${String(isoMatch[2]).padStart(2, "0")}-${String(isoMatch[3]).padStart(2, "0")}`;
+  }
+  const slashMatch = str.match(/^(\d{4})[/\.年](\d{1,2})[/\.月](\d{1,2})/);
+  if (slashMatch) {
+    return `${slashMatch[1]}-${String(slashMatch[2]).padStart(2, "0")}-${String(slashMatch[3]).padStart(2, "0")}`;
+  }
+  const num = Number(str);
+  if (!isNaN(num) && num > 1000000000) {
+    const d = new Date(num > 10000000000 ? num : num * 1000);
+    if (!isNaN(d.getTime())) {
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    }
+  }
+  const d = new Date(str);
+  if (!isNaN(d.getTime())) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+  return str;
+}
+
 function mapEmployeeRow(row, ruleMap = new Map()) {
   return {
     id: Number(row.id),
@@ -740,7 +776,7 @@ function mapEmployeeRow(row, ruleMap = new Map()) {
     phone: row.phone,
     role: row.role,
     dept: row.dept,
-    joinDate: row.join_date,
+    joinDate: normalizeDateValue(row.join_date),
     status: row.status,
     attendanceRuleId: row.attendance_rule_id === null || row.attendance_rule_id === undefined ? 0 : Number(row.attendance_rule_id),
     attendanceRuleName: row.attendance_rule_name || ruleMap.get(Number(row.attendance_rule_id)) || null,
@@ -1575,7 +1611,7 @@ async function fetchEmployeeDetail(employeeId, ownerUserId) {
 }
 
 function toDateKey(value) {
-  return typeof value === "string" ? value.slice(0, 10) : value;
+  return normalizeDateValue(value);
 }
 
 
@@ -2057,7 +2093,9 @@ function getPayrollResultLockError(result) {
 }
 
 function getTodayDateKey() {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  d.setDate(d.getDate() + 1); // 允许跨时区（如 UTC+7/UTC+8）当天业务操作，提供 1 天时区冗余
+  return d.toISOString().slice(0, 10);
 }
 
 function isFutureDateKey(value) {
@@ -2760,7 +2798,7 @@ async function fetchSalaryProfileForMonth(employeeId, yearMonth, ownerUserId) {
 }
 
 async function ensureSalaryProfileForEmployee(employee, ownerUserId, requestedEffectiveStartDate = null) {
-  const effectiveStartDate = requestedEffectiveStartDate || employee.join_date || getTodayDateKey();
+  const effectiveStartDate = normalizeDateValue(requestedEffectiveStartDate || employee.join_date || getTodayDateKey());
   if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveStartDate)) {
     throw new Error("薪资生效日期格式必须为 YYYY-MM-DD");
   }
@@ -3190,7 +3228,7 @@ function normalizeEmployeePayload(body, authUser) {
     phone: body.phone,
     role: body.role,
     dept: body.dept,
-    joinDate: body.joinDate,
+    joinDate: normalizeDateValue(body.joinDate),
     status: body.status,
     salaryType: body.salaryType,
     hourlyRate: body.hourlyRate === null || body.hourlyRate === "" ? null : Number(body.hourlyRate),
@@ -3200,7 +3238,7 @@ function normalizeEmployeePayload(body, authUser) {
     socialSecurity: body.socialSecurity === null || body.socialSecurity === "" || body.socialSecurity === undefined ? 0 : Number(body.socialSecurity),
     mealAllowance: body.mealAllowance === null || body.mealAllowance === "" || body.mealAllowance === undefined ? 0 : Number(body.mealAllowance),
     serviceFeeRate: body.serviceFeeRate === null || body.serviceFeeRate === "" || body.serviceFeeRate === undefined ? 0 : Number(body.serviceFeeRate),
-    salaryEffectiveStartDate: body.salaryEffectiveStartDate || body.joinDate,
+    salaryEffectiveStartDate: normalizeDateValue(body.salaryEffectiveStartDate || body.joinDate),
     currency: body.currency,
     photo: Object.prototype.hasOwnProperty.call(body || {}, "photo") ? (body.photo || null) : undefined,
     updatedAt: body.updatedAt || null,
@@ -4100,13 +4138,16 @@ async function fetchEmployeeBasicProfile(ownerUserId, employeeId) {
 }
 
 function validateLeaveDateRange({ startDate, endDate, joinDate = null }) {
-  if (!isValidDateKey(startDate) || !isValidDateKey(endDate)) {
+  const normStart = normalizeDateValue(startDate);
+  const normEnd = normalizeDateValue(endDate);
+  const normJoin = joinDate ? normalizeDateValue(joinDate) : null;
+  if (!isValidDateKey(normStart) || !isValidDateKey(normEnd)) {
     throw new Error("请假日期格式不正确");
   }
-  if (endDate < startDate) {
+  if (normEnd < normStart) {
     throw new Error("结束日期不能早于开始日期");
   }
-  if (joinDate && startDate < joinDate) {
+  if (normJoin && normStart < normJoin) {
     throw new Error("请假开始日期不能早于员工入职日期");
   }
 }
@@ -5535,7 +5576,7 @@ app.post("/api/admin/attendance-records", async (req, res) => {
   try {
     const ownerUserId = req.authUser.id;
     const employeeId = Number(req.body.employeeId);
-    const date = String(req.body.date || "");
+    const date = normalizeDateValue(req.body.date);
 
     if (!employeeId || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return res.status(400).json({ error: "employeeId 和 date 必填且格式正确" });
@@ -5688,7 +5729,7 @@ app.put("/api/admin/attendance-records/:id", async (req, res) => {
     const employeeOvertimeSettingsPayload = normalizeEmployeeOvertimeSettingsPayload(req.body);
     const previousDate = toDateKey(existingRecord.date);
     const payload = {
-      date: req.body.date,
+      date: req.body.date ? normalizeDateValue(req.body.date) : previousDate,
       type: req.body.type,
       in_time: req.body.inTime || null,
       out_time: req.body.outTime || null,
@@ -5767,7 +5808,7 @@ app.post("/api/admin/attendance-calculations/recalculate-daily", async (req, res
   try {
     const ownerUserId = req.authUser.id;
     const employeeId = Number(req.body.employeeId);
-    const date = String(req.body.date || "");
+    const date = normalizeDateValue(req.body.date);
     if (!employeeId || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return res.status(400).json({ error: "employeeId 和 date 必填且格式正确" });
     }

@@ -29,7 +29,7 @@ export interface GoodsRecord {
 
 export type Gender = 'male' | 'female';
 
-export type CountryCode = 'MM' | 'TH' | 'CN' | 'VN' | 'KH';
+export type CountryCode = 'MM' | 'TH' | 'CN' | 'VN' | 'KH' | 'PH' | 'ID' | 'LA';
 
 export type AttendanceType = 'normal' | 'late' | 'early' | 'absent' | 'leave' | 'sick_leave' | 'overtime' | 'manual_adjusted' | 'checked_in' | 'pending' | 'exception';
 

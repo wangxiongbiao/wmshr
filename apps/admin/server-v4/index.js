@@ -1,6 +1,9 @@
 ﻿import dotenv from "dotenv";
 import express from "express";
 import pg from "pg";
+
+// 避免 node-postgres 默认将 date(1082) 解析为本地时区 Date 对象而导致时区偏移和 ISO 时间戳格式
+pg.types.setTypeParser(1082, (val) => val);
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 import { createAuthV4Controller, verifyToken } from "../server/auth-v4.js";

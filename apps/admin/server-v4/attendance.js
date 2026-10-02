@@ -66,10 +66,12 @@ export function decodeHoliday(str) {
 
 export function enumerateDateRange(startDate, endDate) {
   const dates = [];
-  const start = new Date(`${startDate}T00:00:00Z`);
-  const end = new Date(`${endDate}T00:00:00Z`);
+  const sStr = String(startDate || "").slice(0, 10);
+  const eStr = String(endDate || "").slice(0, 10);
+  const start = new Date(`${sStr}T00:00:00Z`);
+  const end = new Date(`${eStr}T00:00:00Z`);
   const curr = new Date(start);
-  while (curr <= end) {
+  while (curr <= end && !isNaN(curr.getTime())) {
     dates.push(curr.toISOString().slice(0, 10));
     curr.setUTCDate(curr.getUTCDate() + 1);
   }
@@ -500,7 +502,10 @@ export function createAttendanceRouter({ express, supabase }) {
       const { data, error } = await query.order("date", { ascending: false }).limit(5000);
       if (error) throw error;
 
-      res.json(data || []);
+      res.json((data || []).map(r => ({
+        ...r,
+        date: r.date ? String(r.date).slice(0, 10) : r.date
+      })));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -850,7 +855,9 @@ export function createAttendanceRouter({ express, supabase }) {
   router.post("/leave-requests", requirePermission("leave_approve", "attendance_edit"), async (req, res) => {
     try {
       const { ownerUserId, warehouseCode } = getScope(req);
-      const { empId, type, startDate, endDate, reason, status = "approved" } = req.body || {};
+      const { empId, type, startDate: rawStart, endDate: rawEnd, reason, status = "approved" } = req.body || {};
+      const startDate = typeof rawStart === "string" ? rawStart.slice(0, 10) : "";
+      const endDate = typeof rawEnd === "string" ? rawEnd.slice(0, 10) : "";
 
       if (!empId) return res.status(400).json({ error: "请选择员工" });
       if (!startDate || !endDate) return res.status(400).json({ error: "请选择请假起止日期" });
@@ -1020,7 +1027,8 @@ export function createAttendanceRouter({ express, supabase }) {
         return res.status(403).json({ error: "无权操作该海外仓考勤记录" });
       }
 
-      const { employeeId, date, inTime, outTime, type = "normal", note, inLat, inLng, outLat, outLng, isAdjustment, allowOverwrite } = req.body || {};
+      const { employeeId, inTime, outTime, type = "normal", note, inLat, inLng, outLat, outLng, isAdjustment, allowOverwrite } = req.body || {};
+      const date = typeof req.body?.date === "string" ? req.body.date.slice(0, 10) : "";
 
       if (!employeeId || !date) {
         return res.status(400).json({ error: "employeeId and date are required" });

@@ -176,11 +176,13 @@ export function LeaveTable({
       setAddError("请假员工必须是在职员工");
       return;
     }
-    if (!addStartDate || !addEndDate) {
+    const sDate = formatDate(addStartDate, "");
+    const eDate = formatDate(addEndDate, "");
+    if (!sDate || !eDate) {
       setAddError("请选择完整的起止日期");
       return;
     }
-    if (addStartDate > addEndDate) {
+    if (sDate > eDate) {
       setAddError("开始日期不能晚于结束日期");
       return;
     }
@@ -190,8 +192,8 @@ export function LeaveTable({
       const created = await createLeaveRequest({
         empId: Number(addEmpId),
         type: addType,
-        startDate: addStartDate,
-        endDate: addEndDate,
+        startDate: sDate,
+        endDate: eDate,
         reason: addReason.trim() || "管理员代录",
         status: addStatus
       });

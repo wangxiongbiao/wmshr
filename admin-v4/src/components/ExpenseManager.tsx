@@ -55,8 +55,12 @@ const RECEIPT_PRESETS = [
 const CURRENCIES = [
   { code: "CNY", symbol: "￥", rate: 1.0, label: "人民币 (CNY)" },
   { code: "USD", symbol: "$", rate: 7.24, label: "美元 (USD)" },
-  { code: "MMK", symbol: "K", rate: 0.0034, label: "缅元 (MMK)" },
   { code: "THB", symbol: "฿", rate: 0.20, label: "泰铢 (THB)" },
+  { code: "PHP", symbol: "₱", rate: 0.13, label: "菲律宾比索 (PHP)" },
+  { code: "VND", symbol: "₫", rate: 0.00029, label: "越南盾 (VND)" },
+  { code: "IDR", symbol: "Rp", rate: 0.00045, label: "印尼盾 (IDR)" },
+  { code: "MYR", symbol: "RM", rate: 1.62, label: "马来西亚林吉特 (MYR)" },
+  { code: "MMK", symbol: "K", rate: 0.0034, label: "缅元 (MMK)" },
   { code: "EUR", symbol: "€", rate: 7.82, label: "欧元 (EUR)" }
 ];
 

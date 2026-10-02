@@ -14,7 +14,11 @@ const CURRENCY_TO_THB_RATE = {
   THB: 1,
   USD: 36,
   MYR: 7.7,
-  IDR: 0.0023
+  IDR: 0.0023,
+  CNY: 5.0,
+  PHP: 0.63,
+  VND: 0.0014,
+  MMK: 0.017
 };
 
 export function convertAttendanceRuleAmount(amount, fromCurrency = "THB", toCurrency = "THB") {
@@ -85,12 +89,14 @@ function normalizeConfig(config = {}) {
 }
 
 function isWeekendDate(date) {
-  const day = new Date(`${date}T00:00:00Z`).getUTCDay();
+  const cleanDate = String(date || "").slice(0, 10);
+  const day = new Date(`${cleanDate}T00:00:00Z`).getUTCDay();
   return day === 0 || day === 6;
 }
 
 function isHolidayDate(date, config) {
-  return new Set(config.holiday_dates || []).has(date);
+  const cleanDate = String(date || "").slice(0, 10);
+  return new Set(config.holiday_dates || []).has(cleanDate);
 }
 
 function resolveOvertimeMultiplierWithConfig(date, config, useRule) {

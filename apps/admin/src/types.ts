@@ -8,7 +8,7 @@ export type TabId = 'dashboard' | 'employees' | 'attendance' | 'leave' | 'payrol
 
 export type Gender = 'male' | 'female';
 
-export type CountryCode = 'MM' | 'TH' | 'CN' | 'VN' | 'KH';
+export type CountryCode = 'MM' | 'TH' | 'CN' | 'VN' | 'KH' | 'PH' | 'ID' | 'LA';
 
 export type SalaryType = 'fixed' | 'hourly';
 export type SalaryAdjustmentType = 'allowance' | 'deduction' | 'other';
@@ -25,7 +25,7 @@ export type AttendanceCalculationStatus = 'pending' | 'checked_in' | 'normal' | 
 
 export type EmployeeStatus = 'active' | 'on_leave' | 'probation' | 'resigned';
 
-export type CurrencyCode = 'THB' | 'USD' | 'MYR' | 'IDR';
+export type CurrencyCode = 'THB' | 'USD' | 'MYR' | 'IDR' | 'PHP' | 'VND' | 'CNY';
 
 export interface AppConfig {
   startShift: string;

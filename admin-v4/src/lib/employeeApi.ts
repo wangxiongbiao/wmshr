@@ -1,4 +1,5 @@
 import type { Employee } from "../types";
+import { formatDate } from "./utils";
 
 const token = () => localStorage.getItem("wms_admin_token") || "";
 
@@ -91,7 +92,7 @@ export function fromApiEmployee(employee: ApiEmployee): Employee {
     mealAllowanceDaily: employee.mealAllowance,
     licenseFee: employee.licenseFee != null ? Number(employee.licenseFee) : 0,
     currency: employee.currency,
-    joinDate: employee.joinDate,
+    joinDate: formatDate(employee.joinDate, ""),
     status: statusFromApi(employee.status),
     photo: employee.photo,
     username: employee.username || employee.employeeNo,
@@ -135,7 +136,7 @@ function toApiEmployee(employee: Partial<Employee>) {
     phone: employee.phone || "",
     role: employee.role,
     dept: employee.dept,
-    joinDate: employee.joinDate,
+    joinDate: formatDate(employee.joinDate, ""),
     status: statusToApi(employee.status || "在职"),
     salaryType,
     hourlyRate,

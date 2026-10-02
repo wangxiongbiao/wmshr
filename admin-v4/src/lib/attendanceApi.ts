@@ -98,7 +98,10 @@ export async function createAttendanceRecord(payload: {
 }): Promise<{ record: any; metrics: any }> {
   return request("/api/v4/admin/attendance-records", {
     method: "POST",
-    body: JSON.stringify(payload)
+    body: JSON.stringify({
+      ...payload,
+      date: payload.date ? String(payload.date).slice(0, 10) : payload.date
+    })
   });
 }
 
@@ -146,7 +149,7 @@ export async function fetchAttendanceRecords(params: {
   return (rows || []).map(r => ({
     id: String(r.id),
     empId: Number(r.employee_id),
-    date: r.date,
+    date: r.date ? String(r.date).slice(0, 10) : "",
     inTime: r.in_time || "",
     outTime: r.out_time || "",
     type: r.type,
@@ -164,7 +167,12 @@ export async function fetchAttendanceRecords(params: {
 
 export async function fetchLeaveRequests(warehouseCode?: string): Promise<LeaveRequest[]> {
   const query = warehouseCode ? `?warehouse_code=${encodeURIComponent(warehouseCode)}` : "";
-  return request<LeaveRequest[]>(`/api/v4/admin/leave-requests${query}`);
+  const rows = await request<any[]>(`/api/v4/admin/leave-requests${query}`);
+  return (rows || []).map(r => ({
+    ...r,
+    startDate: r.startDate ? String(r.startDate).slice(0, 10) : (r.start_date ? String(r.start_date).slice(0, 10) : ""),
+    endDate: r.endDate ? String(r.endDate).slice(0, 10) : (r.end_date ? String(r.end_date).slice(0, 10) : "")
+  }));
 }
 
 export async function updateLeaveRequestStatus(
@@ -188,7 +196,11 @@ export async function createLeaveRequest(payload: {
 }): Promise<LeaveRequest> {
   return request<LeaveRequest>("/api/v4/admin/leave-requests", {
     method: "POST",
-    body: JSON.stringify(payload)
+    body: JSON.stringify({
+      ...payload,
+      startDate: payload.startDate ? String(payload.startDate).slice(0, 10) : payload.startDate,
+      endDate: payload.endDate ? String(payload.endDate).slice(0, 10) : payload.endDate
+    })
   });
 }
 

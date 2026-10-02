@@ -38,7 +38,19 @@ export const COUNTRY_NAMES: Record<string, string> = {
   TH: '泰国',
   CN: '中国',
   VN: '越南',
-  KH: '柬埔寨'
+  KH: '柬埔寨',
+  PH: '菲律宾',
+  ID: '印度尼西亚',
+  LA: '老挝',
+  '缅甸籍': '缅甸',
+  '泰国籍': '泰国',
+  '中国籍': '中国',
+  '越南籍': '越南',
+  '柬埔寨籍': '柬埔寨',
+  '菲律宾籍': '菲律宾',
+  '印度尼西亚籍': '印度尼西亚',
+  '印尼籍': '印度尼西亚',
+  '老挝籍': '老挝'
 };
 
 export const COUNTRY_FLAGS: Record<string, string> = {
@@ -46,7 +58,19 @@ export const COUNTRY_FLAGS: Record<string, string> = {
   TH: '🇹🇭',
   CN: '🇨🇳',
   VN: '🇻🇳',
-  KH: '🇰🇭'
+  KH: '🇰🇭',
+  PH: '🇵🇭',
+  ID: '🇮🇩',
+  LA: '🇱🇦',
+  '缅甸籍': '🇲🇲',
+  '泰国籍': '🇹🇭',
+  '中国籍': '🇨🇳',
+  '越南籍': '🇻🇳',
+  '柬埔寨籍': '🇰🇭',
+  '菲律宾籍': '🇵🇭',
+  '印度尼西亚籍': '🇮🇩',
+  '印尼籍': '🇮🇩',
+  '老挝籍': '🇱🇦'
 };
 
 
@@ -260,18 +284,36 @@ export function getNowDateTimeStr(date: Date = new Date()): string {
 }
 
 export function formatDate(value?: string | number | Date | null, fallback = "-"): string {
-  if (!value) return fallback;
+  if (value === null || value === undefined || value === "") return fallback;
+  if (value instanceof Date) {
+    return isNaN(value.getTime()) ? fallback : getNowDateStr(value);
+  }
   if (typeof value === "string") {
     const trimmed = value.trim();
     if (!trimmed) return fallback;
-    if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
-      return trimmed.slice(0, 10);
+    const isoMatch = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (isoMatch) {
+      return `${isoMatch[1]}-${pad2(parseInt(isoMatch[2], 10))}-${pad2(parseInt(isoMatch[3], 10))}`;
     }
-    if (/^\d{4}\/\d{2}\/\d{2}/.test(trimmed)) {
-      return trimmed.slice(0, 10).replace(/\//g, "-");
+    const slashMatch = trimmed.match(/^(\d{4})[/\.年](\d{1,2})[/\.月](\d{1,2})/);
+    if (slashMatch) {
+      return `${slashMatch[1]}-${pad2(parseInt(slashMatch[2], 10))}-${pad2(parseInt(slashMatch[3], 10))}`;
     }
+    const num = Number(trimmed);
+    if (!isNaN(num) && num > 1000000000) {
+      const d = new Date(num > 10000000000 ? num : num * 1000);
+      if (!isNaN(d.getTime())) return getNowDateStr(d);
+    }
+    const parsed = new Date(trimmed);
+    if (!isNaN(parsed.getTime())) return getNowDateStr(parsed);
+    return fallback;
   }
-  const d = new Date(value);
+  if (typeof value === "number") {
+    if (isNaN(value) || value <= 0) return fallback;
+    const d = new Date(value > 10000000000 ? value : value * 1000);
+    return isNaN(d.getTime()) ? fallback : getNowDateStr(d);
+  }
+  const d = new Date(value as any);
   if (isNaN(d.getTime())) return fallback;
   return getNowDateStr(d);
 }

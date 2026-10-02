@@ -28,24 +28,30 @@ export function Calendar({
   const today = new Date();
   const todayStr = formatDate(today.getFullYear(), today.getMonth(), today.getDate());
 
+  const selectedDateStr = React.useMemo(() => {
+    if (!selected) return "";
+    const match = String(selected).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return match ? `${match[1]}-${match[2]}-${match[3]}` : String(selected);
+  }, [selected]);
+
   const initialDate = React.useMemo(() => {
-    if (selected && /^\d{4}-\d{2}-\d{2}$/.test(selected)) {
-      const [y, m, d] = selected.split("-").map(Number);
+    if (selectedDateStr && /^\d{4}-\d{2}-\d{2}$/.test(selectedDateStr)) {
+      const [y, m, d] = selectedDateStr.split("-").map(Number);
       return new Date(y, m - 1, d);
     }
     return today;
-  }, [selected]);
+  }, [selectedDateStr]);
 
   const [viewYear, setViewYear] = React.useState(initialDate.getFullYear());
   const [viewMonth, setViewMonth] = React.useState(initialDate.getMonth());
 
   React.useEffect(() => {
-    if (selected && /^\d{4}-\d{2}-\d{2}$/.test(selected)) {
-      const [y, m, d] = selected.split("-").map(Number);
+    if (selectedDateStr && /^\d{4}-\d{2}-\d{2}$/.test(selectedDateStr)) {
+      const [y, m, d] = selectedDateStr.split("-").map(Number);
       setViewYear(y);
       setViewMonth(m - 1);
     }
-  }, [selected]);
+  }, [selectedDateStr]);
 
   const prevMonth = () => {
     if (viewMonth === 0) {
@@ -183,7 +189,7 @@ export function Calendar({
       {/* Days grid */}
       <div className="grid grid-cols-7 gap-1 text-center">
         {days.map(({ dateStr, dayNumber, isCurrentMonth }) => {
-          const isSelected = selected === dateStr;
+          const isSelected = selectedDateStr === dateStr;
           const isToday = todayStr === dateStr;
           const isDisabled =
             Boolean(minDate && dateStr < minDate) ||

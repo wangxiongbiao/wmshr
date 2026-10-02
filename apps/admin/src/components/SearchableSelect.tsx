@@ -15,6 +15,7 @@ export interface SearchableSelectOption {
 }
 
 interface SearchableSelectProps {
+  key?: string | number;
   value: string;
   options: SearchableSelectOption[];
   onChange: (value: string) => void;

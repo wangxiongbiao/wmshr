@@ -22,6 +22,39 @@ const maxJoinDate = () => {
 const normalizeAmount = value => value === null || value === undefined || value === "" ? null : Number(value);
 const nonNegative = value => Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : 0;
 
+const normalizeDateValue = value => {
+  if (value === null || value === undefined || value === "") return "";
+  if (value instanceof Date) {
+    if (isNaN(value.getTime())) return "";
+    const y = value.getFullYear();
+    const m = String(value.getMonth() + 1).padStart(2, "0");
+    const d = String(value.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+  const str = String(value).trim();
+  if (!str) return "";
+  const isoMatch = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (isoMatch) {
+    return `${isoMatch[1]}-${String(isoMatch[2]).padStart(2, "0")}-${String(isoMatch[3]).padStart(2, "0")}`;
+  }
+  const slashMatch = str.match(/^(\d{4})[/\.年](\d{1,2})[/\.月](\d{1,2})/);
+  if (slashMatch) {
+    return `${slashMatch[1]}-${String(slashMatch[2]).padStart(2, "0")}-${String(slashMatch[3]).padStart(2, "0")}`;
+  }
+  const num = Number(str);
+  if (!isNaN(num) && num > 1000000000) {
+    const d = new Date(num > 10000000000 ? num : num * 1000);
+    if (!isNaN(d.getTime())) {
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    }
+  }
+  const d = new Date(str);
+  if (!isNaN(d.getTime())) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+  return str;
+};
+
 export function mapEmployeeRow(row) {
   return {
     id: Number(row.id),
@@ -35,7 +68,7 @@ export function mapEmployeeRow(row) {
     phone: row.phone,
     role: row.role,
     dept: row.dept,
-    joinDate: row.join_date,
+    joinDate: normalizeDateValue(row.join_date),
     status: row.status,
     attendanceRuleId: row.attendance_rule_id == null ? 0 : Number(row.attendance_rule_id),
     attendanceRuleName: row.attendance_rule_name || null,
@@ -83,7 +116,7 @@ function employeePayload(body = {}, authUser = {}) {
     phone: String(body.phone || "").trim(),
     role: String(body.role || "").trim(),
     dept: String(body.dept || "").trim(),
-    joinDate: String(body.joinDate || ""),
+    joinDate: normalizeDateValue(body.joinDate),
     status: normalizeStatus(body.status),
     ...(() => {
       let hourlyRate = normalizeAmount(body.hourlyRate);
@@ -135,7 +168,7 @@ function employeePayload(body = {}, authUser = {}) {
     mealAllowance: nonNegative(body.mealAllowance !== undefined ? body.mealAllowance : body.mealAllowanceDaily),
     licenseFee: nonNegative(body.licenseFee),
     serviceFeeRate: nonNegative(body.serviceFeeRate),
-    salaryEffectiveStartDate: String(body.salaryEffectiveStartDate || body.joinDate || ""),
+    salaryEffectiveStartDate: normalizeDateValue(body.salaryEffectiveStartDate || body.joinDate),
     currency: String(body.currency || "THB"),
     bankCardNumber: body.bankCardNumber ? String(body.bankCardNumber).trim() : null,
     bankName: body.bankName ? String(body.bankName).trim() : null,

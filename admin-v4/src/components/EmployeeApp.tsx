@@ -1135,12 +1135,24 @@ export function EmployeeApp({
   };
 
   const getCountryName = (code: string) => {
-    const flags = {
+    const flags: Record<string, string> = {
       MM: locale === "zh-CN" ? "缅甸" : locale === "zh-TW" ? "緬甸" : locale === "th" ? "เมียนมา" : locale === "id" ? "Myanmar" : "Myanmar",
       TH: locale === "zh-CN" ? "泰国" : locale === "zh-TW" ? "泰國" : locale === "th" ? "ไทย" : locale === "id" ? "Thailand" : "Thailand",
       CN: locale === "zh-CN" ? "中国" : locale === "zh-TW" ? "中國" : locale === "th" ? "จีน" : locale === "id" ? "Tiongkok" : "China",
       VN: locale === "zh-CN" ? "越南" : locale === "zh-TW" ? "越南" : locale === "th" ? "เวียดนาม" : locale === "id" ? "Vietnam" : "Vietnam",
       KH: locale === "zh-CN" ? "柬埔寨" : locale === "zh-TW" ? "柬埔寨" : locale === "th" ? "กัมพูชา" : locale === "id" ? "Kamboja" : "Cambodia",
+      PH: locale === "zh-CN" ? "菲律宾" : locale === "zh-TW" ? "菲律賓" : locale === "th" ? "ฟิลิปปินส์" : locale === "id" ? "Filipina" : "Philippines",
+      ID: locale === "zh-CN" ? "印度尼西亚" : locale === "zh-TW" ? "印度尼西亞" : locale === "th" ? "อินโดนีเซีย" : locale === "id" ? "Indonesia" : "Indonesia",
+      LA: locale === "zh-CN" ? "老挝" : locale === "zh-TW" ? "老撾" : locale === "th" ? "ลาว" : locale === "id" ? "Laos" : "Laos",
+      "菲律宾籍": locale === "zh-CN" ? "菲律宾" : locale === "zh-TW" ? "菲律賓" : "Philippines",
+      "印度尼西亚籍": locale === "zh-CN" ? "印度尼西亚" : locale === "zh-TW" ? "印度尼西亞" : "Indonesia",
+      "印尼籍": locale === "zh-CN" ? "印度尼西亚" : locale === "zh-TW" ? "印度尼西亞" : "Indonesia",
+      "越南籍": locale === "zh-CN" ? "越南" : locale === "zh-TW" ? "越南" : "Vietnam",
+      "中国籍": locale === "zh-CN" ? "中国" : locale === "zh-TW" ? "中國" : "China",
+      "泰国籍": locale === "zh-CN" ? "泰国" : locale === "zh-TW" ? "泰國" : "Thailand",
+      "缅甸籍": locale === "zh-CN" ? "缅甸" : locale === "zh-TW" ? "緬甸" : "Myanmar",
+      "老挝籍": locale === "zh-CN" ? "老挝" : locale === "zh-TW" ? "老撾" : "Laos",
+      "柬埔寨籍": locale === "zh-CN" ? "柬埔寨" : locale === "zh-TW" ? "柬埔寨" : "Cambodia"
     };
     return flags[code as keyof typeof flags] || (locale === "zh-CN" ? "外籍" : locale === "zh-TW" ? "外籍" : locale === "th" ? "ต่างชาติ" : locale === "id" ? "Asing" : "Foreign");
   };

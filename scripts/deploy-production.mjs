@@ -22,6 +22,11 @@ function run(cmd, options = {}) {
     cwd: REPO_ROOT,
     stdio: "inherit",
     shell: true,
+    env: {
+      ...process.env,
+      NO_UPDATE_NOTIFIER: "1",
+      VERCEL_TELEMETRY_DISABLED: "1",
+    },
     ...options,
   });
 }
@@ -31,6 +36,11 @@ function runCapture(cmd, options = {}) {
     cwd: REPO_ROOT,
     encoding: "utf-8",
     shell: true,
+    env: {
+      ...process.env,
+      NO_UPDATE_NOTIFIER: "1",
+      VERCEL_TELEMETRY_DISABLED: "1",
+    },
     ...options,
   }).trim();
 }

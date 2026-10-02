@@ -673,7 +673,7 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
   const handleOpenAdjustment = async (result: AttendanceCalculationResult) => {
     setAdjustingResult(result);
     setAdjustForm({
-      date: result.date,
+      date: result.date ? String(result.date).slice(0, 10) : "",
       type: "",
       inTime: result.rawInTime || null,
       outTime: result.rawOutTime || null,
@@ -686,8 +686,9 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
     setError("");
     try {
       const detail = result.attendanceRecordId ? await fetchAttendanceCalculationDetail(result.id) : null;
+      const recordDate = detail?.record?.date || result.date;
       setAdjustForm({
-        date: detail?.record?.date || result.date,
+        date: recordDate ? String(recordDate).slice(0, 10) : "",
         type: detail?.record?.type || "",
         inTime: detail?.record?.inTime || result.rawInTime || null,
         outTime: detail?.record?.outTime || result.rawOutTime || null,
@@ -743,6 +744,7 @@ export function AttendanceTable({ isActive }: AttendanceTableProps) {
         && Boolean(adjustForm.employeeOvertimeRuleEnabled ?? configForm?.overtimeRuleEnabled);
       const adjustmentPayload: AttendanceRecordUpdatePayload = {
         ...adjustForm,
+        date: adjustForm.date ? String(adjustForm.date).slice(0, 10) : adjustForm.date,
         type: adjustForm.type,
         employeeOvertimeHourlyFee: isHourlyEmployeeWithRule
           ? null
