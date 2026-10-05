@@ -194,7 +194,8 @@ function validatePayload(payload) {
 }
 
 function employeeNo() {
-  return `EMP${Date.now().toString().slice(-8)}${String(Math.floor(Math.random() * 90) + 10)}`;
+  // 时间戳后8位 + 4位随机数（1000-9999），碰撞概率 < 0.01%/ms
+  return `EMP${Date.now().toString().slice(-8)}${String(Math.floor(Math.random() * 9000) + 1000)}`;
 }
 
 async function compatibilityRuleId(supabase, ownerUserId, warehouseCode = "TH") {
@@ -482,7 +483,7 @@ async function ensureEmployeeAccountDirect(client, employee, ownerUserId, custom
 function accountDto(account, employee) {
   return {
     id: account.id, employeeId: Number(employee.id), account: account.account, status: account.status,
-    lastLoginAt: account.last_login_at, passwordUpdatedAt: account.password_updated_at, defaultPasswordHint: DEFAULT_EMPLOYEE_PASSWORD
+    lastLoginAt: account.last_login_at, passwordUpdatedAt: account.password_updated_at
   };
 }
 
@@ -780,7 +781,59 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
           return res.status(201).json({ employee: empDto, ruleHistory: [] });
         } catch (err) {
           if (client) await client.query("ROLLBACK").catch(() => {});
-          if (err.code === "23505" || err.statusCode === 400 || err.statusCode === 403) {
+          // employee_no 唯一冲突时重新生成编号重试一次
+          if (err.code === "23505" && err.detail && err.detail.includes("employee_no")) {
+            client = null;
+            try {
+              client = await directDbPool.connect();
+              await client.query("BEGIN");
+              const ruleId2 = await compatibilityRuleIdDirect(client, req.authUser.id, payload.warehouseCode);
+              const empNo2 = employeeNo();
+              const insertRes2 = await client.query(`
+                INSERT INTO workspace_employees (
+                  owner_user_id, warehouse_code, employee_no, name, nickname, gender,
+                  nationality, country, phone, role, dept, join_date, status,
+                  attendance_rule_id, salary_type, hourly_rate, fixed_salary, daily_wage,
+                  overtime_hourly_fee, ot_rule_type, ot_base_rate, ot_multiplier_workday,
+                  ot_multiplier_weekend, ot_multiplier_holiday, is_dispatch_personnel,
+                  attendance_bonus, social_security, meal_allowance, service_fee_rate,
+                  currency, bank_card_number, bank_name, id_card, photo, license_fee, is_deleted,
+                  created_at, updated_at
+                ) VALUES (
+                  $1, $2, $3, $4, $5, $6,
+                  $7, $8, $9, $10, $11, $12, $13,
+                  $14, $15, $16, $17, $18,
+                  $19, $20, $21, $22,
+                  $23, $24, $25,
+                  $26, $27, $28, $29,
+                  $30, $31, $32, $33, $34, $35, false,
+                  NOW(), NOW()
+                ) RETURNING *;
+              `, [
+                req.authUser.id, payload.warehouseCode, empNo2, payload.name, payload.nickname, payload.gender,
+                payload.nationality, payload.country, payload.phone, payload.role, payload.dept, payload.joinDate, payload.status,
+                ruleId2, payload.salaryType, payload.hourlyRate, payload.fixedSalary, payload.dailyWage,
+                payload.overtimeHourlyFee, payload.otRuleType, payload.otBaseRate, payload.otMultiplierWorkday,
+                payload.otMultiplierWeekend, payload.otMultiplierHoliday, payload.isDispatchPersonnel,
+                payload.attendanceBonus, payload.socialSecurity, payload.mealAllowance, payload.serviceFeeRate,
+                payload.currency, payload.bankCardNumber, payload.bankName, payload.idCard, payload.photo, payload.licenseFee
+              ]);
+              const data2 = insertRes2.rows[0];
+              await ensureSalaryProfileDirect(client, data2, req.authUser.id, payload.salaryEffectiveStartDate);
+              const appAccount2 = await ensureEmployeeAccountDirect(client, data2, req.authUser.id, payload.username, payload.password, payload.permissions);
+              await client.query("COMMIT");
+              const empDto2 = mapEmployeeRow(data2);
+              if (appAccount2?.account) empDto2.username = appAccount2.account;
+              if (Array.isArray(payload.permissions)) empDto2.permissions = payload.permissions;
+              return res.status(201).json({ employee: empDto2, ruleHistory: [] });
+            } catch (retryErr) {
+              if (client) await client.query("ROLLBACK").catch(() => {});
+              console.warn("[admin-v4/employees] directDbPool insert retry failed, falling back to REST:", retryErr.message);
+            } finally {
+              if (client) client.release();
+              client = null;
+            }
+          } else if (err.code === "23505" || err.statusCode === 400 || err.statusCode === 403) {
             throw err;
           }
           console.warn("[admin-v4/employees] directDbPool insert failed, falling back to REST:", err.message);

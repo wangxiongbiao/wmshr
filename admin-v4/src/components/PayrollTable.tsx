@@ -395,7 +395,7 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
     };
   }, [payrollSummary, payouts, selectedMonth]);
 
-  const currentCurrency = config?.currency || employees[0]?.currency || "CNY";
+  const currentCurrency = config?.currency || employees[0]?.currency || "THB";
 
   // Quick Action: Payout or Retract
   const handleTogglePayout = (empId: number) => {

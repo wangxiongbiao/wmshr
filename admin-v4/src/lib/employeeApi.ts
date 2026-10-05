@@ -70,7 +70,8 @@ const statusToApi = (status: Employee["status"]): ApiEmployee["status"] =>
   status === "离职" ? "resigned" : status === "休假" ? "on_leave" : status === "试用" ? "probation" : "active";
 
 export function fromApiEmployee(employee: ApiEmployee): Employee {
-  const isHourly = employee.salaryType === "hourly" || (!employee.fixedSalary && Boolean(employee.hourlyRate));
+  // 与后端 employeePayload 保持一致：fixedSalary === null 时才视为时薪制
+  const isHourly = employee.salaryType === "hourly" || (employee.fixedSalary == null && employee.hourlyRate != null && employee.hourlyRate > 0);
   return {
     id: employee.id,
     employeeNo: employee.employeeNo,
@@ -87,11 +88,11 @@ export function fromApiEmployee(employee: ApiEmployee): Employee {
     hourlyRate: employee.hourlyRate != null ? Number(employee.hourlyRate) : (employee.fixedSalary ? Math.round(Number(employee.fixedSalary) / 240) : undefined),
     baseMonthlyWage: employee.fixedSalary != null ? Number(employee.fixedSalary) : (employee.hourlyRate ? Math.round(Number(employee.hourlyRate) * 240) : undefined),
     dailyWage: employee.dailyWage != null ? Number(employee.dailyWage) : (employee.fixedSalary ? Math.round(Number(employee.fixedSalary) / 30) : (employee.hourlyRate ? Math.round(Number(employee.hourlyRate) * 8) : undefined)),
-    attendanceBonus: employee.attendanceBonus,
-    socialSecurity: employee.socialSecurity,
+    attendanceBonus: employee.attendanceBonus ?? 0,
+    socialSecurity: employee.socialSecurity ?? 0,
     mealAllowanceDaily: employee.mealAllowance,
     licenseFee: employee.licenseFee != null ? Number(employee.licenseFee) : 0,
-    currency: employee.currency,
+    currency: (employee.currency || "THB") as Employee["currency"],
     joinDate: formatDate(employee.joinDate, ""),
     status: statusFromApi(employee.status),
     photo: employee.photo,
@@ -103,6 +104,7 @@ export function fromApiEmployee(employee: ApiEmployee): Employee {
     idCard: employee.idCard || undefined,
     permissions: employee.permissions || [],
     otRuleType: employee.otRuleType || "fixed",
+    // 后端用 overtime_hourly_fee 列同时存储旧版加班费和新版固定加班率，两字段指向同一列，取其一即可
     otFixedRate: employee.otFixedRate != null ? Number(employee.otFixedRate) : (employee.overtimeHourlyFee != null ? Number(employee.overtimeHourlyFee) : undefined),
     otBaseRate: employee.otBaseRate != null ? Number(employee.otBaseRate) : undefined,
     otMultiplierWorkday: employee.otMultiplierWorkday != null ? Number(employee.otMultiplierWorkday) : 1.5,
@@ -118,6 +120,11 @@ function toApiEmployee(employee: Partial<Employee>) {
   const dailyWage = employee.dailyWage != null && (employee.dailyWage as any) !== "" ? Number(employee.dailyWage) : null;
   const fixedSalary = baseMonthlyWage != null ? baseMonthlyWage : (dailyWage != null ? dailyWage * 30 : null);
   const salaryType = employee.salaryType || (hourlyRate !== null && fixedSalary === null ? "hourly" : "fixed");
+  // 以 salaryType 为权威：时薪制时将 fixedSalary 置 null，固定薪时将 hourlyRate 置 null
+  // 防止用户意外填写另一类薪资字段后保存，导致后端读回时薪资类型被翻转
+  const finalHourlyRate = salaryType === "hourly" ? hourlyRate : null;
+  const finalFixedSalary = salaryType === "fixed" ? fixedSalary : null;
+  const finalDailyWage = salaryType === "fixed" ? dailyWage : null;
 
   const otRuleType = employee.otRuleType === "multiplier" ? "multiplier" : "fixed";
   const otFixedRate = employee.otFixedRate != null && !isNaN(Number(employee.otFixedRate)) ? Number(employee.otFixedRate) : null;
@@ -139,20 +146,20 @@ function toApiEmployee(employee: Partial<Employee>) {
     joinDate: formatDate(employee.joinDate, ""),
     status: statusToApi(employee.status || "在职"),
     salaryType,
-    hourlyRate,
-    fixedSalary,
-    dailyWage,
+    hourlyRate: finalHourlyRate,
+    fixedSalary: finalFixedSalary,
+    dailyWage: finalDailyWage,
     isDispatchPersonnel: employee.sourceType === "劳务派遣",
     attendanceBonus: Number(employee.attendanceBonus || 0),
     socialSecurity: Number(employee.socialSecurity || 0),
     mealAllowance: Number(employee.mealAllowanceDaily || 0),
     licenseFee: Number(employee.licenseFee || 0),
     serviceFeeRate: Number(employee.dispatchCommissionRate || 0),
-    currency: employee.currency,
+    currency: employee.currency || "THB", // 避免传 undefined 导致后端 fallback 覆盖用户选择
     bankCardNumber: employee.bankCardNumber || null,
     bankName: employee.bankName || null,
     idCard: employee.idCard || null,
-    overtimeHourlyFee: otFixedRate,
+    overtimeHourlyFee: otFixedRate, // 向后兼容旧版字段名，与 otFixedRate 指向同一列
     otRuleType,
     otFixedRate,
     otBaseRate,

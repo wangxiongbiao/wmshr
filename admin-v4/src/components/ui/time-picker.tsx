@@ -101,6 +101,12 @@ export const TimePicker = React.forwardRef<HTMLInputElement, TimePickerProps>(
     const hours = Array.from({ length: 24 }, (_, i) => padZero(i));
     const minutes = Array.from({ length: 12 }, (_, i) => padZero(i * 5));
 
+    const handleColumnWheel = React.useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+      const container = e.currentTarget;
+      container.scrollTop += e.deltaY;
+      e.stopPropagation();
+    }, []);
+
     return (
       <div className="relative inline-block w-full">
         <input
@@ -190,9 +196,9 @@ export const TimePicker = React.forwardRef<HTMLInputElement, TimePickerProps>(
                   <span>时</span>
                   <span>分</span>
                 </div>
-                <div className="grid grid-cols-2 gap-1 h-32 overflow-hidden">
+                <div className="grid grid-cols-2 gap-1">
                   {/* Hours */}
-                  <div className="overflow-y-auto space-y-0.5 pr-1 text-center scrollbar-thin">
+                  <div className="max-h-32 overflow-y-auto space-y-0.5 pr-1 text-center scrollbar-thin" onWheel={handleColumnWheel}>
                     {hours.map((h) => (
                       <button
                         key={h}
@@ -211,7 +217,7 @@ export const TimePicker = React.forwardRef<HTMLInputElement, TimePickerProps>(
                   </div>
 
                   {/* Minutes */}
-                  <div className="overflow-y-auto space-y-0.5 pr-1 text-center scrollbar-thin">
+                  <div className="max-h-32 overflow-y-auto space-y-0.5 pr-1 text-center scrollbar-thin" onWheel={handleColumnWheel}>
                     {minutes.map((m) => (
                       <button
                         key={m}

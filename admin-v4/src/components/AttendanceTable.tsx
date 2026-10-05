@@ -1217,43 +1217,43 @@ export function AttendanceTable({
                         {isAbsentOrLeave ? <span className="text-slate-400">-</span> : <span className="text-slate-700 font-mono">{formatDuration(details.valid)}</span>}
                       </td>
                       <td className="px-4 py-4.5 text-sm text-center whitespace-nowrap">
-                        {isAbsentOrLeave ? <span className="text-slate-400 font-mono">0.00h</span> : <span className="font-mono text-slate-700">{formatDuration(details.ot)}</span>}
+                        {isAbsentOrLeave ? <span className="text-slate-400">-</span> : <span className="font-mono text-slate-700">{formatDuration(details.ot)}</span>}
                       </td>
                       <td className={cn(
                         "px-4 py-4.5 text-sm font-mono text-right font-medium whitespace-nowrap",
                         isAbsentOrLeave ? "text-slate-400" : "text-slate-700"
                       )}>
-                        {formatCurrency(shiftPay, emp.currency)}
+                        {isAbsentOrLeave ? '-' : formatCurrency(shiftPay, emp.currency)}
                       </td>
                       <td className={cn(
                         "px-4 py-4.5 text-sm font-mono text-right font-medium whitespace-nowrap",
                         isAbsentOrLeave ? "text-slate-400" : "text-slate-700"
                       )}>
-                        {formatCurrency(otPay, emp.currency)}
+                        {isAbsentOrLeave ? '-' : formatCurrency(otPay, emp.currency)}
                       </td>
                       <td className={cn(
                         "px-4 py-4.5 text-sm font-mono text-right font-medium whitespace-nowrap",
                         isAbsentOrLeave ? "text-slate-400" : "text-slate-700"
                       )}>
-                        {formatCurrency(mealAllowance, emp.currency)}
+                        {isAbsentOrLeave ? '-' : formatCurrency(mealAllowance, emp.currency)}
                       </td>
                       <td className={cn(
                         "px-4 py-4.5 text-sm font-mono text-right font-medium whitespace-nowrap",
                         isAbsentOrLeave ? "text-slate-400" : "text-slate-700"
                       )}>
-                        {formatCurrency(dailySocialSecurity, emp.currency)}
+                        {isAbsentOrLeave ? '-' : formatCurrency(dailySocialSecurity, emp.currency)}
                       </td>
                       <td className={cn(
                         "px-4 py-4.5 text-sm font-mono text-right font-medium whitespace-nowrap",
                         isAbsentOrLeave ? "text-slate-400" : "text-slate-700"
                       )}>
-                        {formatCurrency(dailyServiceFee, emp.currency)}
+                        {isAbsentOrLeave ? '-' : formatCurrency(dailyServiceFee, emp.currency)}
                       </td>
                       <td className={cn(
                         "px-4 py-4.5 text-sm font-mono text-right font-bold whitespace-nowrap",
                         isAbsentOrLeave ? "text-slate-400" : "text-blue-600"
                       )}>
-                        {formatCurrency(totalPay, emp.currency)}
+                        {isAbsentOrLeave ? '-' : formatCurrency(totalPay, emp.currency)}
                       </td>
                       <td className={cn(
                         "sticky right-0 transition-colors z-10 px-4 py-4.5 text-center whitespace-nowrap shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.05)]",

@@ -253,19 +253,35 @@ export default function App() {
 
   const [selectedAttIds, setSelectedAttIds] = useState<Set<string>>(new Set());
 
+  // 分批拉取所有员工，直到 hasMore = false
+  const fetchAllEmployees = async (status: "active" | "resigned", warehouse: string) => {
+    const PAGE_SIZE = 50;
+    let page = 1;
+    let allItems: Employee[] = [];
+    while (true) {
+      const result = await fetchEmployees(status, "", page, PAGE_SIZE, warehouse);
+      allItems = [...allItems, ...result.items];
+      if (!result.hasMore) break;
+      page++;
+    }
+    return allItems;
+  };
+
   const reloadEmployees = async (options?: { silent?: boolean }) => {
     const silent = options?.silent ?? false;
     if (!silent) setEmployeesLoading(true);
     try {
       const warehouse = adminUser?.countryCode || "TH";
-      const [active, resigned, attRecords, leaves, cloudConfig, cloudHolidays] = await Promise.all([
-        fetchEmployees("active", "", 1, 50, warehouse),
-        fetchEmployees("resigned", "", 1, 50, warehouse),
+      const [activeItems, resignedItems, attRecords, leaves, cloudConfig, cloudHolidays] = await Promise.all([
+        fetchAllEmployees("active", warehouse),
+        fetchAllEmployees("resigned", warehouse),
         fetchAttendanceRecords({ warehouseCode: warehouse }).catch(() => [] as AttendanceRecord[]),
         fetchLeaveRequests(warehouse).catch(() => [] as LeaveRequest[]),
         fetchAttendanceConfig(warehouse).catch(() => null),
         fetchHolidays(warehouse).catch(() => [] as HolidayRecord[])
       ]);
+      const active = { items: activeItems };
+      const resigned = { items: resignedItems };
       setEmployees([...active.items, ...resigned.items]);
       setEmployeeReloadKey(k => k + 1);
       if (Array.isArray(attRecords)) {
@@ -365,7 +381,7 @@ export default function App() {
   const employeesWithSettlementCurrency = useMemo(() => {
     return employees.map(emp => ({
       ...emp,
-      currency: config.currency
+      currency: emp.currency || config.currency
     }));
   }, [employees, config.currency]);
 

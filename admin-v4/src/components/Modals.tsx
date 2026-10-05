@@ -371,6 +371,7 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
           permissions: employee.permissions || [],
           idCard: employee.idCard || "",
           licenseFee: employee.licenseFee !== undefined && employee.licenseFee !== null ? Number(employee.licenseFee) : undefined,
+          currency: (employee.currency || "THB") as CurrencyCode, // 防止 null 导致 formData.currency=null，提交时被后端 fallback 覆盖
           password: ""
         });
       } else {
@@ -695,14 +696,15 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
                   <Label className="block text-xs font-semibold text-slate-600 mb-1.5">
                     {getTranslation("modal_employee_country", lang)}
                   </Label>
-                  <Select 
-                    name="country" 
-                    value={formData.country || "MM"} 
+                  <Select
+                    name="country"
+                    value={formData.country || "MM"}
                     onValueChange={(val) => {
                       const nextCountry = val as CountryCode;
                       setFormData(prev => ({
                         ...prev,
                         country: nextCountry,
+                        nationality: nextCountry, // 国籍与国籍选项同步，确保提交时不被旧 nationality 覆盖
                         currency: !employee ? getCurrencyForCountry(nextCountry) : prev.currency
                       }));
                     }}
