@@ -104,6 +104,8 @@ export const TRANSLATIONS: Record<string, Record<Language, string>> = {
   "modal_employee_fixed_bonus": { "zh-CN": "固定全勤奖金", "zh-TW": "固定全勤獎金", "en": "Fixed Attendance Bonus", "th": "เบี้ยขยันประจำงวด" },
   "modal_employee_social_security": { "zh-CN": "代扣代缴社保费", "zh-TW": "代扣代繳社保費", "en": "Social Security Deduction", "th": "หักเงินสมทบประกันสังคม" },
   "modal_employee_ot_rule": { "zh-CN": "加班算薪规则", "zh-TW": "加班算薪規則", "en": "Overtime Rate Rule", "th": "กฎการจ่ายค่าล่วงเวลา" },
+  "modal_employee_tax_rate": { "zh-CN": "个人所得税比例 (%)", "zh-TW": "個人所得稅比例 (%)", "en": "Personal Income Tax Rate (%)", "th": "อัตราภาษีเงินได้บุคคลธรรมดา (%)" },
+  "modal_employee_tax_rate_desc": { "zh-CN": "月度工资核算时代扣个人所得税比例，若不填则默认按 5% 计算", "zh-TW": "月度工資核算時代扣個人所得稅比例，若不填則預設按 5% 計算", "en": "Withholding personal income tax rate for monthly payroll, defaults to 5%", "th": "อัตราภาษีเงินได้บุคคลธรรมดาหัก ณ ที่จ่ายในการคำนวณเงินเดือนรายเดือน เริ่มต้น 5%" },
 
   // Delete / Resign Modal
   "modal_delete_confirm_title": { "zh-CN": "办理员工离职确认", "zh-TW": "辦理員工離職確認", "en": "Confirm Employee Resignation?", "th": "ยืนยันการบันทึกพนักงานลาออก?" },

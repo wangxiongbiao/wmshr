@@ -86,6 +86,7 @@ export interface Employee {
   otMultiplierWorkday?: number;
   otMultiplierWeekend?: number;
   otMultiplierHoliday?: number;
+  taxRate?: number; // 个人所得税比例 (百分比数字，如 5 代表 5%，默认 5)
   mealAllowanceDaily?: number;
   licenseFee?: number; // 证书补贴/岗位资质费
   permissions?: string[]; // 员工所拥有的具体后台权限

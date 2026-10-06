@@ -332,7 +332,7 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
     hourlyRate: undefined, baseMonthlyWage: undefined, dailyWage: undefined, attendanceBonus: undefined, socialSecurity: undefined, currency: "THB",
     joinDate: new Date().toISOString().split("T")[0], status: "在职", photo: null, sourceType: "自招", dispatchCommissionRate: undefined,
     otRuleType: "fixed", otFixedRate: undefined, otBaseRate: undefined, otMultiplierWorkday: 1.5, otMultiplierWeekend: 2.0, otMultiplierHoliday: 3.0,
-    mealAllowanceDaily: undefined, licenseFee: undefined, idCard: "", username: "", password: ""
+    taxRate: 5, mealAllowanceDaily: undefined, licenseFee: undefined, idCard: "", username: "", password: ""
   });
   const [errorMsg, setErrorMsg] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -364,13 +364,23 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
           status: employee.status || "在职",
           warehouseCode: employee.warehouseCode || defaultWarehouseCode || "TH",
           sourceType: employee.sourceType || "自招",
+          hourlyRate: employee.hourlyRate !== undefined && employee.hourlyRate !== null && Number(employee.hourlyRate) > 0 ? Number(employee.hourlyRate) : undefined,
+          baseMonthlyWage: employee.baseMonthlyWage !== undefined && employee.baseMonthlyWage !== null && Number(employee.baseMonthlyWage) > 0 ? Number(employee.baseMonthlyWage) : undefined,
+          dailyWage: employee.dailyWage !== undefined && employee.dailyWage !== null && Number(employee.dailyWage) > 0 ? Number(employee.dailyWage) : undefined,
+          attendanceBonus: employee.attendanceBonus !== undefined && employee.attendanceBonus !== null && Number(employee.attendanceBonus) > 0 ? Number(employee.attendanceBonus) : undefined,
+          socialSecurity: employee.socialSecurity !== undefined && employee.socialSecurity !== null && Number(employee.socialSecurity) > 0 ? Number(employee.socialSecurity) : undefined,
+          mealAllowanceDaily: employee.mealAllowanceDaily !== undefined && employee.mealAllowanceDaily !== null && Number(employee.mealAllowanceDaily) > 0 ? Number(employee.mealAllowanceDaily) : undefined,
+          licenseFee: employee.licenseFee !== undefined && employee.licenseFee !== null && Number(employee.licenseFee) > 0 ? Number(employee.licenseFee) : undefined,
+          dispatchCommissionRate: employee.dispatchCommissionRate !== undefined && employee.dispatchCommissionRate !== null && Number(employee.dispatchCommissionRate) > 0 ? Number(employee.dispatchCommissionRate) : undefined,
           otRuleType: employee.otRuleType || "fixed",
+          otFixedRate: employee.otFixedRate !== undefined && employee.otFixedRate !== null && Number(employee.otFixedRate) > 0 ? Number(employee.otFixedRate) : undefined,
+          otBaseRate: employee.otBaseRate !== undefined && employee.otBaseRate !== null && Number(employee.otBaseRate) > 0 ? Number(employee.otBaseRate) : undefined,
           otMultiplierWorkday: employee.otMultiplierWorkday ?? 1.5,
           otMultiplierWeekend: employee.otMultiplierWeekend ?? 2.0,
           otMultiplierHoliday: employee.otMultiplierHoliday ?? 3.0,
+          taxRate: employee.taxRate !== undefined && employee.taxRate !== null ? Number(employee.taxRate) : 5,
           permissions: employee.permissions || [],
           idCard: employee.idCard || "",
-          licenseFee: employee.licenseFee !== undefined && employee.licenseFee !== null ? Number(employee.licenseFee) : undefined,
           currency: (employee.currency || "THB") as CurrencyCode, // 防止 null 导致 formData.currency=null，提交时被后端 fallback 覆盖
           password: ""
         });
@@ -381,7 +391,7 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
           hourlyRate: undefined, baseMonthlyWage: undefined, dailyWage: undefined, attendanceBonus: undefined, socialSecurity: undefined, currency: "THB",
           joinDate: getNowDateStr(), status: "在职", photo: null, username: "", password: randomPass,
           sourceType: "自招", dispatchCommissionRate: undefined, otRuleType: "fixed", otFixedRate: undefined, otBaseRate: undefined,
-          otMultiplierWorkday: 1.5, otMultiplierWeekend: 2.0, otMultiplierHoliday: 3.0,
+          otMultiplierWorkday: 1.5, otMultiplierWeekend: 2.0, otMultiplierHoliday: 3.0, taxRate: 5,
           mealAllowanceDaily: undefined, licenseFee: undefined, permissions: [], idCard: ""
         });
       }
@@ -436,6 +446,7 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
       name === "otMultiplierWorkday" ||
       name === "otMultiplierWeekend" ||
       name === "otMultiplierHoliday" ||
+      name === "taxRate" ||
       name === "mealAllowanceDaily" ||
       name === "licenseFee"
     ) {
@@ -541,18 +552,18 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
         e.preventDefault();
         if (isSubmitting) return;
 
-        const hasBaseWage = formData.baseMonthlyWage !== undefined && formData.baseMonthlyWage !== null && formData.baseMonthlyWage > 0;
-        const hasHourlyRate = formData.hourlyRate !== undefined && formData.hourlyRate !== null && formData.hourlyRate > 0;
-        const hasDailyWage = formData.dailyWage !== undefined && formData.dailyWage !== null && formData.dailyWage > 0;
+        const hasBaseWage = formData.baseMonthlyWage !== undefined && formData.baseMonthlyWage !== null && Number(formData.baseMonthlyWage) > 0;
+        const hasHourlyRate = !hasBaseWage && formData.hourlyRate !== undefined && formData.hourlyRate !== null && Number(formData.hourlyRate) > 0;
+        const hasDailyWage = !hasBaseWage && formData.dailyWage !== undefined && formData.dailyWage !== null && Number(formData.dailyWage) > 0;
         if (!hasBaseWage && !hasHourlyRate && !hasDailyWage) {
           setErrorMsg(
-            lang === "en" 
-              ? "Please enter at least one of: Hourly Rate, Fixed Daily Wage, or Basic Monthly Wage!"
+            lang === "en"
+              ? "Please enter Basic Monthly Wage, or enter Fixed Daily Wage / Hourly Rate!"
               : lang === "th"
-                ? "กรุณาระบุอย่างน้อยหนึ่งรายการ: อัตราค่าจ้างรายชั่วโมง, อัตราค่าจ้างรายวัน หรือเงินเดือนพื้นฐาน!"
+                ? "กรุณาระบุเงินเดือนพื้นฐาน หรือระบุค่าจ้างรายวัน/รายชั่วโมง!"
                 : lang === "zh-TW"
-                  ? "請至少輸入「時薪」、「固定日薪」或「基礎工資（為月工資）」其中的一項！"
-                  : "请至少输入“时薪”、“固定日薪”或“基础工资（为月工资）”其中的一项！"
+                  ? "請輸入「固定月薪」，或輸入「固定日薪」/「時薪」！"
+                  : "请输入“固定月薪”，或输入“固定日薪”/“时薪”！"
           );
           formContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
           return;
@@ -586,11 +597,23 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
           formContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
           return;
         }
-        
+
         const finalUsername = formData.username?.trim() || formData.name?.trim().toLowerCase().replace(/[^a-z0-9]/g, "") || "emp" + Date.now().toString().slice(-4);
         const finalPassword = formData.password?.trim() || (!employee ? Math.floor(100000 + Math.random() * 900000).toString() : undefined);
-        const finalMealAllowanceDaily = formData.mealAllowanceDaily !== undefined && formData.mealAllowanceDaily !== null ? formData.mealAllowanceDaily : 0;
-        const finalOtFixedRate = formData.otFixedRate !== undefined && formData.otFixedRate !== null ? formData.otFixedRate : 0;
+        const finalMealAllowanceDaily = formData.mealAllowanceDaily !== undefined && formData.mealAllowanceDaily !== null && Number(formData.mealAllowanceDaily) > 0 ? Number(formData.mealAllowanceDaily) : undefined;
+        const finalOtFixedRate = formData.otFixedRate !== undefined && formData.otFixedRate !== null && Number(formData.otFixedRate) > 0 ? Number(formData.otFixedRate) : undefined;
+        const finalOtBaseRate = formData.otBaseRate !== undefined && formData.otBaseRate !== null && Number(formData.otBaseRate) > 0 ? Number(formData.otBaseRate) : undefined;
+        const finalAttendanceBonus = formData.attendanceBonus !== undefined && formData.attendanceBonus !== null && Number(formData.attendanceBonus) > 0 ? Number(formData.attendanceBonus) : undefined;
+        const finalSocialSecurity = formData.socialSecurity !== undefined && formData.socialSecurity !== null && Number(formData.socialSecurity) > 0 ? Number(formData.socialSecurity) : undefined;
+        const finalLicenseFee = formData.licenseFee !== undefined && formData.licenseFee !== null && Number(formData.licenseFee) > 0 ? Number(formData.licenseFee) : undefined;
+        const finalDispatchCommissionRate = formData.dispatchCommissionRate !== undefined && formData.dispatchCommissionRate !== null && Number(formData.dispatchCommissionRate) > 0 ? Number(formData.dispatchCommissionRate) : undefined;
+
+        const finalTaxRate = formData.taxRate !== undefined && formData.taxRate !== null && !isNaN(Number(formData.taxRate)) ? Number(formData.taxRate) : 5;
+        if (finalTaxRate < 0 || finalTaxRate > 100) {
+          setErrorMsg(lang === "en" ? "Tax rate must be between 0% and 100%!" : "个人所得税比例必须在 0% 到 100% 之间！");
+          formContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+          return;
+        }
 
         try {
           setIsSubmitting(true);
@@ -602,16 +625,22 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
             gender: formData.gender || "female",
             username: finalUsername,
             password: finalPassword,
-            hourlyRate: formData.hourlyRate,
-            baseMonthlyWage: formData.baseMonthlyWage,
-            dailyWage: formData.dailyWage,
+            hourlyRate: hasBaseWage ? undefined : (formData.hourlyRate !== undefined && Number(formData.hourlyRate) > 0 ? Number(formData.hourlyRate) : undefined),
+            baseMonthlyWage: hasBaseWage ? Number(formData.baseMonthlyWage) : undefined,
+            dailyWage: hasBaseWage ? undefined : (formData.dailyWage !== undefined && Number(formData.dailyWage) > 0 ? Number(formData.dailyWage) : undefined),
+            salaryType: hasBaseWage ? "fixed" : "hourly",
             mealAllowanceDaily: finalMealAllowanceDaily,
+            attendanceBonus: finalAttendanceBonus,
+            socialSecurity: finalSocialSecurity,
+            licenseFee: finalLicenseFee,
+            dispatchCommissionRate: finalDispatchCommissionRate,
             otRuleType: formData.otRuleType || "fixed",
             otFixedRate: finalOtFixedRate,
-            otBaseRate: formData.otBaseRate,
+            otBaseRate: finalOtBaseRate,
             otMultiplierWorkday: formData.otMultiplierWorkday ?? 1.5,
             otMultiplierWeekend: formData.otMultiplierWeekend ?? 2.0,
-            otMultiplierHoliday: formData.otMultiplierHoliday ?? 3.0
+            otMultiplierHoliday: formData.otMultiplierHoliday ?? 3.0,
+            taxRate: finalTaxRate
           });
           onClose();
         } catch (err) {
@@ -819,7 +848,7 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
                     <Label className="block text-xs font-bold text-blue-600 mb-1.5">
                       {getTranslation("modal_employee_dispatch_comm", lang)} <span className="text-red-500">*</span>
                     </Label>
-                    <Input type="number" name="dispatchCommissionRate" step="0.1" min="0" max="100" value={formData.dispatchCommissionRate !== undefined ? formData.dispatchCommissionRate : ""} onChange={handleChange} className="border-blue-200 bg-blue-50/40 text-blue-700 font-semibold" placeholder="如: 5.5" />
+                    <Input type="number" name="dispatchCommissionRate" step="0.1" min="0" max="100" value={formData.dispatchCommissionRate !== undefined && formData.dispatchCommissionRate !== null && Number(formData.dispatchCommissionRate) > 0 ? formData.dispatchCommissionRate : ""} onChange={handleChange} className="border-blue-200 bg-blue-50/40 text-blue-700 font-semibold" placeholder="如: 5.5" />
                   </div>
                 ) : (
                   <div>
@@ -834,59 +863,115 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
               </div>
 
               {/* 3个平行薪资输入项（时薪、固定日薪、固定月薪） */}
-              <div className="col-span-2 pt-1 border-t border-slate-200/60">
-                <span className="text-xs font-semibold text-slate-700 flex items-center gap-1">
-                  <span className="text-red-500 font-bold">*</span>
-                  {lang === "en" 
-                    ? "Wage Standard (Enter at least one: Hourly / Daily / Monthly)" 
-                    : lang === "th" 
-                      ? "เกณฑ์ค่าจ้าง (ระบุอย่างน้อยหนึ่งรายการ: รายชั่วโมง / รายวัน / รายเดือน)" 
-                      : lang === "zh-TW" 
-                        ? "薪資標準（時薪 / 固定日薪 / 固定月薪 至少填一項）" 
-                        : "薪资标准（时薪 / 固定日薪 / 固定月薪 至少填一项）"}
-                </span>
-              </div>
-              <div>
-                <Label className="block text-xs font-semibold text-slate-600 mb-1.5">
-                  {lang === "en" ? "Hourly Rate (optional)" : lang === "th" ? "อัตราค่าจ้างรายชั่วโมง (ถ้ามี)" : lang === "zh-TW" ? "時薪 (如不輸，則根據日薪或月薪計)" : "时薪 (如不输，则根据日薪或月薪计)"}
-                </Label>
-                <div className="relative">
-                  <Input type="number" name="hourlyRate" step="0.5" value={formData.hourlyRate !== undefined ? formData.hourlyRate : ""} onChange={handleChange} className="bg-white font-medium" placeholder="如: 300" />
-                  {formData.hourlyRate !== undefined && formData.hourlyRate > 0 && (
-                    <span className="absolute right-3 top-2 text-xs text-slate-400 font-normal pointer-events-none">
-                      ≈ {(formData.hourlyRate * 8 * 30).toLocaleString()} {formData.currency || "THB"}/月参考
-                    </span>
-                  )}
-                </div>
-              </div>
+              {(() => {
+                const isMonthlyWageActive = Boolean(formData.baseMonthlyWage !== undefined && formData.baseMonthlyWage !== null && Number(formData.baseMonthlyWage) > 0);
+                return (
+                  <>
+                    <div className="col-span-2 pt-1 border-t border-slate-200/60">
+                      <span className="text-xs font-semibold text-slate-700 flex items-center justify-between">
+                        <span className="flex items-center gap-1">
+                          <span className="text-red-500 font-bold">*</span>
+                          {lang === "en"
+                            ? "Wage Standard (Enter Monthly, or Daily / Hourly)"
+                            : lang === "th"
+                              ? "เกณฑ์ค่าจ้าง (ระบุเงินเดือน หรือระบุรายวัน/รายชั่วโมง)"
+                              : lang === "zh-TW"
+                                ? "薪資標準（輸入固定月薪，或輸入固定日薪 / 時薪）"
+                                : "薪资标准（输入固定月薪，或输入固定日薪 / 时薪）"}
+                        </span>
+                        {isMonthlyWageActive && (
+                          <span className="text-[11px] text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-200/80 font-normal animate-fade-in">
+                            {lang === "en" ? "Fixed Monthly Mode: Hourly & Daily Wage are locked" : lang === "zh-TW" ? "已啟用固定月薪模式：時薪與日薪已置灰鎖定" : "已启用固定月薪模式：时薪与日薪已置灰锁定"}
+                          </span>
+                        )}
+                      </span>
+                    </div>
 
-              <div>
-                <Label className="block text-xs font-semibold text-slate-600 mb-1.5">
-                  {lang === "en" ? "Fixed Daily Wage (optional)" : lang === "th" ? "อัตราค่าจ้างรายวัน (ถ้ามี)" : lang === "zh-TW" ? "固定日薪 (如不輸，則根據月薪或時薪計)" : "固定日薪 (如不输，则根据月薪或时薪计)"}
-                </Label>
-                <div className="relative">
-                  <Input type="number" name="dailyWage" step="1" value={formData.dailyWage !== undefined ? formData.dailyWage : ""} onChange={handleChange} className="bg-white font-medium" placeholder="如: 1200" />
-                  {formData.dailyWage !== undefined && formData.dailyWage > 0 && (
-                    <span className="absolute right-3 top-2 text-xs text-slate-400 font-normal pointer-events-none">
-                      ≈ {(formData.dailyWage / 8).toFixed(1)} {formData.currency || "THB"}/时折算
-                    </span>
-                  )}
-                </div>
-              </div>
+                    <div>
+                      <Label className="block text-xs font-semibold text-slate-600 mb-1.5 flex items-center justify-between">
+                        <span>{lang === "en" ? "Hourly Rate (optional)" : lang === "th" ? "อัตราค่าจ้างรายชั่วโมง (ถ้ามี)" : lang === "zh-TW" ? "時薪" : "时薪"}</span>
+                        {isMonthlyWageActive && (
+                          <span className="text-[10px] text-amber-600 font-normal">
+                            {lang === "en" ? "(Locked)" : lang === "zh-TW" ? "(已置灰)" : "(已置灰)"}
+                          </span>
+                        )}
+                      </Label>
+                      <div className="relative">
+                        <Input
+                          type="number"
+                          name="hourlyRate"
+                          step="0.5"
+                          disabled={isMonthlyWageActive}
+                          value={formData.hourlyRate !== undefined && formData.hourlyRate !== null && Number(formData.hourlyRate) > 0 ? formData.hourlyRate : ""}
+                          onChange={handleChange}
+                          className={`font-medium ${isMonthlyWageActive ? "bg-slate-100 text-slate-400 cursor-not-allowed border-slate-200 select-none shadow-none" : "bg-white"}`}
+                          placeholder={isMonthlyWageActive ? (lang === "en" ? "Locked (Monthly active)" : "已启用固定月薪") : "如: 300"}
+                        />
+                        {!isMonthlyWageActive && formData.hourlyRate !== undefined && formData.hourlyRate > 0 && (
+                          <span className="absolute right-3 top-2 text-xs text-slate-400 font-normal pointer-events-none">
+                            ≈ {(formData.hourlyRate * 8 * 30).toLocaleString()} {formData.currency || "THB"}/月参考
+                          </span>
+                        )}
+                      </div>
+                    </div>
 
-              <div>
-                <Label className="block text-xs font-semibold text-slate-600 mb-1.5">
-                  {lang === "en" ? "Basic Monthly Wage (optional)" : lang === "th" ? "เงินเดือนพื้นฐาน (ถ้ามี)" : lang === "zh-TW" ? "固定月薪 (如不輸，則按日薪或時薪計)" : "固定月薪 (如不输，则按日薪或时薪计)"}
-                </Label>
-                <div className="relative">
-                  <Input type="number" name="baseMonthlyWage" step="100" value={formData.baseMonthlyWage !== undefined ? formData.baseMonthlyWage : ""} onChange={handleChange} className="bg-white font-medium" placeholder="如: 60000" />
-                  {formData.baseMonthlyWage !== undefined && formData.baseMonthlyWage > 0 && (
-                    <span className="absolute right-3 top-2 text-xs text-slate-400 font-normal pointer-events-none">
-                      ≈ {(formData.baseMonthlyWage / 30 / 8).toFixed(1)} {formData.currency || "THB"}/时折算
-                    </span>
-                  )}
-                </div>
-              </div>
+                    <div>
+                      <Label className="block text-xs font-semibold text-slate-600 mb-1.5 flex items-center justify-between">
+                        <span>{lang === "en" ? "Fixed Daily Wage (optional)" : lang === "th" ? "อัตราค่าจ้างรายวัน (ถ้ามี)" : lang === "zh-TW" ? "固定日薪" : "固定日薪"}</span>
+                        {isMonthlyWageActive && (
+                          <span className="text-[10px] text-amber-600 font-normal">
+                            {lang === "en" ? "(Locked)" : lang === "zh-TW" ? "(已置灰)" : "(已置灰)"}
+                          </span>
+                        )}
+                      </Label>
+                      <div className="relative">
+                        <Input
+                          type="number"
+                          name="dailyWage"
+                          step="1"
+                          disabled={isMonthlyWageActive}
+                          value={formData.dailyWage !== undefined && formData.dailyWage !== null && Number(formData.dailyWage) > 0 ? formData.dailyWage : ""}
+                          onChange={handleChange}
+                          className={`font-medium ${isMonthlyWageActive ? "bg-slate-100 text-slate-400 cursor-not-allowed border-slate-200 select-none shadow-none" : "bg-white"}`}
+                          placeholder={isMonthlyWageActive ? (lang === "en" ? "Locked (Monthly active)" : "已启用固定月薪") : "如: 1200"}
+                        />
+                        {!isMonthlyWageActive && formData.dailyWage !== undefined && formData.dailyWage > 0 && (
+                          <span className="absolute right-3 top-2 text-xs text-slate-400 font-normal pointer-events-none">
+                            ≈ {(formData.dailyWage / 8).toFixed(1)} {formData.currency || "THB"}/时折算
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <Label className="block text-xs font-semibold text-slate-600 mb-1.5 flex items-center justify-between">
+                        <span>{lang === "en" ? "Basic Monthly Wage (optional)" : lang === "th" ? "เงินเดือนพื้นฐาน (ถ้ามี)" : lang === "zh-TW" ? "固定月薪" : "固定月薪"}</span>
+                        {isMonthlyWageActive && (
+                          <span className="text-[10px] text-emerald-600 font-normal">
+                            {lang === "en" ? "(Active)" : lang === "zh-TW" ? "(生效中)" : "(生效中)"}
+                          </span>
+                        )}
+                      </Label>
+                      <div className="relative">
+                        <Input
+                          type="number"
+                          name="baseMonthlyWage"
+                          step="100"
+                          value={formData.baseMonthlyWage !== undefined && formData.baseMonthlyWage !== null && Number(formData.baseMonthlyWage) > 0 ? formData.baseMonthlyWage : ""}
+                          onChange={handleChange}
+                          className="bg-white font-medium"
+                          placeholder="如: 60000"
+                        />
+                        {formData.baseMonthlyWage !== undefined && formData.baseMonthlyWage > 0 && (
+                          <span className="absolute right-3 top-2 text-xs text-slate-400 font-normal pointer-events-none">
+                            ≈ {(formData.baseMonthlyWage / 30 / 8).toFixed(1)} {formData.currency || "THB"}/时折算
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
 
               <div>
                 <Label className="block text-xs font-semibold text-slate-600 mb-1.5">
@@ -912,28 +997,28 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
                 <Label className="block text-xs font-semibold text-slate-600 mb-1.5">
                   {getTranslation("modal_employee_fixed_bonus", lang)}
                 </Label>
-                <Input type="number" name="attendanceBonus" step="1" value={formData.attendanceBonus !== undefined ? formData.attendanceBonus : ""} onChange={handleChange} className="bg-white font-medium" placeholder="如: 1000" />
+                <Input type="number" name="attendanceBonus" step="1" value={formData.attendanceBonus !== undefined && formData.attendanceBonus !== null && Number(formData.attendanceBonus) > 0 ? formData.attendanceBonus : ""} onChange={handleChange} className="bg-white font-medium" placeholder="如: 1000" />
               </div>
 
               <div>
                 <Label className="block text-xs font-semibold text-slate-600 mb-1.5">
                   {getTranslation("modal_employee_social_security", lang)}
                 </Label>
-                <Input type="number" name="socialSecurity" step="1" value={formData.socialSecurity !== undefined ? formData.socialSecurity : ""} onChange={handleChange} className="bg-white font-medium" placeholder="如: 750" />
+                <Input type="number" name="socialSecurity" step="1" value={formData.socialSecurity !== undefined && formData.socialSecurity !== null && Number(formData.socialSecurity) > 0 ? formData.socialSecurity : ""} onChange={handleChange} className="bg-white font-medium" placeholder="如: 750" />
               </div>
 
               <div>
                 <Label className="block text-xs font-semibold text-slate-600 mb-1.5">
                   {getTranslation("modal_employee_meal_allowance", lang)}
                 </Label>
-                <Input type="number" name="mealAllowanceDaily" step="1" value={formData.mealAllowanceDaily !== undefined ? formData.mealAllowanceDaily : ""} onChange={handleChange} className="bg-white font-medium text-slate-900" placeholder={lang === "en" ? "Default: 0" : lang === "th" ? "เริ่มต้น: 0" : lang === "zh-TW" ? "不填則默認為: 0" : "不填则默认为: 0"} />
+                <Input type="number" name="mealAllowanceDaily" step="1" value={formData.mealAllowanceDaily !== undefined && formData.mealAllowanceDaily !== null && Number(formData.mealAllowanceDaily) > 0 ? formData.mealAllowanceDaily : ""} onChange={handleChange} className="bg-white font-medium text-slate-900" placeholder="如: 50" />
               </div>
 
               <div>
                 <Label className="block text-xs font-semibold text-slate-600 mb-1.5">
                   {getTranslation("modal_employee_license_fee", lang)}
                 </Label>
-                <Input type="number" name="licenseFee" step="1" min="0" value={formData.licenseFee !== undefined ? formData.licenseFee : ""} onChange={handleChange} className="bg-white font-medium text-slate-900" placeholder={lang === "en" ? "Default: 0" : lang === "th" ? "เริ่มต้น: 0" : lang === "zh-TW" ? "不填則默認為: 0" : "不填则默认为: 0"} />
+                <Input type="number" name="licenseFee" step="1" min="0" value={formData.licenseFee !== undefined && formData.licenseFee !== null && Number(formData.licenseFee) > 0 ? formData.licenseFee : ""} onChange={handleChange} className="bg-white font-medium text-slate-900" placeholder="如: 200" />
               </div>
 
               {/* 加班费计算规则设置 */}
@@ -974,10 +1059,10 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
                         type="number"
                         name="otFixedRate"
                         step="1"
-                        value={formData.otFixedRate !== undefined ? formData.otFixedRate : ""}
+                        value={formData.otFixedRate !== undefined && formData.otFixedRate !== null && Number(formData.otFixedRate) > 0 ? formData.otFixedRate : ""}
                         onChange={handleChange}
                         className="bg-white font-medium text-slate-900"
-                        placeholder={lang === "en" ? "Default: 0" : lang === "th" ? "เริ่มต้น: 0" : lang === "zh-TW" ? "默認：0" : "默认：0"}
+                        placeholder="如: 50"
                       />
                       <span className="block text-[10px] text-slate-400 mt-1">
                         {lang === "en" ? "Overtime pay = overtime hours × fixed rate. Defaults to 0." : lang === "th" ? "ค่าล่วงเวลา = ชั่วโมงล่วงเวลา × อัตราคงที่ เริ่มต้นที่ 0" : lang === "zh-TW" ? "加班薪資 = 加班工時 × 固定費用，默認為 0。" : "加班薪资 = 加班工时 × 固定费用，默认为 0。"}
@@ -989,7 +1074,7 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
                         <Label className="block text-xs font-semibold text-slate-600 mb-1.5">
                           {lang === "en" ? "OT Calculation Base Rate" : lang === "th" ? "ค่าจ้างอ้างอิงรายชั่วโมง" : lang === "zh-TW" ? "加班計算基準費用" : "加班计算基准费用"}
                         </Label>
-                        <Input type="number" name="otBaseRate" step="1" value={formData.otBaseRate !== undefined ? formData.otBaseRate : ""} onChange={handleChange} className="bg-white font-medium text-slate-900" placeholder={lang === "en" ? "If blank, uses normal wages" : lang === "th" ? "หากเว้นว่าง ระบบจะคำนวณตามเงินเดือน" : lang === "zh-TW" ? "不填則系統按普通工資折算" : "不填则系统按普通工资折算"} />
+                        <Input type="number" name="otBaseRate" step="1" value={formData.otBaseRate !== undefined && formData.otBaseRate !== null && Number(formData.otBaseRate) > 0 ? formData.otBaseRate : ""} onChange={handleChange} className="bg-white font-medium text-slate-900" placeholder={lang === "en" ? "If blank, uses normal wages" : lang === "th" ? "หากเว้นว่าง ระบบจะคำนวณตามเงินเดือน" : lang === "zh-TW" ? "不填則系統按普通工資折算" : "不填则系统按普通工资折算"} />
                       </div>
                       <div>
                         <div className="grid grid-cols-3 gap-3 mb-3">
@@ -1041,6 +1126,35 @@ export function EmployeeModal({ isOpen, onClose, onSave, employee, canManagePerm
                       </div>
                     </div>
                   )}
+
+                  {/* 个人所得税代扣比例 */}
+                  <div className="border-t border-slate-100 pt-3">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <Label className="block text-xs font-semibold text-slate-700">
+                        {getTranslation("modal_employee_tax_rate", lang)}
+                      </Label>
+                      <span className="text-[11px] font-medium text-brand-600 bg-brand-50 px-2 py-0.5 rounded-full border border-brand-100">
+                        {lang === "en" ? "Default: 5%" : lang === "th" ? "เริ่มต้น: 5%" : lang === "zh-TW" ? "預設：5%" : "默认：5%"}
+                      </span>
+                    </div>
+                    <div className="relative">
+                      <Input
+                        type="number"
+                        name="taxRate"
+                        step="0.1"
+                        min="0"
+                        max="100"
+                        value={formData.taxRate !== undefined ? formData.taxRate : 5}
+                        onChange={handleChange}
+                        className="bg-white font-medium text-slate-900 pr-8"
+                        placeholder="5"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-400 font-bold pointer-events-none">%</span>
+                    </div>
+                    <span className="block text-[11px] text-slate-400 mt-1">
+                      {getTranslation("modal_employee_tax_rate_desc", lang)}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>

@@ -45,7 +45,7 @@ assert(content.includes("pageSizeOptions"), "Must provide page size options");
 
 // 7. Logic Loop Audit: Voucher status & temporal/lifecycle bounds
 assert(content.includes("有凭证") && content.includes("无凭证"), "Must clearly differentiate 有凭证 and 无凭证 badges");
-assert(content.includes('emp.status === "resigned" && empAtt.length === 0'), "Must exclude resigned employees with 0 attendance in target month");
+assert(content.includes('isResigned && empAtt.length === 0'), "Must exclude resigned employees with 0 attendance in target month");
 assert(content.includes("emp.joinDate && emp.joinDate.slice(0, 7) > targetMonth"), "Must respect joinDate temporal lifecycle bounds");
 
 // 8. App.tsx Prop Connection
@@ -53,5 +53,20 @@ const appPath = path.join(__dirname, "src/App.tsx");
 const appContent = fs.readFileSync(appPath, "utf-8");
 assert(appContent.includes("loading={employeesLoading}"), "App.tsx must pass loading={employeesLoading} to ExpenseManager");
 assert(appContent.includes("onRefresh={reloadEmployees}"), "App.tsx must pass onRefresh={reloadEmployees} to ExpenseManager");
+
+// 9. Employee Optional Amounts Empty-State Check (Zero-value clean normalization)
+const employeeApiPath = path.join(__dirname, "src/lib/employeeApi.ts");
+const employeeApiContent = fs.readFileSync(employeeApiPath, "utf-8");
+assert(employeeApiContent.includes("attendanceBonus: employee.attendanceBonus != null && Number(employee.attendanceBonus) > 0 ? Number(employee.attendanceBonus) : undefined"));
+assert(employeeApiContent.includes("socialSecurity: employee.socialSecurity != null && Number(employee.socialSecurity) > 0 ? Number(employee.socialSecurity) : undefined"));
+assert(employeeApiContent.includes("mealAllowanceDaily: employee.mealAllowance != null && Number(employee.mealAllowance) > 0 ? Number(employee.mealAllowance) : undefined"));
+assert(employeeApiContent.includes("licenseFee: employee.licenseFee != null && Number(employee.licenseFee) > 0 ? Number(employee.licenseFee) : undefined"));
+
+const modalsPath = path.join(__dirname, "src/components/Modals.tsx");
+const modalsContent = fs.readFileSync(modalsPath, "utf-8");
+assert(modalsContent.includes("formData.attendanceBonus !== undefined && formData.attendanceBonus !== null && Number(formData.attendanceBonus) > 0 ? formData.attendanceBonus : \"\""));
+assert(modalsContent.includes("formData.socialSecurity !== undefined && formData.socialSecurity !== null && Number(formData.socialSecurity) > 0 ? formData.socialSecurity : \"\""));
+assert(modalsContent.includes("formData.mealAllowanceDaily !== undefined && formData.mealAllowanceDaily !== null && Number(formData.mealAllowanceDaily) > 0 ? formData.mealAllowanceDaily : \"\""));
+assert(modalsContent.includes("formData.licenseFee !== undefined && formData.licenseFee !== null && Number(formData.licenseFee) > 0 ? formData.licenseFee : \"\""));
 
 console.log("✓ All Salary List Payroll Linkage & Data/Logic Loop Audit checks passed successfully!");

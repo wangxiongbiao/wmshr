@@ -180,6 +180,41 @@ export function formatCurrency(amount: number | null | undefined, code?: Currenc
   });
 }
 
+/**
+ * 计算员工单日基本出勤工资
+ * 规则：
+ * 1. 若配置了固定月薪 (baseMonthlyWage > 0)，走月薪日折算：baseMonthlyWage / 30
+ * 2. 若未配置固定月薪，按日薪/时薪混合规则：
+ *    - 满一日的 8 小时 (normalHours >= 8)：按日薪算（无日薪则按标准工时 * 有效时薪）
+ *    - 不满一日 (< 8 小时)：按时薪算 (normalHours * 有效时薪)
+ *    - 有效时薪取值：有输入时薪使用输入的时薪 (hourlyRate)，没有时薪按日薪除以 8 (dailyWage / 8)
+ */
+export function calcDailyBasePay(
+  emp: { baseMonthlyWage?: number | null; dailyWage?: number | null; hourlyRate?: number | null },
+  normalHours: number,
+  config?: { standardHours?: number | null } | null
+): number {
+  if (normalHours <= 0) return 0;
+  const stdHours = config?.standardHours || 8;
+  const hasBaseWage = emp.baseMonthlyWage !== undefined && emp.baseMonthlyWage !== null && Number(emp.baseMonthlyWage) > 0;
+
+  if (hasBaseWage) {
+    return Number(emp.baseMonthlyWage) / 30;
+  }
+
+  const dailyWage = emp.dailyWage !== undefined && emp.dailyWage !== null && Number(emp.dailyWage) > 0 ? Number(emp.dailyWage) : 0;
+  const hourlyRate = emp.hourlyRate !== undefined && emp.hourlyRate !== null && Number(emp.hourlyRate) > 0 ? Number(emp.hourlyRate) : 0;
+  const effectiveHourlyRate = hourlyRate > 0 ? hourlyRate : (dailyWage > 0 ? dailyWage / stdHours : 0);
+
+  if (normalHours >= stdHours) {
+    // 满一日的8小时按日薪算（无日薪则按标准工时 * 时薪）
+    return dailyWage > 0 ? dailyWage : (stdHours * effectiveHourlyRate);
+  }
+
+  // 不满一日的就按时薪算，有输入时薪就使用输入的时薪，没有时薪就按日薪除以8分配
+  return normalHours * effectiveHourlyRate;
+}
+
 export function calcOvertimePay(
   emp: Employee,
   dateStr: string,
@@ -206,14 +241,15 @@ export function calcOvertimePay(
   // Determine standard base hourly rate
   const hasBaseWage = emp.baseMonthlyWage !== undefined && emp.baseMonthlyWage !== null && emp.baseMonthlyWage > 0;
   const hasDailyWage = emp.dailyWage !== undefined && emp.dailyWage !== null && emp.dailyWage > 0;
-  
+  const hasHourlyRate = emp.hourlyRate !== undefined && emp.hourlyRate !== null && emp.hourlyRate > 0;
+
   const baseHourlyRate = emp.otBaseRate !== undefined && emp.otBaseRate !== null && emp.otBaseRate > 0
     ? emp.otBaseRate
-    : (hasBaseWage 
-        ? ((emp.baseMonthlyWage / 30) / config.standardHours) 
-        : (hasDailyWage 
-            ? (emp.dailyWage / config.standardHours)
-            : (emp.hourlyRate ?? 0)
+    : (hasBaseWage
+        ? ((emp.baseMonthlyWage / 30) / config.standardHours)
+        : (hasHourlyRate
+            ? emp.hourlyRate!
+            : (hasDailyWage ? (emp.dailyWage! / config.standardHours) : 0)
           )
       );
 
@@ -251,6 +287,29 @@ export function calcOvertimePay(
 
   const amount = otHours * baseHourlyRate * multiplier;
   return { amount, multiplier, label };
+}
+
+/**
+ * 获取员工个人所得税比例（归一化为计算小数，如 5% -> 0.05）
+ * 优先级：员工独立档案 taxRate -> 全局设置 config.taxRate -> 默认 0.05 (5%)
+ */
+export function getEmployeeTaxRate(
+  emp?: { taxRate?: number | null } | null,
+  config?: { taxRate?: number | null } | null
+): number {
+  if (emp?.taxRate !== undefined && emp?.taxRate !== null && !isNaN(Number(emp.taxRate))) {
+    const val = Number(emp.taxRate);
+    if (!Number.isFinite(val) || val < 0) return 0.05;
+    if (val === 0) return 0;
+    return val > 1 ? val / 100 : (val <= 0.2 ? val : val / 100);
+  }
+  if (config?.taxRate !== undefined && config?.taxRate !== null && !isNaN(Number(config.taxRate))) {
+    const cVal = Number(config.taxRate);
+    if (Number.isFinite(cVal) && cVal >= 0) {
+      return cVal > 1 ? cVal / 100 : cVal;
+    }
+  }
+  return 0.05;
 }
 
 // ==========================================

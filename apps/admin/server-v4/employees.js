@@ -1,7 +1,7 @@
 import { hashPassword } from "../server/auth-v4.js";
 
 const DEFAULT_EMPLOYEE_PASSWORD = "Aa123456";
-const EMPLOYEE_COLUMNS = "id, employee_no, name, nickname, gender, warehouse_code, nationality, country, phone, role, dept, join_date, status, attendance_rule_id, salary_type, hourly_rate, fixed_salary, daily_wage, overtime_hourly_fee, overtime_rule_enabled, ot_rule_type, ot_base_rate, ot_multiplier_workday, ot_multiplier_weekend, ot_multiplier_holiday, is_dispatch_personnel, attendance_bonus, social_security, meal_allowance, service_fee_rate, currency, bank_card_number, bank_name, id_card, photo, is_deleted, updated_at, license_fee";
+const EMPLOYEE_COLUMNS = "id, employee_no, name, nickname, gender, warehouse_code, nationality, country, phone, role, dept, join_date, status, attendance_rule_id, salary_type, hourly_rate, fixed_salary, daily_wage, overtime_hourly_fee, overtime_rule_enabled, ot_rule_type, ot_base_rate, ot_multiplier_workday, ot_multiplier_weekend, ot_multiplier_holiday, is_dispatch_personnel, attendance_bonus, social_security, meal_allowance, service_fee_rate, currency, bank_card_number, bank_name, id_card, photo, is_deleted, updated_at, license_fee, tax_rate";
 
 const normalizeGender = g => (g === "male" || g === "男" ? "male" : "female");
 
@@ -73,24 +73,25 @@ export function mapEmployeeRow(row) {
     attendanceRuleId: row.attendance_rule_id == null ? 0 : Number(row.attendance_rule_id),
     attendanceRuleName: row.attendance_rule_name || null,
     salaryType: row.salary_type,
-    hourlyRate: row.hourly_rate == null ? null : Number(row.hourly_rate),
-    fixedSalary: row.fixed_salary == null ? null : Number(row.fixed_salary),
-    dailyWage: row.daily_wage == null ? (row.fixed_salary != null ? Math.round(Number(row.fixed_salary) / 30) : null) : Number(row.daily_wage),
-    overtimeHourlyFee: row.overtime_hourly_fee == null ? null : Number(row.overtime_hourly_fee),
+    hourlyRate: (row.hourly_rate == null || Number(row.hourly_rate) === 0) ? null : Number(row.hourly_rate),
+    fixedSalary: (row.fixed_salary == null || Number(row.fixed_salary) === 0) ? null : Number(row.fixed_salary),
+    dailyWage: (row.daily_wage == null || Number(row.daily_wage) === 0) ? null : Number(row.daily_wage),
+    overtimeHourlyFee: (row.overtime_hourly_fee == null || Number(row.overtime_hourly_fee) === 0) ? null : Number(row.overtime_hourly_fee),
     overtimeRuleEnabled: row.overtime_rule_enabled == null ? null : Boolean(row.overtime_rule_enabled),
     otRuleType: row.ot_rule_type || "fixed",
-    otFixedRate: row.overtime_hourly_fee == null ? null : Number(row.overtime_hourly_fee),
-    otBaseRate: row.ot_base_rate == null ? null : Number(row.ot_base_rate),
+    otFixedRate: (row.overtime_hourly_fee == null || Number(row.overtime_hourly_fee) === 0) ? null : Number(row.overtime_hourly_fee),
+    otBaseRate: (row.ot_base_rate == null || Number(row.ot_base_rate) === 0) ? null : Number(row.ot_base_rate),
     otMultiplierWorkday: row.ot_multiplier_workday == null ? 1.5 : Number(row.ot_multiplier_workday),
     otMultiplierWeekend: row.ot_multiplier_weekend == null ? 2.0 : Number(row.ot_multiplier_weekend),
     otMultiplierHoliday: row.ot_multiplier_holiday == null ? 3.0 : Number(row.ot_multiplier_holiday),
     username: row.account || row.username || row.employee_no,
     isDispatchPersonnel: Boolean(row.is_dispatch_personnel),
-    attendanceBonus: row.attendance_bonus == null ? 0 : Number(row.attendance_bonus),
-    socialSecurity: row.social_security == null ? 0 : Number(row.social_security),
-    mealAllowance: row.meal_allowance == null ? 0 : Number(row.meal_allowance),
-    licenseFee: row.license_fee == null ? 0 : Number(row.license_fee),
-    serviceFeeRate: row.service_fee_rate == null ? 0 : Number(row.service_fee_rate),
+    attendanceBonus: (row.attendance_bonus == null || Number(row.attendance_bonus) === 0) ? null : Number(row.attendance_bonus),
+    socialSecurity: (row.social_security == null || Number(row.social_security) === 0) ? null : Number(row.social_security),
+    mealAllowance: (row.meal_allowance == null || Number(row.meal_allowance) === 0) ? null : Number(row.meal_allowance),
+    licenseFee: (row.license_fee == null || Number(row.license_fee) === 0) ? null : Number(row.license_fee),
+    serviceFeeRate: (row.service_fee_rate == null || Number(row.service_fee_rate) === 0) ? null : Number(row.service_fee_rate),
+    taxRate: row.tax_rate == null ? 5 : Number(row.tax_rate),
     currency: row.currency,
     bankCardNumber: row.bank_card_number || "",
     bankName: row.bank_name || "",
@@ -123,21 +124,22 @@ function employeePayload(body = {}, authUser = {}) {
       let fixedSalary = normalizeAmount(body.fixedSalary !== undefined ? body.fixedSalary : body.baseMonthlyWage);
       let dailyWage = normalizeAmount(body.dailyWage);
 
-      if (fixedSalary === null && dailyWage !== null) {
-        fixedSalary = Math.round(dailyWage * 30);
-      } else if (dailyWage === null && fixedSalary !== null) {
-        dailyWage = Math.round(fixedSalary / 30);
-      }
-
-      let salaryType = body.salaryType;
-      if (salaryType !== "hourly" && salaryType !== "fixed") {
-        salaryType = (hourlyRate !== null && fixedSalary === null) ? "hourly" : "fixed";
-      }
-      if (salaryType === "fixed" && fixedSalary === null) {
-        fixedSalary = hourlyRate !== null ? Math.round(hourlyRate * 8 * 30) : 0;
-      }
-      if (salaryType === "hourly" && hourlyRate === null) {
-        hourlyRate = fixedSalary !== null ? Math.round(fixedSalary / 240) : 0;
+      let salaryType;
+      if (fixedSalary !== null && fixedSalary > 0) {
+        salaryType = "fixed";
+        hourlyRate = null;
+        dailyWage = null;
+      } else {
+        salaryType = "hourly";
+        fixedSalary = null;
+        dailyWage = (dailyWage !== null && dailyWage > 0) ? dailyWage : null;
+        if (hourlyRate !== null && hourlyRate > 0) {
+          hourlyRate = hourlyRate;
+        } else if (dailyWage !== null) {
+          hourlyRate = Math.round((dailyWage / 8) * 100) / 100;
+        } else {
+          hourlyRate = null;
+        }
       }
 
       const otRuleType = body.otRuleType === "multiplier" ? "multiplier" : "fixed";
@@ -168,6 +170,10 @@ function employeePayload(body = {}, authUser = {}) {
     mealAllowance: nonNegative(body.mealAllowance !== undefined ? body.mealAllowance : body.mealAllowanceDaily),
     licenseFee: nonNegative(body.licenseFee),
     serviceFeeRate: nonNegative(body.serviceFeeRate),
+    taxRate: (() => {
+      const raw = normalizeAmount(body.taxRate);
+      return raw !== null && Number.isFinite(raw) && raw >= 0 ? raw : 5;
+    })(),
     salaryEffectiveStartDate: normalizeDateValue(body.salaryEffectiveStartDate || body.joinDate),
     currency: String(body.currency || "THB"),
     bankCardNumber: body.bankCardNumber ? String(body.bankCardNumber).trim() : null,
@@ -188,6 +194,7 @@ function validatePayload(payload) {
   if (payload.joinDate > maxJoinDate()) return "入职日期不能晚于今天";
   if (!/^(active|on_leave|probation|resigned)$/.test(payload.status)) return "员工状态不合法";
   if (payload.hourlyRate === null && payload.fixedSalary === null && payload.dailyWage === null) return "请至少输入时薪、固定日薪或基础月薪中的一项";
+  if (payload.taxRate !== null && payload.taxRate !== undefined && (payload.taxRate < 0 || payload.taxRate > 100)) return "个人所得税比例必须在 0% 到 100% 之间";
   const amounts = [payload.hourlyRate, payload.fixedSalary, payload.dailyWage, payload.attendanceBonus, payload.socialSecurity, payload.mealAllowance, payload.licenseFee, payload.serviceFeeRate, payload.overtimeHourlyFee, payload.otBaseRate];
   if (amounts.some(value => value !== null && (!Number.isFinite(Number(value)) || Number(value) < 0))) return "金额必须大于等于 0";
   return null;
@@ -521,6 +528,12 @@ async function employeeScope(supabase, req, res, employeeId) {
 
 export function createEmployeeRouter({ express, supabase, directDbPool, identity }) {
   const router = express.Router();
+
+  if (directDbPool) {
+    directDbPool.query("ALTER TABLE workspace_employees ADD COLUMN IF NOT EXISTS tax_rate NUMERIC(6,2) DEFAULT 5.0;")
+      .catch(err => console.warn("[admin-v4/employees] tax_rate schema auto-check:", err.message));
+  }
+
   const safeFailure = (res, error, message) => {
     console.error(`[admin-v4/employees] ${message}`, error);
     res.status(error?.statusCode || 500).json({ error: error?.statusCode ? error.message : message });
@@ -750,7 +763,7 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
               overtime_hourly_fee, ot_rule_type, ot_base_rate, ot_multiplier_workday,
               ot_multiplier_weekend, ot_multiplier_holiday, is_dispatch_personnel,
               attendance_bonus, social_security, meal_allowance, service_fee_rate,
-              currency, bank_card_number, bank_name, id_card, photo, license_fee, is_deleted,
+              currency, bank_card_number, bank_name, id_card, photo, license_fee, tax_rate, is_deleted,
               created_at, updated_at
             ) VALUES (
               $1, $2, $3, $4, $5, $6,
@@ -759,7 +772,7 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
               $19, $20, $21, $22,
               $23, $24, $25,
               $26, $27, $28, $29,
-              $30, $31, $32, $33, $34, $35, false,
+              $30, $31, $32, $33, $34, $35, $36, false,
               NOW(), NOW()
             ) RETURNING *;
           `, [
@@ -769,7 +782,7 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
             payload.overtimeHourlyFee, payload.otRuleType, payload.otBaseRate, payload.otMultiplierWorkday,
             payload.otMultiplierWeekend, payload.otMultiplierHoliday, payload.isDispatchPersonnel,
             payload.attendanceBonus, payload.socialSecurity, payload.mealAllowance, payload.serviceFeeRate,
-            payload.currency, payload.bankCardNumber, payload.bankName, payload.idCard, payload.photo, payload.licenseFee
+            payload.currency, payload.bankCardNumber, payload.bankName, payload.idCard, payload.photo, payload.licenseFee, payload.taxRate
           ]);
           const data = insertRes.rows[0];
           await ensureSalaryProfileDirect(client, data, req.authUser.id, payload.salaryEffectiveStartDate);
@@ -797,7 +810,7 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
                   overtime_hourly_fee, ot_rule_type, ot_base_rate, ot_multiplier_workday,
                   ot_multiplier_weekend, ot_multiplier_holiday, is_dispatch_personnel,
                   attendance_bonus, social_security, meal_allowance, service_fee_rate,
-                  currency, bank_card_number, bank_name, id_card, photo, license_fee, is_deleted,
+                  currency, bank_card_number, bank_name, id_card, photo, license_fee, tax_rate, is_deleted,
                   created_at, updated_at
                 ) VALUES (
                   $1, $2, $3, $4, $5, $6,
@@ -806,7 +819,7 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
                   $19, $20, $21, $22,
                   $23, $24, $25,
                   $26, $27, $28, $29,
-                  $30, $31, $32, $33, $34, $35, false,
+                  $30, $31, $32, $33, $34, $35, $36, false,
                   NOW(), NOW()
                 ) RETURNING *;
               `, [
@@ -816,7 +829,7 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
                 payload.overtimeHourlyFee, payload.otRuleType, payload.otBaseRate, payload.otMultiplierWorkday,
                 payload.otMultiplierWeekend, payload.otMultiplierHoliday, payload.isDispatchPersonnel,
                 payload.attendanceBonus, payload.socialSecurity, payload.mealAllowance, payload.serviceFeeRate,
-                payload.currency, payload.bankCardNumber, payload.bankName, payload.idCard, payload.photo, payload.licenseFee
+                payload.currency, payload.bankCardNumber, payload.bankName, payload.idCard, payload.photo, payload.licenseFee, payload.taxRate
               ]);
               const data2 = insertRes2.rows[0];
               await ensureSalaryProfileDirect(client, data2, req.authUser.id, payload.salaryEffectiveStartDate);
@@ -873,6 +886,7 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
         social_security: payload.socialSecurity,
         meal_allowance: payload.mealAllowance,
         license_fee: payload.licenseFee,
+        tax_rate: payload.taxRate,
         service_fee_rate: payload.serviceFeeRate,
         currency: payload.currency,
         bank_card_number: payload.bankCardNumber,
@@ -949,10 +963,11 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
               meal_allowance = $24, service_fee_rate = $25, currency = $26,
               bank_card_number = $27, bank_name = $28, id_card = $29,
               license_fee = $30,
-              warehouse_code = COALESCE($31, warehouse_code),
-              photo = CASE WHEN $32::boolean THEN $33 ELSE photo END,
+              tax_rate = $31,
+              warehouse_code = COALESCE($32, warehouse_code),
+              photo = CASE WHEN $33::boolean THEN $34 ELSE photo END,
               updated_at = NOW()
-            WHERE owner_user_id = $34 AND id = $35
+            WHERE owner_user_id = $35 AND id = $36
             RETURNING *;
           `, [
             payload.name, payload.nickname, payload.gender, payload.nationality, payload.country,
@@ -964,6 +979,7 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
             payload.mealAllowance, payload.serviceFeeRate, payload.currency,
             payload.bankCardNumber, payload.bankName, payload.idCard,
             payload.licenseFee,
+            payload.taxRate,
             payload.warehouseCode || null,
             hasPhoto, photoVal,
             req.authUser.id, employeeId
@@ -1016,6 +1032,7 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
         social_security: payload.socialSecurity,
         meal_allowance: payload.mealAllowance,
         license_fee: payload.licenseFee,
+        tax_rate: payload.taxRate,
         service_fee_rate: payload.serviceFeeRate,
         currency: payload.currency,
         bank_card_number: payload.bankCardNumber,

@@ -1,5 +1,6 @@
 import ExcelJS from "exceljs";
 import { PayrollSummary, AppConfig } from "../types";
+import { getEmployeeTaxRate } from "./utils";
 
 export interface ExportPayrollExcelOptions {
   monthStr: string; // e.g. "2026-08"
@@ -209,7 +210,6 @@ export async function exportPayrollExcel(options: ExportPayrollExcelOptions): Pr
   };
 
   const startRow = 6;
-  const taxRate = typeof config?.taxRate === "number" && !isNaN(config.taxRate) ? config.taxRate : 0.05;
 
   payrollRows.forEach((item, index) => {
     const r = startRow + index;
@@ -231,7 +231,8 @@ export async function exportPayrollExcel(options: ExportPayrollExcelOptions): Pr
           : Math.round(totalIncomesNum * 0.05 * 100) / 100)
       : Number(emp.socialSecurity || 0);
 
-    const tax = Math.round((basePay + ot + incentive) * taxRate * 100) / 100;
+    const empTaxRate = getEmployeeTaxRate(emp, config);
+    const tax = Math.round((basePay + ot + incentive) * empTaxRate * 100) / 100;
     const otherExpense = Math.round(Number(item.serviceFee || 0) * 100) / 100;
     const leaveWithoutPay = 0;
     const totalExpensesNum = ssf + tax + otherExpense + leaveWithoutPay;

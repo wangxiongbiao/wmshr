@@ -4,7 +4,7 @@
  */
 
 import { AppConfig, AttendanceRecord, Employee, HolidayRecord, PayrollSummary } from "../types";
-import { cn, calcAttendanceDetails, formatCurrency, formatDuration, calcOvertimePay, formatMonthLabel, getNowMonthStr, formatDate } from "../lib/utils";
+import { cn, calcAttendanceDetails, formatCurrency, formatDuration, calcOvertimePay, formatMonthLabel, getNowMonthStr, formatDate, getEmployeeTaxRate, calcDailyBasePay } from "../lib/utils";
 import { useMemo, useState, useEffect, useRef } from "react";
 import { Calendar, DollarSign, CheckCircle2, AlertCircle, TrendingUp, Download, Receipt, Check, RotateCcw, RefreshCw, Search, Filter, Clock, ChevronLeft, ChevronRight, X, Loader2 } from "lucide-react";
 import { getTranslation, Language } from "../lib/i18n";
@@ -276,15 +276,8 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
           };
           mealAllowance += getMealAllowanceVal(emp);
 
-          const hasBaseWage = emp.baseMonthlyWage !== undefined && emp.baseMonthlyWage !== null && emp.baseMonthlyWage > 0;
-          const hasDailyWage = emp.dailyWage !== undefined && emp.dailyWage !== null && emp.dailyWage > 0;
-          if (hasBaseWage) {
-            basePay += emp.baseMonthlyWage / 30; // Daily converted wage from base monthly salary
-          } else if (hasDailyWage) {
-            basePay += (d.valid - d.ot) * (emp.dailyWage / config.standardHours); // Proportional daily wage based on actual hours on duty
-          } else {
-            basePay += (d.valid - d.ot) * (emp.hourlyRate ?? 0); // Normal working hours * hourly rate
-          }
+          const normalHours = Math.max(0, d.valid - d.ot);
+          basePay += calcDailyBasePay(emp, normalHours, config);
         }
       });
       
@@ -292,7 +285,7 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
       const ssSec = workingDays > 0 ? Number(emp.socialSecurity || 0) : 0;
       const licenseVal = workingDays > 0 ? Number(emp.licenseFee || 0) : 0;
       const gross = Number(basePay || 0) + Number(otPay || 0) + bonus + Number(mealAllowance || 0) + licenseVal;
-      const taxRate = typeof config?.taxRate === "number" && !isNaN(config.taxRate) ? config.taxRate : 0.05;
+      const taxRate = getEmployeeTaxRate(emp, config);
       const tax = (Number(basePay || 0) + Number(otPay || 0) + bonus) * taxRate;
       
       const isDispatch = emp.sourceType === '劳务派遣';
@@ -604,15 +597,14 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
       return "时薪";
     };
 
-    const taxRate = typeof config?.taxRate === "number" && !isNaN(config.taxRate) ? config.taxRate : 0.05;
-
     const totals = tableRows.reduce(
       (acc, item) => {
         const bonus = Number(item.emp.attendanceBonus || 0);
         const ssf = Number(item.emp.socialSecurity || 0);
         const basePay = Number(item.basePay || 0);
         const otPay = Number(item.otPay || 0);
-        const tax = (basePay + otPay + bonus) * taxRate;
+        const empTaxRate = getEmployeeTaxRate(item.emp, config);
+        const tax = (basePay + otPay + bonus) * empTaxRate;
         const deduction = ssf + tax;
         const net = Number.isFinite(item.net) ? item.net : Math.max(0, Number(item.gross || 0) - deduction);
 
@@ -635,7 +627,8 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
       const ssf = Number(item.emp.socialSecurity || 0);
       const basePay = Number(item.basePay || 0);
       const otPay = Number(item.otPay || 0);
-      const tax = (basePay + otPay + bonus) * taxRate;
+      const empTaxRate = getEmployeeTaxRate(item.emp, config);
+      const tax = (basePay + otPay + bonus) * empTaxRate;
       const deduction = ssf + tax;
       const net = Number.isFinite(item.net) ? item.net : Math.max(0, Number(item.gross || 0) - deduction);
 
@@ -1430,14 +1423,21 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
                     </div>
                   )}
 
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">
-                      {lang === 'en' ? `Withholding Tax (${(((config?.taxRate ?? 0.05)) * 100).toFixed(0)}%):` : lang === 'th' ? `หักภาษี ณ ที่จ่าย (${(((config?.taxRate ?? 0.05)) * 100).toFixed(0)}%):` : `所得税代扣 (${((config?.taxRate ?? 0.05)) * 100}%):`}
-                    </span>
-                    <span className="text-red-500 text-right">
-                      - {formatCurrency((Number(selectedPayslipEmp.basePay || 0) + Number(selectedPayslipEmp.otPay || 0) + Number(selectedPayslipEmp.emp.attendanceBonus || 0)) * (config?.taxRate ?? 0.05), selectedPayslipEmp.emp.currency)}
-                    </span>
-                  </div>
+                  {(() => {
+                    const empTaxRate = getEmployeeTaxRate(selectedPayslipEmp.emp, config);
+                    const taxPercentLabel = (empTaxRate * 100).toFixed(0);
+                    const taxableGross = Number(selectedPayslipEmp.basePay || 0) + Number(selectedPayslipEmp.otPay || 0) + Number(selectedPayslipEmp.emp.attendanceBonus || 0);
+                    return (
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">
+                          {lang === 'en' ? `Withholding Tax (${taxPercentLabel}%):` : lang === 'th' ? `หักภาษี ณ ที่จ่าย (${taxPercentLabel}%):` : `所得税代扣 (${taxPercentLabel}%):`}
+                        </span>
+                        <span className="text-red-500 text-right">
+                          - {formatCurrency(taxableGross * empTaxRate, selectedPayslipEmp.emp.currency)}
+                        </span>
+                      </div>
+                    );
+                  })()}
 
                   {selectedPayslipEmp.emp.socialSecurity !== undefined && selectedPayslipEmp.emp.socialSecurity > 0 && (
                     <div className="flex justify-between">

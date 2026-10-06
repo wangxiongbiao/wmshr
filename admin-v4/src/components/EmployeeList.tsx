@@ -530,25 +530,29 @@ export function EmployeeList({
                     <span title="由基础月工资换算：(月薪/30)/8 小时" className="font-mono">
                       {formatCurrency((emp.baseMonthlyWage / 30) / 8, emp.currency)} <span className="text-[9px] text-slate-400 font-normal">({lang === 'en' ? 'est.' : lang === 'th' ? 'ประมาณ' : '折算'})</span>
                     </span>
+                  ) : emp.hourlyRate !== undefined && emp.hourlyRate > 0 ? (
+                    <span className="font-mono">{formatCurrency(emp.hourlyRate, emp.currency)}</span>
                   ) : emp.dailyWage !== undefined && emp.dailyWage > 0 ? (
                     <span title="由固定日薪换算：日薪/8 小时" className="font-mono">
                       {formatCurrency(emp.dailyWage / 8, emp.currency)} <span className="text-[9px] text-slate-400 font-normal">({lang === 'en' ? 'est.' : lang === 'th' ? 'ประมาณ' : '折算'})</span>
                     </span>
                   ) : (
-                    emp.hourlyRate !== undefined && emp.hourlyRate > 0 ? formatCurrency(emp.hourlyRate, emp.currency) : '-'
+                    '-'
                   )}
                 </p>
               </div>
               <div>
                 <p className="text-[10px] text-slate-400 uppercase tracking-wide">{getTranslation("emp_wage_type", lang)}</p>
                 <p className="font-semibold text-brand-600 font-mono">
-                  {emp.baseMonthlyWage !== undefined && emp.baseMonthlyWage > 0 
-                    ? `${formatCurrency(emp.baseMonthlyWage, emp.currency)}/${lang === 'en' ? 'mo' : lang === 'th' ? 'เดือน' : '月'}` 
-                    : emp.dailyWage !== undefined && emp.dailyWage > 0 
-                      ? `${formatCurrency(emp.dailyWage, emp.currency)}/${lang === 'en' ? 'day' : lang === 'th' ? 'วัน' : '天'}`
-                      : emp.hourlyRate !== undefined && emp.hourlyRate > 0 
-                        ? `${formatCurrency(emp.hourlyRate, emp.currency)}/${lang === 'en' ? 'hr' : lang === 'th' ? 'ชม.' : '时'}`
-                        : '-'
+                  {emp.baseMonthlyWage !== undefined && emp.baseMonthlyWage > 0
+                    ? `${formatCurrency(emp.baseMonthlyWage, emp.currency)}/${lang === 'en' ? 'mo' : lang === 'th' ? 'เดือน' : '月'}`
+                    : emp.dailyWage !== undefined && emp.dailyWage > 0 && emp.hourlyRate !== undefined && emp.hourlyRate > 0
+                      ? `${formatCurrency(emp.dailyWage, emp.currency)}/${lang === 'en' ? 'day' : lang === 'th' ? 'วัน' : '天'} (${formatCurrency(emp.hourlyRate, emp.currency)}/${lang === 'en' ? 'hr' : lang === 'th' ? 'ชม.' : '时'})`
+                      : emp.dailyWage !== undefined && emp.dailyWage > 0
+                        ? `${formatCurrency(emp.dailyWage, emp.currency)}/${lang === 'en' ? 'day' : lang === 'th' ? 'วัน' : '天'}`
+                        : emp.hourlyRate !== undefined && emp.hourlyRate > 0
+                          ? `${formatCurrency(emp.hourlyRate, emp.currency)}/${lang === 'en' ? 'hr' : lang === 'th' ? 'ชม.' : '时'}`
+                          : '-'
                   }
                 </p>
               </div>
@@ -558,8 +562,11 @@ export function EmployeeList({
                   "font-bold text-xs truncate",
                   emp.sourceType === '劳务派遣' ? "text-blue-600 animate-pulse-subtle" : "text-emerald-600"
                 )}>
-                  {emp.sourceType === '劳务派遣' 
-                    ? (lang === 'en' ? `Dispatch (${emp.dispatchCommissionRate ?? 0}%)` : lang === 'th' ? `ส่งตัว (${emp.dispatchCommissionRate ?? 0}%)` : `派遣 (佣${emp.dispatchCommissionRate ?? 0}%)`)
+                  {emp.sourceType === '劳务派遣'
+                    ? (emp.dispatchCommissionRate !== undefined && emp.dispatchCommissionRate > 0
+                        ? (lang === 'en' ? `Dispatch (${emp.dispatchCommissionRate}%)` : lang === 'th' ? `ส่งตัว (${emp.dispatchCommissionRate}%)` : `派遣 (佣${emp.dispatchCommissionRate}%)`)
+                        : (lang === 'en' ? 'Dispatch' : lang === 'th' ? 'ส่งตัว' : '劳务派遣')
+                      )
                     : getTranslation("emp_source_direct", lang)
                   }
                 </p>
@@ -1181,8 +1188,11 @@ export function EmployeeList({
                   <div>
                     <span className="text-slate-400 font-medium block">{getTranslation("emp_source_type", lang)}</span>
                     <span className="font-bold text-slate-800 text-sm block mt-1">
-                      {selectedDetailEmployee.sourceType === '劳务派遣' 
-                        ? (lang === 'en' ? `Dispatch (${selectedDetailEmployee.dispatchCommissionRate ?? 0}%)` : `派遣 (佣${selectedDetailEmployee.dispatchCommissionRate ?? 0}%)`)
+                      {selectedDetailEmployee.sourceType === '劳务派遣'
+                        ? (selectedDetailEmployee.dispatchCommissionRate !== undefined && selectedDetailEmployee.dispatchCommissionRate > 0
+                            ? (lang === 'en' ? `Dispatch (${selectedDetailEmployee.dispatchCommissionRate}%)` : `派遣 (佣${selectedDetailEmployee.dispatchCommissionRate}%)`)
+                            : (lang === 'en' ? 'Dispatch' : '劳务派遣')
+                          )
                         : getTranslation("emp_source_direct", lang)
                       }
                     </span>
@@ -1200,13 +1210,15 @@ export function EmployeeList({
                   <div>
                     <span className="text-slate-400 font-medium block">{getTranslation("emp_wage_type", lang)}</span>
                     <span className="font-bold text-brand-600 text-sm block mt-1">
-                      {selectedDetailEmployee.baseMonthlyWage !== undefined && selectedDetailEmployee.baseMonthlyWage > 0 
-                        ? `${formatCurrency(selectedDetailEmployee.baseMonthlyWage, selectedDetailEmployee.currency)}/月` 
-                        : selectedDetailEmployee.dailyWage !== undefined && selectedDetailEmployee.dailyWage > 0 
-                          ? `${formatCurrency(selectedDetailEmployee.dailyWage, selectedDetailEmployee.currency)}/天`
-                          : selectedDetailEmployee.hourlyRate !== undefined && selectedDetailEmployee.hourlyRate > 0 
-                            ? `${formatCurrency(selectedDetailEmployee.hourlyRate, selectedDetailEmployee.currency)}/时`
-                            : '-'
+                      {selectedDetailEmployee.baseMonthlyWage !== undefined && selectedDetailEmployee.baseMonthlyWage > 0
+                        ? `${formatCurrency(selectedDetailEmployee.baseMonthlyWage, selectedDetailEmployee.currency)}/月`
+                        : selectedDetailEmployee.dailyWage !== undefined && selectedDetailEmployee.dailyWage > 0 && selectedDetailEmployee.hourlyRate !== undefined && selectedDetailEmployee.hourlyRate > 0
+                          ? `${formatCurrency(selectedDetailEmployee.dailyWage, selectedDetailEmployee.currency)}/天 (${formatCurrency(selectedDetailEmployee.hourlyRate, selectedDetailEmployee.currency)}/时)`
+                          : selectedDetailEmployee.dailyWage !== undefined && selectedDetailEmployee.dailyWage > 0
+                            ? `${formatCurrency(selectedDetailEmployee.dailyWage, selectedDetailEmployee.currency)}/天`
+                            : selectedDetailEmployee.hourlyRate !== undefined && selectedDetailEmployee.hourlyRate > 0
+                              ? `${formatCurrency(selectedDetailEmployee.hourlyRate, selectedDetailEmployee.currency)}/时`
+                              : '-'
                       }
                     </span>
                   </div>
@@ -1215,10 +1227,12 @@ export function EmployeeList({
                     <span className="font-bold text-slate-800 text-sm block mt-1 font-mono">
                       {selectedDetailEmployee.baseMonthlyWage !== undefined && selectedDetailEmployee.baseMonthlyWage > 0 ? (
                         <span>{formatCurrency((selectedDetailEmployee.baseMonthlyWage / 30) / 8, selectedDetailEmployee.currency)}</span>
+                      ) : selectedDetailEmployee.hourlyRate !== undefined && selectedDetailEmployee.hourlyRate > 0 ? (
+                        <span>{formatCurrency(selectedDetailEmployee.hourlyRate, selectedDetailEmployee.currency)}</span>
                       ) : selectedDetailEmployee.dailyWage !== undefined && selectedDetailEmployee.dailyWage > 0 ? (
                         <span>{formatCurrency(selectedDetailEmployee.dailyWage / 8, selectedDetailEmployee.currency)}</span>
                       ) : (
-                        selectedDetailEmployee.hourlyRate !== undefined && selectedDetailEmployee.hourlyRate > 0 ? formatCurrency(selectedDetailEmployee.hourlyRate, selectedDetailEmployee.currency) : '-'
+                        '-'
                       )}
                     </span>
                   </div>
@@ -1253,9 +1267,19 @@ export function EmployeeList({
                       {lang === 'en' ? "License Fee" : lang === 'th' ? "ค่าใบอนุญาต" : "证书/技能补贴"}
                     </span>
                     <span className="font-bold text-sky-600 text-sm block mt-1 font-mono">
-                      {selectedDetailEmployee.licenseFee !== undefined && selectedDetailEmployee.licenseFee > 0 
-                        ? formatCurrency(selectedDetailEmployee.licenseFee, selectedDetailEmployee.currency) 
+                      {selectedDetailEmployee.licenseFee !== undefined && selectedDetailEmployee.licenseFee > 0
+                        ? formatCurrency(selectedDetailEmployee.licenseFee, selectedDetailEmployee.currency)
                         : '-'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 font-medium block">
+                      {lang === 'en' ? "Tax Rate" : lang === 'th' ? "อัตราภาษี" : "个人所得税比例"}
+                    </span>
+                    <span className="font-bold text-indigo-600 text-sm block mt-1 font-mono">
+                      {selectedDetailEmployee.taxRate !== undefined && selectedDetailEmployee.taxRate !== null
+                        ? `${selectedDetailEmployee.taxRate}%`
+                        : '5%'}
                     </span>
                   </div>
                 </div>

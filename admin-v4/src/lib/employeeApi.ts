@@ -52,6 +52,7 @@ type ApiEmployee = {
   otMultiplierWorkday?: number | null;
   otMultiplierWeekend?: number | null;
   otMultiplierHoliday?: number | null;
+  taxRate?: number | null;
   username?: string;
   permissions?: string[];
   photo: string | null;
@@ -70,8 +71,7 @@ const statusToApi = (status: Employee["status"]): ApiEmployee["status"] =>
   status === "离职" ? "resigned" : status === "休假" ? "on_leave" : status === "试用" ? "probation" : "active";
 
 export function fromApiEmployee(employee: ApiEmployee): Employee {
-  // 与后端 employeePayload 保持一致：fixedSalary === null 时才视为时薪制
-  const isHourly = employee.salaryType === "hourly" || (employee.fixedSalary == null && employee.hourlyRate != null && employee.hourlyRate > 0);
+  const isFixed = employee.salaryType === "fixed" || (employee.fixedSalary != null && Number(employee.fixedSalary) > 0);
   return {
     id: employee.id,
     employeeNo: employee.employeeNo,
@@ -84,51 +84,68 @@ export function fromApiEmployee(employee: ApiEmployee): Employee {
     phone: employee.phone,
     role: employee.role,
     dept: employee.dept,
-    salaryType: isHourly ? "hourly" : "fixed",
-    hourlyRate: employee.hourlyRate != null ? Number(employee.hourlyRate) : (employee.fixedSalary ? Math.round(Number(employee.fixedSalary) / 240) : undefined),
-    baseMonthlyWage: employee.fixedSalary != null ? Number(employee.fixedSalary) : (employee.hourlyRate ? Math.round(Number(employee.hourlyRate) * 240) : undefined),
-    dailyWage: employee.dailyWage != null ? Number(employee.dailyWage) : (employee.fixedSalary ? Math.round(Number(employee.fixedSalary) / 30) : (employee.hourlyRate ? Math.round(Number(employee.hourlyRate) * 8) : undefined)),
-    attendanceBonus: employee.attendanceBonus ?? 0,
-    socialSecurity: employee.socialSecurity ?? 0,
-    mealAllowanceDaily: employee.mealAllowance,
-    licenseFee: employee.licenseFee != null ? Number(employee.licenseFee) : 0,
+    salaryType: isFixed ? "fixed" : "hourly",
+    hourlyRate: isFixed ? undefined : (employee.hourlyRate != null ? Number(employee.hourlyRate) : undefined),
+    baseMonthlyWage: isFixed ? Number(employee.fixedSalary) : undefined,
+    dailyWage: isFixed ? undefined : (employee.dailyWage != null ? Number(employee.dailyWage) : undefined),
+    attendanceBonus: employee.attendanceBonus != null && Number(employee.attendanceBonus) > 0 ? Number(employee.attendanceBonus) : undefined,
+    socialSecurity: employee.socialSecurity != null && Number(employee.socialSecurity) > 0 ? Number(employee.socialSecurity) : undefined,
+    mealAllowanceDaily: employee.mealAllowance != null && Number(employee.mealAllowance) > 0 ? Number(employee.mealAllowance) : undefined,
+    licenseFee: employee.licenseFee != null && Number(employee.licenseFee) > 0 ? Number(employee.licenseFee) : undefined,
     currency: (employee.currency || "THB") as Employee["currency"],
     joinDate: formatDate(employee.joinDate, ""),
     status: statusFromApi(employee.status),
     photo: employee.photo,
     username: employee.username || employee.employeeNo,
     sourceType: employee.isDispatchPersonnel ? "劳务派遣" : "自招",
-    dispatchCommissionRate: employee.serviceFeeRate,
+    dispatchCommissionRate: employee.serviceFeeRate != null && Number(employee.serviceFeeRate) > 0 ? Number(employee.serviceFeeRate) : undefined,
     bankCardNumber: employee.bankCardNumber || undefined,
     bankName: employee.bankName || undefined,
     idCard: employee.idCard || undefined,
     permissions: employee.permissions || [],
     otRuleType: employee.otRuleType || "fixed",
     // 后端用 overtime_hourly_fee 列同时存储旧版加班费和新版固定加班率，两字段指向同一列，取其一即可
-    otFixedRate: employee.otFixedRate != null ? Number(employee.otFixedRate) : (employee.overtimeHourlyFee != null ? Number(employee.overtimeHourlyFee) : undefined),
-    otBaseRate: employee.otBaseRate != null ? Number(employee.otBaseRate) : undefined,
+    otFixedRate: employee.otFixedRate != null && Number(employee.otFixedRate) > 0
+      ? Number(employee.otFixedRate)
+      : (employee.overtimeHourlyFee != null && Number(employee.overtimeHourlyFee) > 0 ? Number(employee.overtimeHourlyFee) : undefined),
+    otBaseRate: employee.otBaseRate != null && Number(employee.otBaseRate) > 0 ? Number(employee.otBaseRate) : undefined,
     otMultiplierWorkday: employee.otMultiplierWorkday != null ? Number(employee.otMultiplierWorkday) : 1.5,
     otMultiplierWeekend: employee.otMultiplierWeekend != null ? Number(employee.otMultiplierWeekend) : 2.0,
     otMultiplierHoliday: employee.otMultiplierHoliday != null ? Number(employee.otMultiplierHoliday) : 3.0,
+    taxRate: employee.taxRate != null ? Number(employee.taxRate) : 5,
     updatedAt: employee.updatedAt
   };
 }
 
 function toApiEmployee(employee: Partial<Employee>) {
-  const hourlyRate = employee.hourlyRate != null && (employee.hourlyRate as any) !== "" ? Number(employee.hourlyRate) : null;
-  const baseMonthlyWage = employee.baseMonthlyWage != null && (employee.baseMonthlyWage as any) !== "" ? Number(employee.baseMonthlyWage) : null;
-  const dailyWage = employee.dailyWage != null && (employee.dailyWage as any) !== "" ? Number(employee.dailyWage) : null;
-  const fixedSalary = baseMonthlyWage != null ? baseMonthlyWage : (dailyWage != null ? dailyWage * 30 : null);
-  const salaryType = employee.salaryType || (hourlyRate !== null && fixedSalary === null ? "hourly" : "fixed");
-  // 以 salaryType 为权威：时薪制时将 fixedSalary 置 null，固定薪时将 hourlyRate 置 null
-  // 防止用户意外填写另一类薪资字段后保存，导致后端读回时薪资类型被翻转
-  const finalHourlyRate = salaryType === "hourly" ? hourlyRate : null;
-  const finalFixedSalary = salaryType === "fixed" ? fixedSalary : null;
-  const finalDailyWage = salaryType === "fixed" ? dailyWage : null;
+  const hasBaseMonthlyWage = employee.baseMonthlyWage !== undefined && employee.baseMonthlyWage !== null && (employee.baseMonthlyWage as any) !== "" && Number(employee.baseMonthlyWage) > 0;
+
+  let salaryType: "fixed" | "hourly" = "hourly";
+  let finalFixedSalary: number | null = null;
+  let finalHourlyRate: number | null = null;
+  let finalDailyWage: number | null = null;
+
+  if (hasBaseMonthlyWage) {
+    salaryType = "fixed";
+    finalFixedSalary = Number(employee.baseMonthlyWage);
+    finalHourlyRate = null;
+    finalDailyWage = null;
+  } else {
+    salaryType = "hourly";
+    finalFixedSalary = null;
+    finalDailyWage = employee.dailyWage != null && (employee.dailyWage as any) !== "" && Number(employee.dailyWage) > 0 ? Number(employee.dailyWage) : null;
+    if (employee.hourlyRate != null && (employee.hourlyRate as any) !== "" && Number(employee.hourlyRate) > 0) {
+      finalHourlyRate = Number(employee.hourlyRate);
+    } else if (finalDailyWage !== null) {
+      finalHourlyRate = Math.round((finalDailyWage / 8) * 100) / 100;
+    } else {
+      finalHourlyRate = null;
+    }
+  }
 
   const otRuleType = employee.otRuleType === "multiplier" ? "multiplier" : "fixed";
-  const otFixedRate = employee.otFixedRate != null && !isNaN(Number(employee.otFixedRate)) ? Number(employee.otFixedRate) : null;
-  const otBaseRate = employee.otBaseRate != null && !isNaN(Number(employee.otBaseRate)) ? Number(employee.otBaseRate) : null;
+  const otFixedRate = employee.otFixedRate != null && !isNaN(Number(employee.otFixedRate)) && Number(employee.otFixedRate) > 0 ? Number(employee.otFixedRate) : null;
+  const otBaseRate = employee.otBaseRate != null && !isNaN(Number(employee.otBaseRate)) && Number(employee.otBaseRate) > 0 ? Number(employee.otBaseRate) : null;
   const otMultiplierWorkday = employee.otMultiplierWorkday != null && !isNaN(Number(employee.otMultiplierWorkday)) ? Number(employee.otMultiplierWorkday) : 1.5;
   const otMultiplierWeekend = employee.otMultiplierWeekend != null && !isNaN(Number(employee.otMultiplierWeekend)) ? Number(employee.otMultiplierWeekend) : 2.0;
   const otMultiplierHoliday = employee.otMultiplierHoliday != null && !isNaN(Number(employee.otMultiplierHoliday)) ? Number(employee.otMultiplierHoliday) : 3.0;
@@ -139,7 +156,7 @@ function toApiEmployee(employee: Partial<Employee>) {
     gender: employee.gender,
     warehouseCode: employee.warehouseCode || undefined,
     nationality: employee.nationality || employee.country || "MM",
-    country: employee.nationality || employee.country || "MM", 
+    country: employee.nationality || employee.country || "MM",
     phone: employee.phone || "",
     role: employee.role,
     dept: employee.dept,
@@ -150,11 +167,11 @@ function toApiEmployee(employee: Partial<Employee>) {
     fixedSalary: finalFixedSalary,
     dailyWage: finalDailyWage,
     isDispatchPersonnel: employee.sourceType === "劳务派遣",
-    attendanceBonus: Number(employee.attendanceBonus || 0),
-    socialSecurity: Number(employee.socialSecurity || 0),
-    mealAllowance: Number(employee.mealAllowanceDaily || 0),
-    licenseFee: Number(employee.licenseFee || 0),
-    serviceFeeRate: Number(employee.dispatchCommissionRate || 0),
+    attendanceBonus: employee.attendanceBonus != null && Number(employee.attendanceBonus) > 0 ? Number(employee.attendanceBonus) : null,
+    socialSecurity: employee.socialSecurity != null && Number(employee.socialSecurity) > 0 ? Number(employee.socialSecurity) : null,
+    mealAllowance: employee.mealAllowanceDaily != null && Number(employee.mealAllowanceDaily) > 0 ? Number(employee.mealAllowanceDaily) : null,
+    licenseFee: employee.licenseFee != null && Number(employee.licenseFee) > 0 ? Number(employee.licenseFee) : null,
+    serviceFeeRate: employee.dispatchCommissionRate != null && Number(employee.dispatchCommissionRate) > 0 ? Number(employee.dispatchCommissionRate) : null,
     currency: employee.currency || "THB", // 避免传 undefined 导致后端 fallback 覆盖用户选择
     bankCardNumber: employee.bankCardNumber || null,
     bankName: employee.bankName || null,
@@ -166,6 +183,7 @@ function toApiEmployee(employee: Partial<Employee>) {
     otMultiplierWorkday,
     otMultiplierWeekend,
     otMultiplierHoliday,
+    taxRate: employee.taxRate != null && !isNaN(Number(employee.taxRate)) ? Number(employee.taxRate) : 5,
     username: employee.username ? employee.username.trim() : undefined,
     password: employee.password ? employee.password.trim() : undefined,
     permissions: Array.isArray(employee.permissions) ? employee.permissions : undefined,

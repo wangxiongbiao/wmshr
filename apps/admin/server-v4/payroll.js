@@ -3,6 +3,16 @@
 export function createPayrollRouter({ express, supabase, directDbPool, identity }) {
   const router = express.Router();
 
+  // 幂等自愈：确保 monthly_payroll_results 存在 tax_deduction 字段
+  if (directDbPool?.query) {
+    directDbPool.query(`
+      ALTER TABLE public.monthly_payroll_results
+        ADD COLUMN IF NOT EXISTS tax_deduction NUMERIC(12,2) NOT NULL DEFAULT 0;
+    `).catch(err => {
+      console.warn("[admin-v4/payroll] ensure tax_deduction column note:", err.message);
+    });
+  }
+
   function roundToTwo(num) {
     return Math.round((Number(num || 0) + Number.EPSILON) * 100) / 100;
   }
@@ -22,9 +32,10 @@ export function createPayrollRouter({ express, supabase, directDbPool, identity 
     const overtimePayHours = Number(row.overtime_pay_hours || 0);
     const overtimePay = Number(row.overtime_pay || 0);
     const allowanceTotal = Number(row.allowance_total || 0);
-    const deductionTotal = Number(row.deduction_total || row.tax_deduction || 0);
-    const otherTotal = Number(row.other_total || 0);
+    const taxDeduction = Number(row.tax_deduction || 0);
     const socialSecurity = Number(row.social_security_amount || row.social_security_deduction || 0);
+    const deductionTotal = Number(row.deduction_total || (taxDeduction + socialSecurity));
+    const otherTotal = Number(row.other_total || 0);
     const serviceFee = Number(row.service_fee_amount || 0);
     const grossPay = Number(row.gross_pay || (Number(row.base_salary || 0) + overtimePay + Number(row.meal_allowance || 0) + Number(row.attendance_bonus || 0)));
     const totalDeduction = Number(row.total_deduction || (deductionTotal + socialSecurity));
@@ -40,6 +51,7 @@ export function createPayrollRouter({ express, supabase, directDbPool, identity 
       employeeRole: emp.role || row.role || "员工",
       employeePhoto: emp.photo || null,
       employeeStatus: emp.status || "active",
+      taxRate: emp.tax_rate != null ? Number(emp.tax_rate) : 5,
       yearMonth: row.year_month,
       salaryType: row.salary_type || emp.salary_type || "fixed",
       fixedSalary: row.fixed_salary != null ? Number(row.fixed_salary) : (emp.fixed_salary != null ? Number(emp.fixed_salary) : null),
@@ -59,7 +71,7 @@ export function createPayrollRouter({ express, supabase, directDbPool, identity 
       baseSalary: Number(row.base_salary || (row.salary_type === "hourly" ? hourlyPay : (row.fixed_salary || emp.fixed_salary || 0))),
       allowanceTotal,
       deductionTotal,
-      taxDeduction: deductionTotal,
+      taxDeduction,
       otherTotal,
       socialSecurityAmount: socialSecurity,
       socialSecurityDeduction: socialSecurity,
@@ -272,36 +284,58 @@ export function createPayrollRouter({ express, supabase, directDbPool, identity 
         let totalOtHours = 0;
         let workingDays = 0;
 
+        const fixedSalary = Number(emp.fixed_salary || 0);
+        const dailyWage = Number(emp.daily_wage || 0);
+        const hourlyRate = Number(emp.hourly_rate || 0);
+        const isFixedMonthly = emp.salary_type === "fixed" || fixedSalary > 0;
+        const effectiveHourlyRate = hourlyRate > 0 ? hourlyRate : (dailyWage > 0 ? dailyWage / 8 : 0);
+
+        let calculatedBasePay = 0;
+
         for (const r of empRecs) {
           const wHours = Number(r.work_hours || 0);
           const oHours = Number(r.ot_hours || 0);
           if (wHours > 0) {
             workingDays += 1;
             totalValidHours += wHours;
+            if (!isFixedMonthly) {
+              if (wHours >= 8) {
+                // 满一日的8小时按日薪算 (无日薪则按 8 * effectiveHourlyRate)
+                calculatedBasePay += dailyWage > 0 ? dailyWage : (8 * effectiveHourlyRate);
+              } else {
+                // 不满一日的就按时薪算，有输入时薪就使用输入的时薪，没有时薪就按日薪除以8分配
+                calculatedBasePay += wHours * effectiveHourlyRate;
+              }
+            }
           }
           if (oHours > 0) {
             totalOtHours += oHours;
           }
         }
 
-        const isHourly = emp.salary_type === "hourly";
-        const hourlyRate = Number(emp.hourly_rate || 0);
-        const fixedSalary = Number(emp.fixed_salary || 0);
-        const basePay = isHourly ? roundToTwo(totalValidHours * hourlyRate) : fixedSalary;
-        const overtimePay = roundToTwo(totalOtHours * (emp.overtime_hourly_fee ? Number(emp.overtime_hourly_fee) : (hourlyRate * 1.5)));
+        const isHourly = !isFixedMonthly;
+        const basePay = isFixedMonthly ? fixedSalary : roundToTwo(calculatedBasePay);
+        const overtimePay = roundToTwo(totalOtHours * (emp.overtime_hourly_fee ? Number(emp.overtime_hourly_fee) : (effectiveHourlyRate * 1.5)));
         const mealAllowanceTotal = roundToTwo(workingDays * getNonNegativeAmount(emp.meal_allowance));
         const attendanceBonusAmount = workingDays >= 20 ? getNonNegativeAmount(emp.attendance_bonus) : 0;
         const socialSecurity = getNonNegativeAmount(emp.social_security);
         const grossPay = roundToTwo(basePay + overtimePay + mealAllowanceTotal + attendanceBonusAmount);
-        const netPay = roundToTwo(grossPay - socialSecurity);
+
+        // 个人所得税扣缴：按员工档案设定的税率 (百分比数值，默认 5 代表 5%) 计算
+        const rawTaxRate = emp.tax_rate != null ? Number(emp.tax_rate) : 5;
+        const taxRate = rawTaxRate > 1 ? rawTaxRate / 100 : (rawTaxRate < 0 ? 0.05 : (rawTaxRate === 0 ? 0 : (rawTaxRate <= 0.2 ? rawTaxRate : rawTaxRate / 100)));
+        const taxableGross = basePay + overtimePay + attendanceBonusAmount;
+        const taxDeduction = roundToTwo(taxableGross * taxRate);
+        const totalDeduction = roundToTwo(socialSecurity + taxDeduction);
+        const netPay = Math.max(0, roundToTwo(grossPay - totalDeduction));
 
         const payload = {
           owner_user_id: ownerUserId,
           employee_id: empId,
           year_month: yearMonth,
-          salary_type: emp.salary_type || "fixed",
-          fixed_salary: fixedSalary,
-          hourly_rate: hourlyRate,
+          salary_type: isFixedMonthly ? "fixed" : "hourly",
+          fixed_salary: isFixedMonthly ? fixedSalary : null,
+          hourly_rate: hourlyRate > 0 ? hourlyRate : (dailyWage > 0 ? Math.round((dailyWage / 8) * 100) / 100 : null),
           currency: (emp.currency || "THB").toUpperCase(),
           working_days: workingDays,
           effective_attendance_days: workingDays,
@@ -317,12 +351,12 @@ export function createPayrollRouter({ express, supabase, directDbPool, identity 
           attendance_bonus_amount: attendanceBonusAmount,
           social_security_deduction: socialSecurity,
           social_security_amount: socialSecurity,
-          tax_deduction: 0,
+          tax_deduction: taxDeduction,
           allowance_total: mealAllowanceTotal + attendanceBonusAmount,
-          deduction_total: socialSecurity,
+          deduction_total: totalDeduction,
           other_total: 0,
           gross_pay: grossPay,
-          total_deduction: socialSecurity,
+          total_deduction: totalDeduction,
           net_pay: netPay,
           net_salary: netPay,
           calculation_status: "calculated",

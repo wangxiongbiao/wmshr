@@ -32,7 +32,7 @@ import {
   BadgeAlert, BadgeCheck, BadgeHelp, Upload, Settings, RotateCcw,
   FileCheck, FileX, Loader2, RefreshCw
 } from "lucide-react";
-import { calcAttendanceDetails, calcOvertimePay, formatCurrency, cn, formatDate, formatDateTime, getNowDateStr, getNowDateTimeStr, getNowMonthStr, formatMonthLabel } from "../lib/utils";
+import { calcAttendanceDetails, calcOvertimePay, formatCurrency, cn, formatDate, formatDateTime, getNowDateStr, getNowDateTimeStr, getNowMonthStr, formatMonthLabel, calcDailyBasePay } from "../lib/utils";
 
 interface ExpenseManagerProps {
   employees: Employee[];
@@ -853,7 +853,8 @@ export function ExpenseManager({ employees, addToast, attendance = [], config, h
       employees.forEach(emp => {
         if (emp.joinDate && emp.joinDate.slice(0, 7) > targetMonth) return;
         const empAtt = filteredAtt.filter(r => r.empId === emp.id);
-        if ((emp.status as any) === "resigned" && empAtt.length === 0) return;
+        const isResigned = (emp.status as any) === "resigned" || emp.status === "离职";
+        if (isResigned && empAtt.length === 0) return;
 
         let valid = 0, ot = 0, otPay = 0, basePay = 0;
         let workingDays = 0;
@@ -871,15 +872,8 @@ export function ExpenseManager({ employees, addToast, attendance = [], config, h
             workingDays += 1;
             mealAllowance += Number(emp.mealAllowanceDaily || 0);
 
-            const hasBaseWage = emp.baseMonthlyWage !== undefined && emp.baseMonthlyWage !== null && emp.baseMonthlyWage > 0;
-            const hasDailyWage = emp.dailyWage !== undefined && emp.dailyWage !== null && emp.dailyWage > 0;
-            if (hasBaseWage) {
-              basePay += emp.baseMonthlyWage / 30;
-            } else if (hasDailyWage) {
-              basePay += (d.valid - d.ot) * (emp.dailyWage / (config?.standardHours || 8));
-            } else {
-              basePay += (d.valid - d.ot) * (emp.hourlyRate ?? 0);
-            }
+            const normalHours = Math.max(0, d.valid - d.ot);
+            basePay += calcDailyBasePay(emp, normalHours, config);
           }
         });
 
@@ -1027,15 +1021,8 @@ export function ExpenseManager({ employees, addToast, attendance = [], config, h
           workingDays += 1;
           mealAllowance += Number(emp.mealAllowanceDaily || 0);
 
-          const hasBaseWage = emp.baseMonthlyWage !== undefined && emp.baseMonthlyWage !== null && emp.baseMonthlyWage > 0;
-          const hasDailyWage = emp.dailyWage !== undefined && emp.dailyWage !== null && emp.dailyWage > 0;
-          if (hasBaseWage) {
-            basePay += emp.baseMonthlyWage / 30;
-          } else if (hasDailyWage) {
-            basePay += (d.valid - d.ot) * (emp.dailyWage / config.standardHours);
-          } else {
-            basePay += (d.valid - d.ot) * (emp.hourlyRate ?? 0);
-          }
+          const normalHours = Math.max(0, d.valid - d.ot);
+          basePay += calcDailyBasePay(emp, normalHours, config);
         }
       });
 
@@ -1131,15 +1118,8 @@ export function ExpenseManager({ employees, addToast, attendance = [], config, h
           };
           mealAllowance += getMealAllowanceVal(emp);
 
-          const hasBaseWage = emp.baseMonthlyWage !== undefined && emp.baseMonthlyWage !== null && emp.baseMonthlyWage > 0;
-          const hasDailyWage = emp.dailyWage !== undefined && emp.dailyWage !== null && emp.dailyWage > 0;
-          if (hasBaseWage) {
-            basePay += emp.baseMonthlyWage / 30;
-          } else if (hasDailyWage) {
-            basePay += (d.valid - d.ot) * (emp.dailyWage / config.standardHours);
-          } else {
-            basePay += (d.valid - d.ot) * (emp.hourlyRate ?? 0);
-          }
+          const normalHours = Math.max(0, d.valid - d.ot);
+          basePay += calcDailyBasePay(emp, normalHours, config);
         }
       });
 
