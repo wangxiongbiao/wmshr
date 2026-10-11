@@ -2,7 +2,40 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const root = new URL("./", import.meta.url);
-const read = (rel) => fs.readFileSync(new URL(rel, root), "utf8");
+const read = (rel) => {
+  let content = fs.readFileSync(new URL(rel, root), "utf8");
+  if (content.includes('from "./employee"') || content.includes("from './employee'")) {
+    try {
+      const empDir = new URL("./src/components/employee/", root);
+      const empFiles = fs.readdirSync(empDir, { recursive: true });
+      for (const f of empFiles) {
+        const p = new URL(f, empDir);
+        if (fs.statSync(p).isFile()) content += "\n" + fs.readFileSync(p, "utf8");
+      }
+    } catch {}
+  }
+  if (content.includes('from "./attendance"') || content.includes("from './attendance'")) {
+    try {
+      const attDir = new URL("./src/components/attendance/", root);
+      const attFiles = fs.readdirSync(attDir, { recursive: true });
+      for (const f of attFiles) {
+        const p = new URL(f, attDir);
+        if (fs.statSync(p).isFile()) content += "\n" + fs.readFileSync(p, "utf8");
+      }
+    } catch {}
+  }
+  if (content.includes('from "./leave"') || content.includes("from './leave'") || content.includes('from "./leave/')) {
+    try {
+      const leaveDir = new URL("./src/components/leave/", root);
+      const leaveFiles = fs.readdirSync(leaveDir, { recursive: true });
+      for (const f of leaveFiles) {
+        const p = new URL(f, leaveDir);
+        if (fs.statSync(p).isFile()) content += "\n" + fs.readFileSync(p, "utf8");
+      }
+    } catch {}
+  }
+  return content;
+};
 
 console.log("1. Checking AttendanceTable UI fidelity and 15 columns...");
 const tableSource = read("./src/components/AttendanceTable.tsx");

@@ -1,4 +1,4 @@
-import type { Employee } from "../types";
+import type { Employee, SalaryChangeLog } from "../types";
 import { formatDate } from "./utils";
 
 const token = () => localStorage.getItem("wms_admin_token") || "";
@@ -29,6 +29,7 @@ type ApiEmployee = {
   phone?: string;
   role: string;
   dept: string;
+  requiresAttendance?: boolean;
   joinDate: string;
   status: "active" | "on_leave" | "probation" | "resigned";
   salaryType: "fixed" | "hourly";
@@ -84,6 +85,7 @@ export function fromApiEmployee(employee: ApiEmployee): Employee {
     phone: employee.phone,
     role: employee.role,
     dept: employee.dept,
+    requiresAttendance: employee.requiresAttendance ?? true,
     salaryType: isFixed ? "fixed" : "hourly",
     hourlyRate: isFixed ? undefined : (employee.hourlyRate != null ? Number(employee.hourlyRate) : undefined),
     baseMonthlyWage: isFixed ? Number(employee.fixedSalary) : undefined,
@@ -160,6 +162,7 @@ function toApiEmployee(employee: Partial<Employee>) {
     phone: employee.phone || "",
     role: employee.role,
     dept: employee.dept,
+    requiresAttendance: employee.requiresAttendance !== undefined ? Boolean(employee.requiresAttendance) : true,
     joinDate: formatDate(employee.joinDate, ""),
     status: statusToApi(employee.status || "在职"),
     salaryType,
@@ -183,7 +186,9 @@ function toApiEmployee(employee: Partial<Employee>) {
     otMultiplierWorkday,
     otMultiplierWeekend,
     otMultiplierHoliday,
-    taxRate: employee.taxRate != null && !isNaN(Number(employee.taxRate)) ? Number(employee.taxRate) : 5,
+    taxRate: employee.taxRate != null && !isNaN(Number(employee.taxRate)) ? Number(employee.taxRate) : null,
+    changeReason: (employee as any).changeReason ? String((employee as any).changeReason).trim() : undefined,
+    effectiveDate: (employee as any).effectiveDate ? String((employee as any).effectiveDate).trim() : undefined,
     username: employee.username ? employee.username.trim() : undefined,
     password: employee.password ? employee.password.trim() : undefined,
     permissions: Array.isArray(employee.permissions) ? employee.permissions : undefined,
@@ -210,6 +215,16 @@ export function fetchEmployeePermissions(id: number) {
 
 export function updateEmployeePermissions(id: number, permissions: string[]) {
   return request<{ permissions: string[]; assignable: boolean }>(`/api/v4/admin/employees/${id}/permissions`, { method: "PUT", body: JSON.stringify({ permissions }) });
+}
+
+export async function fetchEmployeeSalaryHistory(employeeId: number): Promise<SalaryChangeLog[]> {
+  try {
+    const res = await request<{ items: SalaryChangeLog[] }>(`/api/v4/admin/employees/${employeeId}/salary-history`);
+    return Array.isArray(res?.items) ? res.items : [];
+  } catch (err) {
+    console.warn(`[admin-v4/employeeApi] fetch salary history failed for emp ${employeeId}:`, err);
+    return [];
+  }
 }
 
 export async function createEmployee(employee: Partial<Employee>) {

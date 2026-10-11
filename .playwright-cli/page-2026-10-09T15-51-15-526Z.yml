@@ -1,0 +1,107 @@
+- generic [ref=f1e3]:
+  - complementary [ref=f1e4]:
+    - generic [ref=f1e5]: WMSHR
+    - navigation [ref=f1e10]:
+      - generic [ref=f1e11]:
+        - button "客户管理" [ref=f1e12] [cursor=pointer]
+        - button "客户列表" [ref=f1e21] [cursor=pointer]
+      - generic [ref=f1e26]:
+        - button "库存管理" [ref=f1e27] [cursor=pointer]
+        - generic [ref=f1e42]:
+          - button "订单列表" [ref=f1e43] [cursor=pointer]
+          - button "入库列表" [ref=f1e48] [cursor=pointer]
+          - button "商品列表" [ref=f1e54] [cursor=pointer]
+      - generic [ref=f1e60]:
+        - button "员工管理" [ref=f1e61] [cursor=pointer]
+        - generic [ref=f1e71]:
+          - button "数据看板" [ref=f1e72] [cursor=pointer]
+          - button "员工列表" [ref=f1e79] [cursor=pointer]
+          - button "考勤列表" [ref=f1e86] [cursor=pointer]
+          - button "请假列表" [ref=f1e91] [cursor=pointer]
+          - button "薪资列表" [ref=f1e95] [cursor=pointer]
+      - generic [ref=f1e100]:
+        - button "财务管理" [ref=f1e101] [cursor=pointer]
+        - generic [ref=f1e111]:
+          - button "报销列表" [ref=f1e112] [cursor=pointer]
+          - button "发票列表" [ref=f1e117] [cursor=pointer]
+          - button "快递列表" [ref=f1e122] [cursor=pointer]
+      - generic [ref=f1e129]:
+        - button "培训管理" [ref=f1e130] [cursor=pointer]
+        - button "培训列表" [ref=f1e139] [cursor=pointer]
+      - generic [ref=f1e144]:
+        - button "厨房管理" [ref=f1e145] [cursor=pointer]
+        - button "菜谱列表" [ref=f1e154] [cursor=pointer]
+      - generic [ref=f1e159]:
+        - button "移动协同" [ref=f1e160] [cursor=pointer]
+        - button "员工考勤APP" [ref=f1e168] [cursor=pointer]
+  - main [ref=f1e172]:
+    - generic [ref=f1e173]:
+      - heading "快递列表" [level=2] [ref=f1e311]
+      - generic [ref=f1e181]:
+        - button "🌐 简体中文" [ref=f1e183] [cursor=pointer]:
+          - generic [ref=f1e184]: 🌐
+          - generic [ref=f1e185]: 简体中文
+        - button "当前国家：🏳️ 未选择" [ref=f1e189] [cursor=pointer]
+        - generic [ref=f1e200]:
+          - generic [ref=f1e201]: 08:51:15
+          - generic [ref=f1e202]: 10月9日 周五
+        - generic [ref=f1e203]:
+          - generic [ref=f1e204]:
+            - generic [ref=f1e205]: 系
+            - generic [ref=f1e206]:
+              - generic [ref=f1e207]: 系统管理员 (Gary)
+              - generic [ref=f1e208]: 超管
+          - button "安全退出" [ref=f1e212] [cursor=pointer]
+    - generic [ref=f1e313]:
+      - generic [ref=f1e314]:
+        - generic [ref=f1e315]:
+          - textbox "搜索运单号、客户名称、收件人、订单号..." [ref=f1e318]
+          - generic [ref=f1e319]:
+            - button "收起导入区" [ref=f1e320] [cursor=pointer]
+            - button "客户操作列表 0" [ref=f1e322] [cursor=pointer]:
+              - generic [ref=f1e323]: 客户操作列表
+              - generic [ref=f1e324]: "0"
+            - button "导入记录 1" [ref=f1e325] [cursor=pointer]:
+              - generic [ref=f1e326]: 导入记录
+              - generic [ref=f1e327]: "1"
+        - generic [ref=f1e328]:
+          - generic [ref=f1e330]:
+            - button "客户账单汇总 0" [ref=f1e331] [cursor=pointer]:
+              - generic [ref=f1e332]: 客户账单汇总
+              - generic [ref=f1e333]: "0"
+            - button "比对明细 0" [ref=f1e334] [cursor=pointer]:
+              - generic [ref=f1e335]: 比对明细
+              - generic [ref=f1e336]: "0"
+            - button "异常核对" [ref=f1e337] [cursor=pointer]
+          - generic "表格横向滚动（点击单步 / 长按平滑）" [ref=f1e340]:
+            - button "向左滚动" [disabled] [ref=f1e341]
+            - button "向右滚动" [disabled] [ref=f1e345]
+      - generic [ref=f1e349]:
+        - generic [ref=f1e350]:
+          - generic [ref=f1e352]:
+            - generic [ref=f1e353]:
+              - generic [ref=f1e354]: "1"
+              - heading "导入系统发货数据（线下发货单 / order_*.xlsx）" [level=3] [ref=f1e355]
+            - paragraph [ref=f1e356]: 从客服系统导出的客户发货记录，直接拖入或选择 Excel 文件
+          - generic [ref=f1e357] [cursor=pointer]:
+            - paragraph [ref=f1e362]: 点击上传 或 拖拽系统发货 Excel 文件到此处
+            - paragraph [ref=f1e363]: 支持 .xlsx / .xls / .csv（如客服系统导出的 order_*.xlsx）
+          - generic [ref=f1e364]:
+            - generic [ref=f1e365]: 尚未识别列头
+            - button "从剪贴板快速粘贴" [active] [ref=f1e366] [cursor=pointer]
+        - generic [ref=f1e368]:
+          - generic [ref=f1e370]:
+            - generic [ref=f1e371]:
+              - generic [ref=f1e372]: "2"
+              - heading "导入 J&T 官方结算表格（对账单 / VIP_*.xlsx）" [level=3] [ref=f1e373]
+            - paragraph [ref=f1e374]: J&T 快递官方月底提供的财务结算账单，拖入或选择 Excel 文件
+          - generic [ref=f1e375] [cursor=pointer]:
+            - paragraph [ref=f1e380]: 点击上传 或 拖拽 J&T 官方账单 Excel 文件到此处
+            - paragraph [ref=f1e381]: 支持 .xlsx / .xls / .csv（如 J&T 月底账单 VIP8021*.xlsx）
+          - generic [ref=f1e382]:
+            - generic [ref=f1e383]: 尚未识别列头
+            - button "从剪贴板快速粘贴" [ref=f1e384] [cursor=pointer]
+      - generic [ref=f1e386]:
+        - heading "暂无对账数据" [level=4] [ref=f1e390]
+        - paragraph [ref=f1e391]: 请在上方导入系统发货数据和 J&T 官方对账表格，系统将自动核算发货运费与操作费。
+  - generic: 无法直接读取剪贴板，请展开文本框后使用 Ctrl+V 粘贴

@@ -29,9 +29,9 @@ export interface GoodsRecord {
 
 export type Gender = 'male' | 'female';
 
-export type CountryCode = 'MM' | 'TH' | 'CN' | 'VN' | 'KH' | 'PH' | 'ID' | 'LA';
+export type CountryCode = 'MM' | 'TH' | 'CN' | 'VN' | 'KH' | 'PH' | 'ID' | 'MY' | 'LA';
 
-export type AttendanceType = 'normal' | 'late' | 'early' | 'absent' | 'leave' | 'sick_leave' | 'overtime' | 'manual_adjusted' | 'checked_in' | 'pending' | 'exception';
+export type AttendanceType = 'normal' | 'exempt_present' | 'rest' | 'late' | 'early' | 'absent' | 'leave' | 'sick_leave' | 'overtime' | 'manual_adjusted' | 'checked_in' | 'pending' | 'exception';
 
 export type EmployeeStatus = '在职' | '试用' | '休假' | '离职';
 
@@ -54,6 +54,25 @@ export interface AppConfig {
   companyName?: string;
 }
 
+export interface SalaryFieldDiff {
+  field: string;
+  label: string;
+  from: number | string | null;
+  to: number | string | null;
+}
+
+export interface SalaryChangeLog {
+  id: number;
+  employee_id: number;
+  operator_name?: string | null;
+  effective_date: string;
+  change_reason?: string | null;
+  before_snapshot: Record<string, any>;
+  after_snapshot: Record<string, any>;
+  changed_fields: SalaryFieldDiff[];
+  created_at: string;
+}
+
 export interface Employee {
   id: number;
   employeeNo?: string;
@@ -64,6 +83,7 @@ export interface Employee {
   country: CountryCode;
   role: string;
   dept: string;
+  requiresAttendance?: boolean; // 是否需要考勤打卡，默认 true
   phone?: string;
   nationality?: string;
   salaryType?: "hourly" | "fixed";
@@ -320,10 +340,12 @@ export interface CustomerOrder {
   reason?: string;        // 异常标记说明/作废说明
 }
 
+export type LeaveCategory = '事假' | '病假' | '年假' | '调休' | '婚产假' | '丧假' | '其他' | 'personal' | 'sick' | 'annual' | 'special';
+
 export interface LeaveRequest {
   id: string;
   empId: number;
-  type: string;
+  type: LeaveCategory | string;
   days: number;
   startDate: string;
   endDate: string;

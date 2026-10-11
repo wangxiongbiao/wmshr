@@ -41,6 +41,7 @@ export const COUNTRY_NAMES: Record<string, string> = {
   KH: '柬埔寨',
   PH: '菲律宾',
   ID: '印度尼西亚',
+  MY: '马来西亚',
   LA: '老挝',
   '缅甸籍': '缅甸',
   '泰国籍': '泰国',
@@ -50,6 +51,7 @@ export const COUNTRY_NAMES: Record<string, string> = {
   '菲律宾籍': '菲律宾',
   '印度尼西亚籍': '印度尼西亚',
   '印尼籍': '印度尼西亚',
+  '马来西亚籍': '马来西亚',
   '老挝籍': '老挝'
 };
 
@@ -61,6 +63,7 @@ export const COUNTRY_FLAGS: Record<string, string> = {
   KH: '🇰🇭',
   PH: '🇵🇭',
   ID: '🇮🇩',
+  MY: '🇲🇾',
   LA: '🇱🇦',
   '缅甸籍': '🇲🇲',
   '泰国籍': '🇹🇭',
@@ -70,6 +73,7 @@ export const COUNTRY_FLAGS: Record<string, string> = {
   '菲律宾籍': '🇵🇭',
   '印度尼西亚籍': '🇮🇩',
   '印尼籍': '🇮🇩',
+  '马来西亚籍': '🇲🇾',
   '老挝籍': '🇱🇦'
 };
 
@@ -287,6 +291,21 @@ export function calcOvertimePay(
 
   const amount = otHours * baseHourlyRate * multiplier;
   return { amount, multiplier, label };
+}
+
+/**
+ * 统一归一化薪酬字段数值，解决 null, undefined, 0, "" 等类型噪音导致的误判
+ */
+export function normalizeSalaryValue(val: any, isString = false): number | string | null {
+  if (val === undefined || val === null || val === "") return null;
+  if (isString) {
+    const s = String(val).trim();
+    return s === "" ? null : s;
+  }
+  const n = Number(val);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  // 保留两位小数精度，避免浮点数计算误差
+  return Math.round(n * 100) / 100;
 }
 
 /**

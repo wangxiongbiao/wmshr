@@ -94,6 +94,12 @@ export function Dashboard({ employees, attendance, config, leaveRequests, loadin
         return;
       }
 
+      // 免打卡员工未打卡时，按标准工时计入且不计入异常缺勤
+      if (emp.requiresAttendance === false && !rec) {
+        workHours += (config.standardHours || 8);
+        return;
+      }
+
       if (!rec) {
         // 未打卡且非请假即为异常缺勤
         abnormalCount++;
@@ -103,7 +109,10 @@ export function Dashboard({ employees, attendance, config, leaveRequests, loadin
         otHours += details.ot;
 
         if (rec.type === "absent" || rec.type === "late" || rec.type === "early" || rec.type === "exception") {
-          abnormalCount++;
+          // 若为免打卡员工，不计入缺勤异常
+          if (emp.requiresAttendance !== false) {
+            abnormalCount++;
+          }
         }
       }
     });
@@ -137,7 +146,11 @@ export function Dashboard({ employees, attendance, config, leaveRequests, loadin
         let todayOt = 0;
         let hasWorked = false;
 
-        if (!isApprovedLeave && rec && rec.type !== "absent") {
+        if (emp.requiresAttendance === false && !rec && !isApprovedLeave) {
+          todayValid = standardHours;
+          todayOt = 0;
+          hasWorked = true;
+        } else if (!isApprovedLeave && rec && rec.type !== "absent") {
           const details = calcAttendanceDetails(rec, config);
           todayValid = details.valid;
           todayOt = details.ot;
@@ -324,6 +337,9 @@ export function Dashboard({ employees, attendance, config, leaveRequests, loadin
               if (stat.isApprovedLeave) {
                 satBg = "bg-slate-100 text-slate-600 border-slate-200";
                 badgeText = "休假中";
+              } else if (stat.requiresAttendance === false && !stat.todayOt) {
+                satBg = "bg-sky-50 text-sky-700 border-sky-200";
+                badgeText = "免打卡";
               } else if (!stat.hasWorked) {
                 satBg = "bg-slate-100 text-slate-500 border-slate-200";
                 badgeText = "未打卡";

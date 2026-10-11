@@ -1,0 +1,276 @@
+- generic:
+  - generic [aria-hidden]:
+    - generic:
+      - complementary:
+        - generic: WMSHR
+        - navigation:
+          - generic:
+            - button:
+              - generic: 客户管理
+            - generic:
+              - button:
+                - generic: 客户列表
+          - generic:
+            - button:
+              - generic: 库存管理
+            - generic:
+              - button:
+                - generic: 订单列表
+              - button:
+                - generic: 入库列表
+              - button:
+                - generic: 商品列表
+          - generic:
+            - button:
+              - generic: 员工管理
+            - generic:
+              - button:
+                - generic: 数据看板
+              - button:
+                - generic: 员工列表
+              - button:
+                - generic: 考勤列表
+              - button:
+                - generic: 请假列表
+              - button:
+                - generic: 薪资列表
+          - generic:
+            - button:
+              - generic: 财务管理
+            - generic:
+              - button:
+                - generic: 报销列表
+              - button:
+                - generic: 发票列表
+              - button:
+                - generic: 快递列表
+          - generic:
+            - button:
+              - generic: 培训管理
+            - generic:
+              - button:
+                - generic: 培训列表
+          - generic:
+            - button:
+              - generic: 厨房管理
+            - generic:
+              - button:
+                - generic: 菜谱列表
+          - generic:
+            - button:
+              - generic: 移动协同
+            - generic:
+              - button:
+                - generic: 员工考勤APP
+      - main:
+        - generic:
+          - generic:
+            - heading [level=2]: 员工列表
+          - generic:
+            - generic:
+              - button:
+                - generic: 🌐
+                - generic: 简体中文
+            - generic:
+              - button:
+                - generic: 当前国家：🏳️ 未选择
+            - generic:
+              - generic:
+                - generic: 10:10:21
+                - generic: 10月9日 周五
+            - generic:
+              - generic:
+                - generic: 系
+                - generic:
+                  - generic: 系统管理员 (Gary)
+                  - generic: 超管
+              - button:
+                - generic: 安全退出
+        - generic:
+          - generic:
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - textbox:
+                      - /placeholder: 搜索姓名、职位或区域...
+                  - generic:
+                    - tablist:
+                      - tab [selected]: 在职员工
+                      - tab: 离职员工
+                - generic:
+                  - button: 假期设置
+                  - button: 考勤设置
+                  - button: 刷新
+                  - button: 新增员工
+              - generic:
+                - generic:
+                  - generic:
+                    - button
+                    - button
+                    - button
+                    - button
+                  - generic:
+                    - generic:
+                      - heading [level=3]: Nono Hot Path Updated
+                      - generic:
+                        - generic: 🇲🇲
+                        - generic: 缅甸
+                        - generic: 🇹🇭 泰国仓
+                        - generic: 女
+                        - generic: 在职
+                  - generic:
+                    - generic:
+                      - paragraph: 职位
+                      - paragraph: 分拣主管
+                    - generic:
+                      - paragraph: 区域
+                      - paragraph: 操作部
+                    - generic:
+                      - paragraph: 时薪
+                      - paragraph:
+                        - generic:
+                          - text: ฿200.00
+                          - generic: (折算)
+                    - generic:
+                      - paragraph: 薪资制
+                      - paragraph: ฿48,000.00/月
+                    - generic:
+                      - paragraph: 用工性质
+                      - paragraph: 自招员工
+                    - generic:
+                      - paragraph: 入职日期
+                      - paragraph: 2026-06-01
+                    - generic:
+                      - paragraph: 全勤奖
+                      - paragraph: "-"
+                    - generic:
+                      - paragraph: 社保
+                      - paragraph: "-"
+                - generic:
+                  - generic:
+                    - button
+                    - button
+                    - button
+                    - button
+                  - generic:
+                    - generic:
+                      - heading [level=3]: Nono Latency Check Updated
+                      - generic:
+                        - generic: 🇲🇲
+                        - generic: 缅甸
+                        - generic: 🇹🇭 泰国仓
+                        - generic: 女
+                        - generic: 在职
+                  - generic:
+                    - generic:
+                      - paragraph: 职位
+                      - paragraph: 分拣主管
+                    - generic:
+                      - paragraph: 区域
+                      - paragraph: 操作部
+                    - generic:
+                      - paragraph: 时薪
+                      - paragraph:
+                        - generic:
+                          - text: ฿200.00
+                          - generic: (折算)
+                    - generic:
+                      - paragraph: 薪资制
+                      - paragraph: ฿48,000.00/月
+                    - generic:
+                      - paragraph: 用工性质
+                      - paragraph: 自招员工
+                    - generic:
+                      - paragraph: 入职日期
+                      - paragraph: 2026-06-01
+                    - generic:
+                      - paragraph: 全勤奖
+                      - paragraph: "-"
+                    - generic:
+                      - paragraph: 社保
+                      - paragraph: "-"
+                - generic:
+                  - generic:
+                    - button
+                    - button
+                    - button
+                    - button
+                  - generic:
+                    - generic: 真
+                    - generic:
+                      - heading [level=3]: 真实走查陈建国
+                      - generic:
+                        - generic: 🇲🇲
+                        - generic: 缅甸
+                        - generic: 🇹🇭 泰国仓
+                        - generic: 女
+                        - generic: 在职
+                  - generic:
+                    - generic:
+                      - paragraph: 职位
+                      - paragraph: 拣货员
+                    - generic:
+                      - paragraph: 区域
+                      - paragraph: A区-分拣
+                    - generic:
+                      - paragraph: 时薪
+                      - paragraph:
+                        - generic:
+                          - text: ฿158.33
+                          - generic: (折算)
+                    - generic:
+                      - paragraph: 薪资制
+                      - paragraph: ฿38,000.00/月
+                    - generic:
+                      - paragraph: 用工性质
+                      - paragraph: 自招员工
+                    - generic:
+                      - paragraph: 入职日期
+                      - paragraph: 2026-10-09
+                    - generic:
+                      - paragraph: 全勤奖
+                      - paragraph: ฿1,800.00
+                    - generic:
+                      - paragraph: 社保
+                      - paragraph: ฿850.00
+              - generic:
+                - navigation:
+                  - generic:
+                    - generic:
+                      - text: 共
+                      - strong: "3"
+                      - text: 条
+                    - generic: ，每页
+                    - combobox
+                    - generic: 条
+                  - generic:
+                    - button [disabled]:
+                      - generic: 上一页
+                    - button: "1"
+                    - button [disabled]:
+                      - generic: 下一页
+      - generic: 员工密码已重置：Aa1o2ltri8y（请立即安全交付）
+  - dialog [active] [ref=f1e1229]:
+    - generic [ref=f1e1230]:
+      - heading "APP 账号管理" [level=2] [ref=f1e1231]
+      - paragraph [ref=f1e1232]: 员工：真实走查陈建国
+    - generic [ref=f1e1233]:
+      - generic [ref=f1e1234]:
+        - generic [ref=f1e1235]: APP 登录账号
+        - generic [ref=f1e1237]:
+          - generic [ref=f1e1238]: test_e2e_playwright
+          - button "复制账号" [ref=f1e1239] [cursor=pointer]
+      - generic [ref=f1e1240]:
+        - generic [ref=f1e1241]:
+          - generic [ref=f1e1242]: 新密码已成功生成
+          - generic [ref=f1e1245]: 仅此一次显示
+        - generic [ref=f1e1246]:
+          - generic [ref=f1e1247]: Aa1o2ltri8y
+          - button "复制密码" [ref=f1e1248] [cursor=pointer]
+        - paragraph [ref=f1e1249]: 请立即复制并将新密码安全交付给员工。密码已哈希加密存储，关闭弹窗后无法再次查阅。
+    - generic [ref=f1e1250]:
+      - button "重置并生成安全新密码" [ref=f1e1251] [cursor=pointer]
+      - paragraph [ref=f1e1252]: 重置后旧密码将立即失效，现有密码无法直接查看。
+    - button "关闭" [ref=f1e1254] [cursor=pointer]
+    - button "Close" [ref=f1e1255] [cursor=pointer]

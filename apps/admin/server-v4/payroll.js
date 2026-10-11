@@ -255,6 +255,27 @@ export function createPayrollRouter({ express, supabase, directDbPool, identity 
         });
       }
 
+      // 1.1 查询在计薪月份 (yearMonth) 期间及之前的所有调薪快照，以便按月截断真实生效薪酬
+      const salaryLogsByEmp = new Map();
+      if (directDbPool?.query) {
+        try {
+          const { rows: historyLogs } = await directDbPool.query(`
+            SELECT employee_id, effective_date, after_snapshot, change_reason, created_at
+            FROM workspace_salary_change_logs
+            WHERE owner_user_id = $1 AND effective_date <= $2
+            ORDER BY effective_date ASC, id ASC
+          `, [ownerUserId, `${yearMonth}-31`]);
+
+          for (const log of (historyLogs || [])) {
+            const eId = Number(log.employee_id);
+            if (!salaryLogsByEmp.has(eId)) salaryLogsByEmp.set(eId, []);
+            salaryLogsByEmp.get(eId).push(log);
+          }
+        } catch (err) {
+          console.warn("[admin-v4/payroll] fetch historical salary logs note:", err.message);
+        }
+      }
+
       // 2. 查询当月所有打卡记录
       const startDate = `${yearMonth}-01`;
       const endDate = `${yearMonth}-31`;
@@ -284,11 +305,24 @@ export function createPayrollRouter({ express, supabase, directDbPool, identity 
         let totalOtHours = 0;
         let workingDays = 0;
 
-        const fixedSalary = Number(emp.fixed_salary || 0);
-        const dailyWage = Number(emp.daily_wage || 0);
-        const hourlyRate = Number(emp.hourly_rate || 0);
-        const isFixedMonthly = emp.salary_type === "fixed" || fixedSalary > 0;
+        // 溯源：按计薪月份 (yearMonth) 截断，提取截至当月末最后一条生效的薪酬配置快照
+        const empLogs = salaryLogsByEmp.get(empId) || [];
+        const activeLog = empLogs.length > 0 ? empLogs[empLogs.length - 1] : null;
+        const snapshot = activeLog?.after_snapshot || {};
+
+        const fixedSalary = snapshot.fixedSalary !== undefined ? Number(snapshot.fixedSalary || 0) : Number(emp.fixed_salary || 0);
+        const dailyWage = snapshot.dailyWage !== undefined ? Number(snapshot.dailyWage || 0) : Number(emp.daily_wage || 0);
+        const hourlyRate = snapshot.hourlyRate !== undefined ? Number(snapshot.hourlyRate || 0) : Number(emp.hourly_rate || 0);
+        const salaryType = snapshot.salaryType || emp.salary_type;
+        const isFixedMonthly = salaryType === "fixed" || fixedSalary > 0;
         const effectiveHourlyRate = hourlyRate > 0 ? hourlyRate : (dailyWage > 0 ? dailyWage / 8 : 0);
+
+        const overtimeHourlyFee = snapshot.overtimeHourlyFee !== undefined ? snapshot.overtimeHourlyFee : (snapshot.otFixedRate !== undefined ? snapshot.otFixedRate : emp.overtime_hourly_fee);
+        const mealAllowance = snapshot.mealAllowance !== undefined ? snapshot.mealAllowance : emp.meal_allowance;
+        const attendanceBonus = snapshot.attendanceBonus !== undefined ? snapshot.attendanceBonus : emp.attendance_bonus;
+        const socialSecurityVal = snapshot.socialSecurity !== undefined ? snapshot.socialSecurity : emp.social_security;
+        const rawTaxRateVal = snapshot.taxRate !== undefined ? snapshot.taxRate : emp.tax_rate;
+        const currency = (snapshot.currency || emp.currency || "THB").toUpperCase();
 
         let calculatedBasePay = 0;
 
@@ -315,14 +349,15 @@ export function createPayrollRouter({ express, supabase, directDbPool, identity 
 
         const isHourly = !isFixedMonthly;
         const basePay = isFixedMonthly ? fixedSalary : roundToTwo(calculatedBasePay);
-        const overtimePay = roundToTwo(totalOtHours * (emp.overtime_hourly_fee ? Number(emp.overtime_hourly_fee) : (effectiveHourlyRate * 1.5)));
-        const mealAllowanceTotal = roundToTwo(workingDays * getNonNegativeAmount(emp.meal_allowance));
-        const attendanceBonusAmount = workingDays >= 20 ? getNonNegativeAmount(emp.attendance_bonus) : 0;
-        const socialSecurity = getNonNegativeAmount(emp.social_security);
+        const overtimePay = roundToTwo(totalOtHours * (overtimeHourlyFee ? Number(overtimeHourlyFee) : (effectiveHourlyRate * 1.5)));
+        const mealAllowanceTotal = roundToTwo(workingDays * getNonNegativeAmount(mealAllowance));
+        const isAttendanceExempt = emp.requires_attendance === false || emp.requiresAttendance === false;
+        const attendanceBonusAmount = (isAttendanceExempt || workingDays >= 20) ? getNonNegativeAmount(attendanceBonus) : 0;
+        const socialSecurity = getNonNegativeAmount(socialSecurityVal);
         const grossPay = roundToTwo(basePay + overtimePay + mealAllowanceTotal + attendanceBonusAmount);
 
-        // 个人所得税扣缴：按员工档案设定的税率 (百分比数值，默认 5 代表 5%) 计算
-        const rawTaxRate = emp.tax_rate != null ? Number(emp.tax_rate) : 5;
+        // 个人所得税扣缴：优先使用该月份生效快照或档案设定的税率 (百分比数值，默认 5 代表 5%) 计算
+        const rawTaxRate = rawTaxRateVal != null ? Number(rawTaxRateVal) : 5;
         const taxRate = rawTaxRate > 1 ? rawTaxRate / 100 : (rawTaxRate < 0 ? 0.05 : (rawTaxRate === 0 ? 0 : (rawTaxRate <= 0.2 ? rawTaxRate : rawTaxRate / 100)));
         const taxableGross = basePay + overtimePay + attendanceBonusAmount;
         const taxDeduction = roundToTwo(taxableGross * taxRate);
@@ -336,7 +371,7 @@ export function createPayrollRouter({ express, supabase, directDbPool, identity 
           salary_type: isFixedMonthly ? "fixed" : "hourly",
           fixed_salary: isFixedMonthly ? fixedSalary : null,
           hourly_rate: hourlyRate > 0 ? hourlyRate : (dailyWage > 0 ? Math.round((dailyWage / 8) * 100) / 100 : null),
-          currency: (emp.currency || "THB").toUpperCase(),
+          currency,
           working_days: workingDays,
           effective_attendance_days: workingDays,
           valid_hours: totalValidHours,

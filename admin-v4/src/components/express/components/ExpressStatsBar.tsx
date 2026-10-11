@@ -8,12 +8,15 @@ import {
   Wallet
 } from "lucide-react";
 import { ReconciliationStats } from "../types";
+import { getCurrencyInfo } from "../constants";
 
 interface ExpressStatsBarProps {
   stats: ReconciliationStats;
+  targetCurrency?: string;
 }
 
-export function ExpressStatsBar({ stats }: ExpressStatsBarProps) {
+export function ExpressStatsBar({ stats, targetCurrency = "THB" }: ExpressStatsBarProps) {
+  const curSymbol = getCurrencyInfo(targetCurrency).symbol;
   const matchPct =
     stats.totalShipments > 0
       ? Math.round((stats.matchedCount / stats.totalShipments) * 100)
@@ -94,7 +97,7 @@ export function ExpressStatsBar({ stats }: ExpressStatsBarProps) {
         </div>
         <div className="mt-2">
           <span className="text-lg font-black text-slate-800 font-mono">
-            ฿{stats.totalExpressFee.toLocaleString("zh-CN", { minimumFractionDigits: 2 })}
+            {curSymbol}{stats.totalExpressFee.toLocaleString("zh-CN", { minimumFractionDigits: 2 })}
           </span>
         </div>
       </div>
@@ -107,7 +110,7 @@ export function ExpressStatsBar({ stats }: ExpressStatsBarProps) {
         </div>
         <div className="mt-2">
           <span className="text-lg font-black text-brand-700 font-mono">
-            ฿{stats.totalPayable.toLocaleString("zh-CN", { minimumFractionDigits: 2 })}
+            {curSymbol}{stats.totalPayable.toLocaleString("zh-CN", { minimumFractionDigits: 2 })}
           </span>
         </div>
       </div>

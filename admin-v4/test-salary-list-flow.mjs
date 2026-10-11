@@ -6,10 +6,29 @@ import assert from "assert";
 console.log("Starting Salary List Payroll Linkage verification...");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const expenseManagerPath = path.join(__dirname, "src/components/ExpenseManager.tsx");
-assert(fs.existsSync(expenseManagerPath), "ExpenseManager.tsx must exist");
+const expenseManagerEntry = path.join(__dirname, "src/components/ExpenseManager.tsx");
+assert(fs.existsSync(expenseManagerEntry), "ExpenseManager.tsx must exist");
 
-const content = fs.readFileSync(expenseManagerPath, "utf-8");
+// Check either monolithic ExpenseManager or refactored modular expense bundle
+const expenseDir = path.join(__dirname, "src/components/expense");
+let content = "";
+if (fs.existsSync(expenseDir)) {
+  const allExpenseFiles = [
+    "index.ts",
+    "ExpenseManager.tsx",
+    "hooks/useExpenseList.ts",
+    "components/ExpenseMainTable.tsx",
+    "components/ExpenseDetailModal.tsx",
+    "components/ExpenseToolbar.tsx",
+    "utils/salaryCalculator.ts"
+  ];
+  content = allExpenseFiles
+    .filter(f => fs.existsSync(path.join(expenseDir, f)))
+    .map(f => fs.readFileSync(path.join(expenseDir, f), "utf-8"))
+    .join("\n");
+} else {
+  content = fs.readFileSync(expenseManagerEntry, "utf-8");
+}
 
 // 1. Check state & localStorage synchronization with payroll module
 assert(content.includes("payroll_payout_status"), "Must synchronize payroll_payout_status with localStorage");
@@ -62,11 +81,38 @@ assert(employeeApiContent.includes("socialSecurity: employee.socialSecurity != n
 assert(employeeApiContent.includes("mealAllowanceDaily: employee.mealAllowance != null && Number(employee.mealAllowance) > 0 ? Number(employee.mealAllowance) : undefined"));
 assert(employeeApiContent.includes("licenseFee: employee.licenseFee != null && Number(employee.licenseFee) > 0 ? Number(employee.licenseFee) : undefined"));
 
-const modalsPath = path.join(__dirname, "src/components/Modals.tsx");
+const modalsPath = fs.existsSync(path.join(__dirname, "src/components/employee/components/EmployeeModal.tsx"))
+  ? path.join(__dirname, "src/components/employee/components/EmployeeModal.tsx")
+  : path.join(__dirname, "src/components/Modals.tsx");
 const modalsContent = fs.readFileSync(modalsPath, "utf-8");
 assert(modalsContent.includes("formData.attendanceBonus !== undefined && formData.attendanceBonus !== null && Number(formData.attendanceBonus) > 0 ? formData.attendanceBonus : \"\""));
 assert(modalsContent.includes("formData.socialSecurity !== undefined && formData.socialSecurity !== null && Number(formData.socialSecurity) > 0 ? formData.socialSecurity : \"\""));
 assert(modalsContent.includes("formData.mealAllowanceDaily !== undefined && formData.mealAllowanceDaily !== null && Number(formData.mealAllowanceDaily) > 0 ? formData.mealAllowanceDaily : \"\""));
 assert(modalsContent.includes("formData.licenseFee !== undefined && formData.licenseFee !== null && Number(formData.licenseFee) > 0 ? formData.licenseFee : \"\""));
+
+// 10. PayrollTable.tsx Strict Verification
+const payrollPath = path.join(__dirname, "src/components/PayrollTable.tsx");
+assert(fs.existsSync(payrollPath), "PayrollTable.tsx must exist");
+const payrollContent = fs.readFileSync(payrollPath, "utf-8");
+
+// A. Temporal & Resigned Lifecycle bounds filter
+assert(payrollContent.includes("emp.joinDate && emp.joinDate.slice(0, 7) > selectedMonth"), "PayrollTable must exclude future joinDate employees");
+assert(payrollContent.includes('isResigned'), "PayrollTable must handle resigned employees");
+
+// B. Signature persistence & data sink
+assert(payrollContent.includes('localStorage.setItem("payroll_employee_signatures"'), "PayrollTable must persist employee signatures");
+assert(payrollContent.includes('setEmpConfirmations'), "PayrollTable must update empConfirmations state");
+
+// C. Dispatch commission deduct consistency
+assert(payrollContent.includes('Math.max(0, gross - tax - ssSec - serviceFee)'), "PayrollTable net salary must balance by deducting serviceFee");
+
+// D. ESC Keyboard listener
+assert(payrollContent.includes('e.key === "Escape"'), "PayrollTable modals must close on Escape key");
+
+// E. EmployeeNo search support
+assert(payrollContent.includes('row.emp.employeeNo'), "PayrollTable search must match employeeNo");
+
+// F. Table Footer totals
+assert(payrollContent.includes('<tfoot'), "PayrollTable must render tfoot summary totals row");
 
 console.log("✓ All Salary List Payroll Linkage & Data/Logic Loop Audit checks passed successfully!");

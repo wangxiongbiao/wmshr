@@ -362,21 +362,6 @@ export default function App() {
   useEffect(() => { frontendStore.saveHolidays(holidays); }, [holidays]);
   useEffect(() => { frontendStore.saveLeaveRequests(leaveRequests); }, [leaveRequests]);
 
-  // 自动清洗历史遗留的测试请假数据与无效员工记录
-  useEffect(() => {
-    setLeaveRequests(prev => {
-      const cleaned = prev.filter(l => {
-        const isLegacyMock = l.id === "leave-1" || l.id === "leave-2" || 
-          (typeof l.reason === "string" && (l.reason.includes("家里有些急事") || l.reason.includes("身体不适发烧")));
-        return !isLegacyMock;
-      });
-      if (cleaned.length !== prev.length) {
-        frontendStore.saveLeaveRequests(cleaned);
-        return cleaned;
-      }
-      return prev;
-    });
-  }, []);
 
   const employeesWithSettlementCurrency = useMemo(() => {
     return employees.map(emp => ({
@@ -419,6 +404,8 @@ export default function App() {
 
       setEmployees(prev => editingEmployee ? prev.map(e => e.id === saved.id ? saved : e) : [...prev, saved]);
       setEmployeeReloadKey(k => k + 1);
+      // 如果当前详情弹窗正打开着该员工，即时回显更新对象
+      setEditingEmployee(saved);
       addToast(editingEmployee ? "员工档案已更新" : "新员工已添加成功");
       setIsEmployeeModalOpen(false);
     } catch (error) {
@@ -761,6 +748,8 @@ export default function App() {
             customers={customers}
             addToast={addToast}
             lang={lang}
+            warehouseCode={adminUser?.countryCode || "TH"}
+            warehouseCurrency={adminUser?.currency}
           />
         );
       case "customers":

@@ -184,6 +184,7 @@ export async function fetchInvoices(params: {
   invoiceType?: string;
   month?: string;
   warehouseCode?: string;
+  signal?: AbortSignal;
 } = {}): Promise<InvoicePageResult> {
   const query = new URLSearchParams();
   if (params.page) query.set("page", String(params.page));
@@ -195,7 +196,8 @@ export async function fetchInvoices(params: {
   if (params.warehouseCode && params.warehouseCode !== "ALL") query.set("warehouse_code", params.warehouseCode);
 
   const res = await request<{ items: ApiInvoice[]; total: number; page: number; pageSize: number; hasMore: boolean }>(
-    `/api/v4/admin/invoices?${query.toString()}`
+    `/api/v4/admin/invoices?${query.toString()}`,
+    params.signal ? { signal: params.signal } : {}
   );
   return {
     ...res,

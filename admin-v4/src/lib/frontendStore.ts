@@ -8,44 +8,7 @@ import {
 } from "../types";
 import { INITIAL_CONFIG, INITIAL_ATTENDANCE, INITIAL_GOODS, INITIAL_HOLIDAYS } from "../constants";
 
-export const INITIAL_CUSTOMERS: Customer[] = [
-  {
-    id: "CUST-101",
-    name: "上海凯信国际贸易商社",
-    contact: "李经理 13911112222",
-    currency: "CNY",
-    availableLimit: 120000,
-    creditLimit: 150000,
-    billingTemplate: "WMS标准月结模版",
-    status: "enabled",
-    shops: [
-      { id: "s-1", platform: "TikTok", shopName: "凯信海外美妆直营1店", shopId: "tk-859403", status: "enabled", authorizedAt: "2026-05-01" },
-      { id: "s-2", platform: "Shopee", shopName: "凯信东南亚特产屋", shopId: "sp-748301", status: "enabled", authorizedAt: "2026-05-15" }
-    ],
-    creditLogs: [
-      { id: "tx-1", type: "recharge", amount: 100000, balanceAfter: 100000, createdAt: "2026-05-01 10:00:00", note: "首期线下银行电汇缴费充值入账", operator: "财务主管-小陈" },
-      { id: "tx-2", type: "recharge", amount: 20450, balanceAfter: 120450, createdAt: "2026-05-15 11:30:00", note: "季度WMS仓储补贴活动预充赠送", operator: "系统自动" },
-      { id: "tx-3", type: "consumption", amount: 450, balanceAfter: 120000, createdAt: "2026-06-05 15:00:00", note: "扣除 WMS 拣货贴单打包费 (批次: IN2026-06)", operator: "系统自动" }
-    ]
-  },
-  {
-    id: "CUST-102",
-    name: "深圳市格朗户外智能装备",
-    contact: "王主管 18688889999",
-    currency: "USD",
-    availableLimit: 45000,
-    creditLimit: 50000,
-    billingTemplate: "外贸一件代发专属模版",
-    status: "enabled",
-    shops: [
-      { id: "s-3", platform: "TikTok", shopName: "GLOW Outdoor TK-FR", shopId: "tk-229940", status: "enabled", authorizedAt: "2026-06-01" }
-    ],
-    creditLogs: [
-      { id: "tx-4", type: "recharge", amount: 50000, balanceAfter: 50000, createdAt: "2026-06-01 09:12:00", note: "商户开户预付押金及可用额度充值", operator: "财务主管-小陈" },
-      { id: "tx-5", type: "consumption", amount: 5000, balanceAfter: 45000, createdAt: "2026-06-03 14:00:00", note: "平台一件代发国际分拨首段航程预扣费", operator: "拼箱专员" }
-    ]
-  }
-];
+export const INITIAL_CUSTOMERS: Customer[] = [];
 
 export const INITIAL_PRODUCTS: Product[] = [
   { id: "SKU-3CE", name: "3CE 九色眼影盘 #波打大马士革", spec: "9色/120g", customerId: "CUST-101", customerName: "上海凯信国际贸易商社", inventory: 25, shelfLocation: "A-02-05", note: "大促热销美妆件，需要气泡纸精细包装", length: 10, width: 10, height: 2, weight: 0.12, volume: 200 },
@@ -182,7 +145,17 @@ export const frontendStore = {
   clearLeaveRequests: () => saveToStorage(STORAGE_KEYS.LEAVE, []),
   saveLeaveRequests: (list: LeaveRequest[]) => saveToStorage(STORAGE_KEYS.LEAVE, list),
 
-  getCustomers: () => loadFromStorage<Customer[]>(STORAGE_KEYS.CUSTOMERS, INITIAL_CUSTOMERS),
+  getCustomers: () => {
+    const list = loadFromStorage<Customer[]>(STORAGE_KEYS.CUSTOMERS, []);
+    // 清除历史遗留的假客户数据
+    const cleaned = list.filter(
+      (c) => c && c.id !== "CUST-101" && c.id !== "CUST-102" && c.name !== "上海凯信国际贸易商社" && c.name !== "深圳市格朗户外智能装备"
+    );
+    if (cleaned.length !== list.length) {
+      saveToStorage(STORAGE_KEYS.CUSTOMERS, cleaned);
+    }
+    return cleaned;
+  },
   saveCustomers: (list: Customer[]) => saveToStorage(STORAGE_KEYS.CUSTOMERS, list),
 
   getProducts: () => loadFromStorage<Product[]>(STORAGE_KEYS.PRODUCTS, INITIAL_PRODUCTS),

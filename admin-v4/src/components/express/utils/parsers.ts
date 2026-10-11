@@ -2,6 +2,26 @@ import * as XLSX from "xlsx";
 import { ShipmentRecord, JntRecord } from "../types";
 
 /**
+ * 安全金额解析函数：支持负号、千分位逗号，如 "-1,234.50" => -1234.5
+ */
+export const parseCurrencyNumber = (v: any): number => {
+  if (v === null || v === undefined) return 0;
+  if (typeof v === "number") return isNaN(v) ? 0 : v;
+  let str = String(v).trim();
+  if (!str) return 0;
+
+  // 判断是否为负数（前缀负号或括号 (100)）
+  const isNegative = str.startsWith("-") || (/^\(.*\)$/.test(str) && !str.includes("+"));
+
+  // 清洗掉货币符号、千分位逗号、空格、括号等非数字与小数点字符
+  const cleaned = str.replace(/[^0-9.]/g, "");
+  const num = parseFloat(cleaned);
+  if (isNaN(num)) return 0;
+
+  return isNegative ? -num : num;
+};
+
+/**
  * 运单号清洗函数：去除不可见字符、前后引号、科学计数法与浮点尾缀
  */
 export const sanitizeWaybillNo = (no: string | undefined | null): string => {
@@ -311,19 +331,19 @@ export function parseJntRows(rawRows: (string | number | any)[][]): {
     }
 
     const totalFeeStr = totalFeeIdx >= 0 && totalFeeIdx < row.length ? row[totalFeeIdx] : "0";
-    const jntFee = parseFloat(totalFeeStr.replace(/[^0-9.]/g, "")) || 0;
+    const jntFee = parseCurrencyNumber(totalFeeStr);
 
     const baseFeeStr = baseFeeIdx >= 0 && baseFeeIdx < row.length ? row[baseFeeIdx] : "0";
-    const baseFee = parseFloat(baseFeeStr.replace(/[^0-9.]/g, "")) || 0;
+    const baseFee = parseCurrencyNumber(baseFeeStr);
 
     const remoteFeeStr = remoteFeeIdx >= 0 && remoteFeeIdx < row.length ? row[remoteFeeIdx] : "0";
-    const remoteFee = parseFloat(remoteFeeStr.replace(/[^0-9.]/g, "")) || 0;
+    const remoteFee = parseCurrencyNumber(remoteFeeStr);
 
     const insuranceFeeStr = insuranceFeeIdx >= 0 && insuranceFeeIdx < row.length ? row[insuranceFeeIdx] : "0";
-    const insuranceFee = parseFloat(insuranceFeeStr.replace(/[^0-9.]/g, "")) || 0;
+    const insuranceFee = parseCurrencyNumber(insuranceFeeStr);
 
     const packageFeeStr = packageFeeIdx >= 0 && packageFeeIdx < row.length ? row[packageFeeIdx] : "0";
-    const packageFee = parseFloat(packageFeeStr.replace(/[^0-9.]/g, "")) || 0;
+    const packageFee = parseCurrencyNumber(packageFeeStr);
 
     const weightStr = weightIdx >= 0 && weightIdx < row.length ? row[weightIdx] : "0";
     const weight = parseFloat(weightStr.replace(/[^0-9.]/g, "")) || 0;
@@ -439,9 +459,9 @@ export async function parseUploadedFile(
 
     const result = target === "system" ? parseSystemRows(rows) : parseJntRows(rows);
 
-    // 生成前 60 行预览文本用于在界面的粘贴框中回显
-    const previewRows = rows.slice(0, 60).map((r) => r.map(cleanCell).join("\t"));
-    const previewText = previewRows.join("\n");
+    // 生成全量文本用于在界面的数据状态中留存与回显
+    const fullRows = rows.map((r) => r.map(cleanCell).join("\t"));
+    const previewText = fullRows.join("\n");
 
     return {
       records: result.records,

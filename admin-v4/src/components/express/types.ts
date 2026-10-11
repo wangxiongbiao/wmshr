@@ -4,6 +4,15 @@ export interface ExpressManagerProps {
   customers: Customer[];
   addToast: (msg: string, kind?: "success" | "error" | "info") => void;
   lang: string;
+  warehouseCode?: string;
+  warehouseCurrency?: string;
+}
+
+export interface CurrencyOption {
+  code: string;
+  symbol: string;
+  countryName: string;
+  flag: string;
 }
 
 export interface ShipmentRecord {
@@ -52,6 +61,8 @@ export interface ReconciledItem {
   surcharge: number;
   totalFee: number;
   status: "matched" | "system_only" | "jnt_only";
+  rawJntFee?: number;
+  rawSurcharge?: number;
   entryTime?: string;
   signTime?: string;
   branchName?: string;
@@ -79,6 +90,39 @@ export interface CustomerSurcharge {
   amount: number;
 }
 
+export interface ExpressImportLog {
+  id: string;
+  batchNo: string;
+  createdAt: string;
+
+  // 双表来源信息
+  systemFileName: string;
+  systemCount: number;
+  jntFileName: string;
+  jntCount: number;
+  jntTotalFee: number;
+
+  // 对账核算核心指标
+  matchedCount: number;
+  discrepancyCount: number;
+  totalSurcharge: number;
+  finalTotalPayable: number;
+
+  // 完整双表回显快照 (Result Snapshot)
+  systemRawText: string;
+  jntRawText: string;
+  systemHeaders?: string[];
+  jntHeaders?: string[];
+  matchKeyOption?: MatchKeyOption;
+  systemAltKey?: string;
+  jntAltKey?: string;
+  reconciledData?: ReconciledItem[];
+  customerSummary?: CustomerSummaryItem[];
+  stats?: ReconciliationStats;
+  systemRecords?: ShipmentRecord[];
+  jntRecords?: JntRecord[];
+}
+
 export interface CustomerSummaryItem {
   customerName: string;
   totalItems: number;
@@ -91,6 +135,8 @@ export interface CustomerSummaryItem {
   totalSurcharge: number;
   finalTotalPayable: number;
   records: ReconciledItem[];
+  currency?: string;
+  currencySymbol?: string;
 }
 
 export interface ReconciliationStats {

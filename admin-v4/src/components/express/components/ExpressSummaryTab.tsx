@@ -4,16 +4,19 @@ import {
   Download,
   Info,
   Search,
+  X,
   CheckCircle,
   AlertTriangle,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Pencil,
+  ArrowRightLeft
 } from "lucide-react";
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
 import { Badge } from "../../ui/badge";
 import { Customer } from "../../../types";
 import { CustomerSummaryItem, ReconciledItem } from "../types";
-import { getCustomerCurrency, STATUS_CONFIG } from "../constants";
+import { getCustomerCurrency, getCurrencyInfo, STATUS_CONFIG } from "../constants";
 import { getOrderNoFromRecord } from "../utils/reconciliation";
 
 interface ExpressSummaryTabProps {
@@ -28,7 +31,7 @@ interface ExpressSummaryTabProps {
   systemAltKey: string;
   jntAltKey: string;
   onExportCustomerBill: (customerName: string) => void;
-  onLoadDemoData: () => void;
+  onOpenCustomerCurrencyModal?: (customerName: string) => void;
 }
 
 export function ExpressSummaryTab(props: ExpressSummaryTabProps) {
@@ -42,7 +45,7 @@ export function ExpressSummaryTab(props: ExpressSummaryTabProps) {
     systemAltKey,
     jntAltKey,
     onExportCustomerBill,
-    onLoadDemoData
+    onOpenCustomerCurrencyModal
   } = props;
 
   if (customerSummary.length === 0) {
@@ -51,19 +54,8 @@ export function ExpressSummaryTab(props: ExpressSummaryTabProps) {
         <FileSpreadsheet className="w-12 h-12 text-slate-300 mx-auto mb-3" />
         <h4 className="text-sm font-bold text-slate-700">暂无对账数据</h4>
         <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-          请在上方导入系统发货数据和 J&T 官方对账表格，或者直接点击下方按钮快速体验
+          请在上方导入系统发货数据和 J&T 官方对账表格，系统将自动核算发货运费与操作费。
         </p>
-        <div className="mt-4">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={onLoadDemoData}
-            className="text-xs gap-1.5 cursor-pointer"
-          >
-            加载演示对账数据
-          </Button>
-        </div>
       </div>
     );
   }
@@ -76,11 +68,7 @@ export function ExpressSummaryTab(props: ExpressSummaryTabProps) {
         <div>
           <span className="font-bold">对账单自动计算逻辑：</span>
           系统根据每一位客户的运单数量结合操作费规则，累加 J&T
-          实际快递账单，最后应付金额为：
-          <strong className="underline decoration-amber-400">
-            快递运费 (฿) + 客户额外操作费
-          </strong>
-          。点击对应客户操作栏的「导出结算单」可生成该客户独立的对账 Excel/CSV 表。
+          实际快递账单，默认统一按当前仓库国家的货币结算。点击操作栏的「编辑货币」可单独设置该客户的结算货币，「导出结算单」可生成该客户独立的对账 Excel/CSV 表。
         </div>
       </div>
 
@@ -94,17 +82,17 @@ export function ExpressSummaryTab(props: ExpressSummaryTabProps) {
                 <th className="py-3 px-4 font-bold">发货客户名称</th>
                 <th className="py-3 px-3 text-center">发货单量</th>
                 <th className="py-3 px-3 text-center">核对情况</th>
-                <th className="py-3 px-4 text-right">基础运费(฿)</th>
+                <th className="py-3 px-4 text-right">基础运费</th>
                 <th className="py-3 px-4 text-right">操作费合计</th>
                 <th className="py-3 px-4 text-right font-black">客户最终应付</th>
-                <th className="py-3 px-4 text-center w-32">操作</th>
+                <th className="py-3 px-4 text-center w-40">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {customerSummary.map((sum) => {
                 const isExpanded = !!expandedCustomers[sum.customerName];
-                const curInfo = getCustomerCurrency(sum.customerName, customers);
-                const curSymbol = curInfo.symbol;
+                const curSymbol = sum.currencySymbol || "฿";
+                const curCode = sum.currency || "THB";
 
                 const matchPct =
                   sum.totalItems > 0
@@ -140,10 +128,12 @@ export function ExpressSummaryTab(props: ExpressSummaryTabProps) {
                       }`}
                     >
                       <td className="py-3.5 px-3 text-center">
-                        <button
+                        <Button
                           type="button"
+                          variant="ghost"
+                          size="icon"
                           onClick={() => toggleCustomerExpand(sum.customerName)}
-                          className="p-1 rounded-md hover:bg-slate-200/60 text-slate-400 hover:text-slate-700 transition-colors cursor-pointer"
+                          className="h-6 w-6 p-0 rounded-md hover:bg-slate-200/60 text-slate-400 hover:text-slate-700 transition-colors cursor-pointer"
                           title={isExpanded ? "收起明细" : "展开明细"}
                         >
                           <ChevronDown
@@ -151,7 +141,7 @@ export function ExpressSummaryTab(props: ExpressSummaryTabProps) {
                               isExpanded ? "" : "-rotate-90"
                             }`}
                           />
-                        </button>
+                        </Button>
                       </td>
 
                       <td
@@ -190,7 +180,7 @@ export function ExpressSummaryTab(props: ExpressSummaryTabProps) {
                       </td>
 
                       <td className="py-3.5 px-4 text-right font-mono text-slate-800 font-semibold">
-                        ฿{sum.totalJntFee.toFixed(2)}
+                        {curSymbol}{sum.totalJntFee.toFixed(2)}
                       </td>
 
                       <td className="py-3.5 px-4 text-right">
@@ -206,15 +196,29 @@ export function ExpressSummaryTab(props: ExpressSummaryTabProps) {
                       </td>
 
                       <td className="py-3.5 px-4 text-right">
-                        <span className="font-mono font-bold text-brand-700 text-sm">
-                          {curSymbol === "฿"
-                            ? `฿${sum.finalTotalPayable.toFixed(2)}`
-                            : `฿${sum.totalJntFee.toFixed(2)} + ¥${sum.totalSurcharge.toFixed(2)}`}
-                        </span>
+                        <div className="font-mono font-bold text-brand-700 text-sm">
+                          {curSymbol}{sum.finalTotalPayable.toFixed(2)}
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-mono">
+                          {curCode}
+                        </div>
                       </td>
 
                       <td className="py-3.5 px-4 text-center">
                         <div className="flex items-center justify-center gap-1.5">
+                          {onOpenCustomerCurrencyModal && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => onOpenCustomerCurrencyModal(sum.customerName)}
+                              className="h-7 px-2 text-[11px] font-medium text-slate-700 hover:text-brand-700 bg-white border-slate-200 gap-1 cursor-pointer"
+                              title="编辑该客户结算货币"
+                            >
+                              <Pencil className="w-3 h-3 text-brand-600" />
+                              <span>编辑</span>
+                            </Button>
+                          )}
                           <Button
                             type="button"
                             variant="outline"
@@ -257,9 +261,26 @@ export function ExpressSummaryTab(props: ExpressSummaryTabProps) {
                                       [sum.customerName]: val
                                     }));
                                   }}
-                                  className="h-7 text-xs pl-7 pr-2 bg-slate-50 border-slate-200"
+                                  className="h-7 text-xs pl-7 pr-7 bg-slate-50 border-slate-200"
                                 />
-                                <Search className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
+                                <Search className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                                {customerDetailsSearch[sum.customerName] && (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() =>
+                                      setCustomerDetailsSearch((prev) => ({
+                                        ...prev,
+                                        [sum.customerName]: ""
+                                      }))
+                                    }
+                                    className="absolute right-1 top-1/2 -translate-y-1/2 h-5 w-5 rounded-full hover:bg-slate-200 text-slate-400 hover:text-slate-600 p-0 cursor-pointer"
+                                    title="清空搜索"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </Button>
+                                )}
                               </div>
                             </div>
 

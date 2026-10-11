@@ -5,6 +5,8 @@
 
 import { AppConfig, AttendanceRecord, Employee, HolidayRecord, PayrollSummary } from "../types";
 import { cn, calcAttendanceDetails, formatCurrency, formatDuration, calcOvertimePay, formatMonthLabel, getNowMonthStr, formatDate, getEmployeeTaxRate, calcDailyBasePay } from "../lib/utils";
+import { fetchEmployeeSalaryHistory } from "../lib/employeeApi";
+import type { SalaryChangeLog } from "../types";
 import { useMemo, useState, useEffect, useRef } from "react";
 import { Calendar, DollarSign, CheckCircle2, AlertCircle, TrendingUp, Download, Receipt, Check, RotateCcw, RefreshCw, Search, Filter, Clock, ChevronLeft, ChevronRight, X, Loader2 } from "lucide-react";
 import { getTranslation, Language } from "../lib/i18n";
@@ -12,6 +14,9 @@ import { Pagination } from "./Pagination";
 import { TableHorizontalScroller } from "./TableHorizontalScroller";
 import { useStickyMirrorHeader } from "../lib/useStickyMirrorHeader";
 import { exportPayrollExcel } from "../lib/exportPayrollExcel";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+import { Button } from "./ui/button";
 
 interface PayrollTableProps {
   employees: Employee[];
@@ -132,6 +137,11 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
     localStorage.setItem("payroll_payout_status", JSON.stringify(payouts));
   }, [payouts]);
 
+  // Save signatures to localStorage
+  useEffect(() => {
+    localStorage.setItem("payroll_employee_signatures", JSON.stringify(empConfirmations));
+  }, [empConfirmations]);
+
   // Sync payouts and signatures with localStorage from storage and focus events
   useEffect(() => {
     const syncPayoutsAndSignatures = () => {
@@ -226,6 +236,20 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
   const [showSlipModal, setShowSlipModal] = useState(false);
   const [signName, setSignName] = useState("");
   const [isCashPaid, setIsCashPaid] = useState(false);
+  const [isPayslipSubmitting, setIsPayslipSubmitting] = useState(false);
+  const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
+  const [isConfirmingDialog, setIsConfirmingDialog] = useState(false);
+  const [activeEmpSalaryLogs, setActiveEmpSalaryLogs] = useState<SalaryChangeLog[]>([]);
+
+  useEffect(() => {
+    if (selectedPayslipEmp?.emp?.id) {
+      fetchEmployeeSalaryHistory(selectedPayslipEmp.emp.id)
+        .then(logs => setActiveEmpSalaryLogs(logs))
+        .catch(() => setActiveEmpSalaryLogs([]));
+    } else {
+      setActiveEmpSalaryLogs([]);
+    }
+  }, [selectedPayslipEmp?.emp?.id]);
 
   // Custom Confirmation Dialog State
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -243,6 +267,25 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
     onConfirm: () => {},
   });
 
+  // Keyboard Escape listener for modals
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (isConfirmingDialog || isPayslipSubmitting) return; // 通信期禁止按键退出
+        if (showSlipModal) {
+          setShowSlipModal(false);
+          setSelectedPayslipEmp(null);
+        } else if (confirmDialog.isOpen) {
+          setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+        } else if (isMonthPickerOpen) {
+          setIsMonthPickerOpen(false);
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [showSlipModal, confirmDialog.isOpen, isMonthPickerOpen, isConfirmingDialog, isPayslipSubmitting]);
+
   // Filter attendance records to ONLY those in the selected month
   const filteredAttendance = useMemo(() => {
     return attendance.filter(rec => rec.date && rec.date.startsWith(selectedMonth));
@@ -250,7 +293,19 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
 
   // Generate salary summaries for current selected month
   const payrollSummary: PayrollSummary[] = useMemo(() => {
-    return employees.map(emp => {
+    return employees
+      .filter(emp => {
+        // Exclude employees who haven't joined yet in selectedMonth
+        if (emp.joinDate && emp.joinDate.slice(0, 7) > selectedMonth) return false;
+        // Exclude resigned employees with zero attendance in selectedMonth
+        const isResigned = (emp.status as any) === "resigned" || emp.status === "离职";
+        if (isResigned) {
+          const hasAtt = filteredAttendance.some(r => String(r.empId) === String(emp.id));
+          if (!hasAtt) return false;
+        }
+        return true;
+      })
+      .map(emp => {
       let valid = 0, ot = 0, otPay = 0, basePay = 0;
       let workingDays = 0;
       let otCount = 0;
@@ -292,7 +347,7 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
       const commRate = isDispatch ? Number(emp.dispatchCommissionRate || 0) : 0;
       const serviceFee = Number(basePay || 0) * (commRate / 100);
 
-      const net = Math.max(0, gross - tax - ssSec);
+      const net = Math.max(0, gross - tax - ssSec - serviceFee);
       
       return { 
         emp, 
@@ -313,10 +368,14 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
 
   // Filtered rows for listing
   const tableRows = useMemo(() => {
+    const searchLower = searchTerm.trim().toLowerCase();
     return payrollSummary.filter(row => {
-      const matchSearch = row.emp.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          (row.emp.dept && row.emp.dept.toLowerCase().includes(searchTerm.toLowerCase())) ||
-                          (row.emp.role && row.emp.role.toLowerCase().includes(searchTerm.toLowerCase()));
+      const matchSearch = !searchLower ||
+                          row.emp.name.toLowerCase().includes(searchLower) || 
+                          (row.emp.employeeNo && row.emp.employeeNo.toLowerCase().includes(searchLower)) ||
+                          (row.emp.id && String(row.emp.id).toLowerCase().includes(searchLower)) ||
+                          (row.emp.dept && row.emp.dept.toLowerCase().includes(searchLower)) ||
+                          (row.emp.role && row.emp.role.toLowerCase().includes(searchLower));
       
       const payoutKey = `${row.emp.id}_${selectedMonth}`;
       const isPaid = !!payouts[payoutKey];
@@ -338,6 +397,39 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
     const start = (currentPage - 1) * pageSize;
     return tableRows.slice(start, start + pageSize);
   }, [tableRows, currentPage, pageSize]);
+
+  // Aggregate totals across currently filtered rows for table footer
+  const tableTotals = useMemo(() => {
+    return tableRows.reduce(
+      (acc, r) => {
+        acc.workingDays += r.workingDays;
+        acc.valid += r.valid;
+        acc.otCount += r.otCount;
+        acc.ot += r.ot;
+        acc.basePay += r.basePay;
+        acc.otPay += r.otPay;
+        acc.bonus += (r.workingDays > 0 ? Number(r.emp.attendanceBonus || 0) : 0);
+        acc.mealAllowance += r.mealAllowance;
+        acc.socialSecurity += (r.workingDays > 0 ? Number(r.emp.socialSecurity || 0) : 0);
+        acc.serviceFee += r.serviceFee;
+        acc.net += r.net;
+        return acc;
+      },
+      {
+        workingDays: 0,
+        valid: 0,
+        otCount: 0,
+        ot: 0,
+        basePay: 0,
+        otPay: 0,
+        bonus: 0,
+        mealAllowance: 0,
+        socialSecurity: 0,
+        serviceFee: 0,
+        net: 0
+      }
+    );
+  }, [tableRows]);
 
   const {
     mirrorHeaderRef,
@@ -391,142 +483,146 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
   const currentCurrency = config?.currency || employees[0]?.currency || "THB";
 
   // Quick Action: Payout or Retract
-  const handleTogglePayout = (empId: number) => {
+  const handleTogglePayout = async (empId: number) => {
     const key = `${empId}_${selectedMonth}`;
-    setPayouts(prev => {
-      const isCurrentlyPaid = prev[key];
-      const isNewPaid = !isCurrentlyPaid;
+    const emp = employees.find(e => e.id === empId);
+    const empName = emp ? emp.name : `员工 #${empId}`;
+    setActionLoadingId(empId);
 
-      // Handle notifications
-      try {
-        const savedSops = localStorage.getItem("wms_sop_documents");
-        let currentSops: any[] = [];
-        if (savedSops) {
-          try {
-            currentSops = JSON.parse(savedSops);
-          } catch (e) {
-            console.error(e);
-          }
-        }
+    try {
+      setPayouts(prev => {
+        const isCurrentlyPaid = prev[key];
+        const isNewPaid = !isCurrentlyPaid;
 
-        const originalNotifId = `sop-payslip-${empId}-${selectedMonth}`;
-        const recallNotifId = `sop-payslip-recall-${empId}-${selectedMonth}`;
-
-        if (!isNewPaid) {
-          // Admin is RETRACTING/RECALLING the payslip
-          // Delete original notification and previous recall notifications to avoid duplicates
-          let filtered = currentSops.filter(s => s.id !== originalNotifId && s.id !== recallNotifId);
-
-          // Clear employee signature for this month upon retraction
-          try {
-            const savedSigs = localStorage.getItem("payroll_employee_signatures");
-            if (savedSigs) {
-              const sigs = JSON.parse(savedSigs);
-              const sigKey = `${empId}_${selectedMonth}`;
-              if (sigs[sigKey]) {
-                delete sigs[sigKey];
-                localStorage.setItem("payroll_employee_signatures", JSON.stringify(sigs));
-              }
+        // Handle notifications
+        try {
+          const savedSops = localStorage.getItem("wms_sop_documents");
+          let currentSops: any[] = [];
+          if (savedSops) {
+            try {
+              currentSops = JSON.parse(savedSops);
+            } catch (e) {
+              console.error(e);
             }
-          } catch (e) {
-            console.error("Failed to delete employee signature upon retraction", e);
           }
 
-          const parts = selectedMonth.split("-");
-          const monthNum = parts.length >= 2 ? parseInt(parts[1], 10) : 7;
-          const emp = employees.find(e => e.id === empId);
-          const empName = emp ? emp.name : "";
+          const originalNotifId = `sop-payslip-${empId}-${selectedMonth}`;
+          const recallNotifId = `sop-payslip-recall-${empId}-${selectedMonth}`;
 
-          const recallNotif: any = {
-            id: recallNotifId,
-            title: `⚠️ ${monthNum}月电子工资条已被撤回`,
-            content: `尊敬的 <b>${empName}</b> (工号: ${empId})，您 <b>${selectedMonth}</b> 的电子工资条已被财务部撤回重新核对。当前原工资条已失效，请您知悉。`,
-            images: [],
-            attachments: [],
-            targetType: 'specific',
-            targetEmployeeIds: [empId],
-            createdAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
-            creator: "财务薪资部 · Admin",
-            status: "published",
-            reads: {},
-            category: 'training',
-            docType: 'notification'
-          };
+          if (!isNewPaid) {
+            // Admin is RETRACTING/RECALLING the payslip
+            // Delete original notification and previous recall notifications to avoid duplicates
+            let filtered = currentSops.filter(s => s.id !== originalNotifId && s.id !== recallNotifId);
 
-          localStorage.setItem("wms_sop_documents", JSON.stringify([recallNotif, ...filtered]));
-          window.dispatchEvent(new Event("storage"));
-        } else {
-          // Admin is RE-ISSUING / PAYING the payslip
-          // Remove any existing recall notification
-          const filtered = currentSops.filter(s => s.id !== recallNotifId);
-          localStorage.setItem("wms_sop_documents", JSON.stringify(filtered));
-          window.dispatchEvent(new Event("storage"));
+            // Clear employee signature for this month upon retraction
+            try {
+              const savedSigs = localStorage.getItem("payroll_employee_signatures");
+              if (savedSigs) {
+                const sigs = JSON.parse(savedSigs);
+                const sigKey = `${empId}_${selectedMonth}`;
+                if (sigs[sigKey]) {
+                  delete sigs[sigKey];
+                  localStorage.setItem("payroll_employee_signatures", JSON.stringify(sigs));
+                }
+              }
+            } catch (e) {
+              console.error("Failed to delete employee signature upon retraction", e);
+            }
 
-          const row = payrollSummary.find(r => r.emp.id === empId);
-          if (row) {
-            createPayslipNotification(
-              empId,
-              selectedMonth,
-              row.net,
-              row.emp.currency,
-              row.emp.name
-            );
+            const parts = selectedMonth.split("-");
+            const monthNum = parts.length >= 2 ? parseInt(parts[1], 10) : 7;
+
+            const recallNotif: any = {
+              id: recallNotifId,
+              title: `⚠️ ${monthNum}月电子工资条已被撤回`,
+              content: `尊敬的 <b>${empName}</b> (工号: ${empId})，您 <b>${selectedMonth}</b> 的电子工资条已被财务部撤回重新核对。当前原工资条已失效，请您知悉。`,
+              images: [],
+              attachments: [],
+              targetType: 'specific',
+              targetEmployeeIds: [empId],
+              createdAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
+              creator: "财务薪资部 · Admin",
+              status: "published",
+              reads: {},
+              category: 'training',
+              docType: 'notification'
+            };
+
+            localStorage.setItem("wms_sop_documents", JSON.stringify([recallNotif, ...filtered]));
+            window.dispatchEvent(new Event("storage"));
+            addToast?.(`已成功撤回员工【${empName}】的工资发放状态并作废旧工资单`, "info");
           } else {
-            createPayslipNotification(
-              empId,
-              selectedMonth,
-              0,
-              employees.find(e => e.id === empId)?.currency || 'THB',
-              employees.find(e => e.id === empId)?.name || ''
-            );
-          }
-        }
-      } catch (e) {
-        console.error("Failed to update notifications for payout toggle", e);
-      }
+            // Admin is RE-ISSUING / PAYING the payslip
+            // Remove any existing recall notification
+            const filtered = currentSops.filter(s => s.id !== recallNotifId);
+            localStorage.setItem("wms_sop_documents", JSON.stringify(filtered));
+            window.dispatchEvent(new Event("storage"));
 
-      return {
-        ...prev,
-        [key]: isNewPaid
-      };
-    });
+            const row = payrollSummary.find(r => r.emp.id === empId);
+            if (row) {
+              createPayslipNotification(
+                empId,
+                selectedMonth,
+                row.net,
+                row.emp.currency,
+                row.emp.name
+              );
+            } else {
+              createPayslipNotification(
+                empId,
+                selectedMonth,
+                0,
+                employees.find(e => e.id === empId)?.currency || 'THB',
+                employees.find(e => e.id === empId)?.name || ''
+              );
+            }
+            addToast?.(`员工【${empName}】工资发放状态已重新核准`, "success");
+          }
+        } catch (e) {
+          console.error("Failed to update notifications for payout toggle", e);
+          addToast?.("更新发放通知失败，请重试", "error");
+        }
+
+        return {
+          ...prev,
+          [key]: isNewPaid
+        };
+      });
+    } finally {
+      setTimeout(() => {
+        setActionLoadingId(null);
+      }, 150);
+    }
   };
 
   // Quick Action: Mark All as Paid for this Selected Month
   const handleMarkAllPaid = () => {
+    const unPaidRows = payrollSummary.filter(r => !payouts[`${r.emp.id}_${selectedMonth}`]);
+    const unPaidCount = unPaidRows.length;
     setConfirmDialog({
       isOpen: true,
       title: "确认全员核销发放",
-      message: `确定要将当前选择月份 (${selectedMonth}) 的所有在职员工都标记为“已发放”吗？该操作将批量更新发放状态。`,
+      message: `确定要将当前选择月份 (${selectedMonth}) 的 ${unPaidCount} 名未发放员工全员标记为“已发放”并推送电子工资条通知吗？`,
       confirmText: "确定全员发放",
       cancelText: "取消",
       type: "warning",
       onConfirm: () => {
         const updated = { ...payouts };
-        employees.forEach(emp => {
+        payrollSummary.forEach(row => {
+          const emp = row.emp;
           updated[`${emp.id}_${selectedMonth}`] = true;
           // Generate notification for this employee
-          const row = payrollSummary.find(r => r.emp.id === emp.id);
-          if (row) {
-            createPayslipNotification(
-              emp.id,
-              selectedMonth,
-              row.net,
-              emp.currency,
-              emp.name
-            );
-          } else {
-            createPayslipNotification(
-              emp.id,
-              selectedMonth,
-              0,
-              emp.currency,
-              emp.name
-            );
-          }
+          createPayslipNotification(
+            emp.id,
+            selectedMonth,
+            row.net,
+            emp.currency,
+            emp.name
+          );
         });
         setPayouts(updated);
         setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+        addToast?.(`已成功为 ${payrollSummary.length} 位员工完成工资核销与发放通知`, "success");
       }
     });
   };
@@ -534,31 +630,50 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
   // Launch Payslip Modal Detail
   const handleOpenPayslip = (row: PayrollSummary) => {
     setSelectedPayslipEmp(row);
-    setSignName("");
-    setIsCashPaid(!!payouts[`${row.emp.id}_${selectedMonth}`]);
+    const key = `${row.emp.id}_${selectedMonth}`;
+    setSignName(empConfirmations[key] || "");
+    setIsCashPaid(!!payouts[key]);
     setShowSlipModal(true);
   };
 
   // Confirm payout from inside Modal
-  const submitPayslipConfirm = () => {
-    if (!selectedPayslipEmp) return;
-    const key = `${selectedPayslipEmp.emp.id}_${selectedMonth}`;
-    setPayouts(prev => ({
-      ...prev,
-      [key]: true
-    }));
+  const submitPayslipConfirm = async () => {
+    if (!selectedPayslipEmp || isPayslipSubmitting) return;
+    setIsPayslipSubmitting(true);
+    try {
+      const key = `${selectedPayslipEmp.emp.id}_${selectedMonth}`;
+      setPayouts(prev => ({
+        ...prev,
+        [key]: true
+      }));
 
-    // Generate notification for this specific employee
-    createPayslipNotification(
-      selectedPayslipEmp.emp.id,
-      selectedMonth,
-      selectedPayslipEmp.net,
-      selectedPayslipEmp.emp.currency,
-      selectedPayslipEmp.emp.name
-    );
+      if (signName.trim()) {
+        setEmpConfirmations(prev => {
+          const next = { ...prev, [key]: signName.trim() };
+          try {
+            localStorage.setItem("payroll_employee_signatures", JSON.stringify(next));
+          } catch (e) {
+            console.error(e);
+          }
+          return next;
+        });
+      }
 
-    setShowSlipModal(false);
-    setSelectedPayslipEmp(null);
+      // Generate notification for this specific employee
+      createPayslipNotification(
+        selectedPayslipEmp.emp.id,
+        selectedMonth,
+        selectedPayslipEmp.net,
+        selectedPayslipEmp.emp.currency,
+        selectedPayslipEmp.emp.name
+      );
+
+      addToast?.(`员工 ${selectedPayslipEmp.emp.name} 的工资条已核准发放并保存签收`, "success");
+      setShowSlipModal(false);
+      setSelectedPayslipEmp(null);
+    } finally {
+      setIsPayslipSubmitting(false);
+    }
   };
 
   const [isExporting, setIsExporting] = useState<boolean>(false);
@@ -567,9 +682,10 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
   const handleExportExcel = async () => {
     try {
       setIsExporting(true);
+      const rowsToExport = (searchTerm.trim() || statusFilter !== 'all') ? tableRows : payrollSummary;
       await exportPayrollExcel({
         monthStr: selectedMonth,
-        payrollRows: payrollSummary,
+        payrollRows: rowsToExport,
         config,
         companyName: "( SHUOMAX Co., LTD. )",
         approverName: "ZHANYINGLONG"
@@ -581,106 +697,6 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
     } finally {
       setIsExporting(false);
     }
-  };
-
-  // Export current month payroll to CSV (fallback)
-  const handleExportCSV = () => {
-    const headers = [
-      "年月", "员工", "员工编号", "所属部门", "职位", "计薪方式", 
-      "有效工时", "加班时长", "加班费", "服务费", "应发", 
-      "社保扣款", "扣款", "实发", "发放状态", "币种"
-    ];
-
-    const getSalaryTypeLabel = (emp: Employee) => {
-      if (emp.baseMonthlyWage !== undefined && emp.baseMonthlyWage !== null && emp.baseMonthlyWage > 0) return "月薪";
-      if (emp.dailyWage !== undefined && emp.dailyWage !== null && emp.dailyWage > 0) return "日薪";
-      return "时薪";
-    };
-
-    const totals = tableRows.reduce(
-      (acc, item) => {
-        const bonus = Number(item.emp.attendanceBonus || 0);
-        const ssf = Number(item.emp.socialSecurity || 0);
-        const basePay = Number(item.basePay || 0);
-        const otPay = Number(item.otPay || 0);
-        const empTaxRate = getEmployeeTaxRate(item.emp, config);
-        const tax = (basePay + otPay + bonus) * empTaxRate;
-        const deduction = ssf + tax;
-        const net = Number.isFinite(item.net) ? item.net : Math.max(0, Number(item.gross || 0) - deduction);
-
-        acc.validHours += Number(item.valid || 0);
-        acc.overtimeHours += Number(item.ot || 0);
-        acc.overtimePay += Number(item.otPay || 0);
-        acc.serviceFee += Number(item.serviceFee || 0);
-        acc.grossPay += Number(item.gross || 0);
-        acc.socialSecurity += ssf;
-        acc.deduction += deduction;
-        acc.netPay += net;
-        return acc;
-      },
-      { validHours: 0, overtimeHours: 0, overtimePay: 0, serviceFee: 0, grossPay: 0, socialSecurity: 0, deduction: 0, netPay: 0 }
-    );
-
-    const rows = tableRows.map((item) => {
-      const isPaid = !!payouts[`${item.emp.id}_${selectedMonth}`];
-      const bonus = Number(item.emp.attendanceBonus || 0);
-      const ssf = Number(item.emp.socialSecurity || 0);
-      const basePay = Number(item.basePay || 0);
-      const otPay = Number(item.otPay || 0);
-      const empTaxRate = getEmployeeTaxRate(item.emp, config);
-      const tax = (basePay + otPay + bonus) * empTaxRate;
-      const deduction = ssf + tax;
-      const net = Number.isFinite(item.net) ? item.net : Math.max(0, Number(item.gross || 0) - deduction);
-
-      return [
-        selectedMonth,
-        `"${item.emp.name}"`,
-        item.emp.employeeNo || item.emp.idCard || item.emp.id || "-",
-        `"${item.emp.dept || "未分配"}"`,
-        `"${item.emp.role || "未设置职位"}"`,
-        getSalaryTypeLabel(item.emp),
-        Number(item.valid || 0).toFixed(2),
-        Number(item.ot || 0).toFixed(2),
-        Number(item.otPay || 0).toFixed(2),
-        Number(item.serviceFee || 0).toFixed(2),
-        Number(item.gross || 0).toFixed(2),
-        Number(ssf || 0).toFixed(2),
-        Number(deduction || 0).toFixed(2),
-        Number(net || 0).toFixed(2),
-        isPaid ? "已发" : "待发",
-        item.emp.currency || currentCurrency
-      ];
-    });
-
-    const summaryRow = [
-      "合计",
-      "",
-      "",
-      "",
-      "",
-      "",
-      Number(totals.validHours || 0).toFixed(2),
-      Number(totals.overtimeHours || 0).toFixed(2),
-      Number(totals.overtimePay || 0).toFixed(2),
-      Number(totals.serviceFee || 0).toFixed(2),
-      Number(totals.grossPay || 0).toFixed(2),
-      Number(totals.socialSecurity || 0).toFixed(2),
-      Number(totals.deduction || 0).toFixed(2),
-      Number(totals.netPay || 0).toFixed(2),
-      "",
-      tableRows[0]?.emp?.currency || currentCurrency
-    ];
-
-    const csvContent = "\uFEFF" + [headers.join(","), ...rows.map((row) => row.join(",")), summaryRow.join(",")].join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.setAttribute("download", `员工薪资报表_${selectedMonth}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
   };
 
   return (
@@ -816,26 +832,31 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
             </div>
           </div>
 
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             onClick={handleRefresh}
             disabled={isRefreshing}
-            className="px-3 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition flex items-center gap-1.5 shadow-2xs cursor-pointer ml-auto sm:ml-0"
+            className="h-[34px] px-3 bg-white border-slate-200 text-slate-700 hover:bg-slate-50 transition flex items-center gap-1.5 shadow-2xs cursor-pointer ml-auto sm:ml-0"
             title="刷新薪资核算数据"
           >
             <RefreshCw className={cn("w-4 h-4 text-slate-500", isRefreshing && "animate-spin")} />
             <span>刷新</span>
-          </button>
+          </Button>
 
-          <button
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
             onClick={handleExportExcel}
             disabled={isExporting}
-            className="px-3 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300 transition flex items-center gap-1.5 shadow-2xs ml-auto sm:ml-0 cursor-pointer disabled:opacity-50"
+            className="h-[34px] px-3 bg-white border-slate-200 text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300 transition flex items-center gap-1.5 shadow-2xs ml-auto sm:ml-0 cursor-pointer disabled:opacity-50"
             title="导出为标准Excel工资汇总表"
           >
             <Download className={cn("w-4 h-4 text-emerald-600", isExporting && "animate-bounce")} />
             <span>{isExporting ? "正在导出..." : "导出工资表 (Excel)"}</span>
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -913,7 +934,7 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
                   : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
               }`}
             >
-              全部员工 ({payrollSummary.length})
+              {lang === 'en' ? `All (${payrollSummary.length})` : lang === 'th' ? `ทั้งหมด (${payrollSummary.length})` : `全部员工 (${payrollSummary.length})`}
             </button>
             <button
               onClick={() => setStatusFilter('pending')}
@@ -923,7 +944,7 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
                   : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
               }`}
             >
-              ⏳ 待发放 ({payrollSummary.length - metrics.paidCount})
+              {lang === 'en' ? `⏳ Pending (${payrollSummary.length - metrics.paidCount})` : lang === 'th' ? `⏳ รอจ่าย (${payrollSummary.length - metrics.paidCount})` : `⏳ 待发放 (${payrollSummary.length - metrics.paidCount})`}
             </button>
             <button
               onClick={() => setStatusFilter('paid')}
@@ -933,25 +954,25 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
                   : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
               }`}
             >
-              ✅ 已发放 ({metrics.paidCount})
+              {lang === 'en' ? `✅ Paid (${metrics.paidCount})` : lang === 'th' ? `✅ จ่ายแล้ว (${metrics.paidCount})` : `✅ 已发放 (${metrics.paidCount})`}
             </button>
           </div>
 
           <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
             {/* Search Input */}
             <div className="relative">
-              <input
+              <Input
                 type="text"
-                placeholder="搜索员工、职位或区域..."
+                placeholder={lang === "en" ? "Search name, ID, dept, role..." : lang === "th" ? "ค้นหาชื่อ, รหัส, แผนก, ตำแหน่ง..." : lang === "zh-TW" ? "搜尋員工姓名、工號、職位或部門..." : "搜索员工姓名、工号、职位或部门..."}
                 value={searchTerm}
-                onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-                className="w-full sm:w-64 h-8 pl-8 pr-8 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-brand-500 shadow-3xs"
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full sm:w-64 h-8 pl-8 pr-8 bg-white border border-slate-200 rounded-lg text-xs outline-none focus-visible:ring-2 focus-visible:ring-brand-500 shadow-3xs"
               />
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               {searchTerm && (
                 <button
                   type="button"
-                  onClick={() => { setSearchTerm(""); setCurrentPage(1); }}
+                  onClick={() => setSearchTerm("")}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 rounded-full hover:bg-slate-100 transition-colors cursor-pointer"
                   title="清空搜索"
                 >
@@ -996,20 +1017,20 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
             >
               <thead>
                 <tr className="bg-slate-50/95 text-slate-500 text-xs uppercase border-b border-slate-200 whitespace-nowrap">
-                  <th style={{ width: colWidths[0] ? `${colWidths[0]}px` : undefined }} className="px-5 py-3.5 font-bold">员工详情</th>
-                  <th style={{ width: colWidths[1] ? `${colWidths[1]}px` : undefined }} className="px-3.5 py-3.5 font-bold text-left">上班数</th>
-                  <th style={{ width: colWidths[2] ? `${colWidths[2]}px` : undefined }} className="px-3.5 py-3.5 font-bold text-left">工时</th>
-                  <th style={{ width: colWidths[3] ? `${colWidths[3]}px` : undefined }} className="px-3.5 py-3.5 font-bold text-left">加班</th>
-                  <th style={{ width: colWidths[4] ? `${colWidths[4]}px` : undefined }} className="px-3.5 py-3.5 font-bold text-left">加班时长</th>
-                  <th style={{ width: colWidths[5] ? `${colWidths[5]}px` : undefined }} className="px-3.5 py-3.5 font-bold text-left">薪资</th>
-                  <th style={{ width: colWidths[6] ? `${colWidths[6]}px` : undefined }} className="px-3.5 py-3.5 font-bold text-left font-sans">加班费</th>
-                  <th style={{ width: colWidths[7] ? `${colWidths[7]}px` : undefined }} className="px-3.5 py-3.5 font-bold text-left font-sans">全勤奖</th>
-                  <th style={{ width: colWidths[8] ? `${colWidths[8]}px` : undefined }} className="px-3.5 py-3.5 font-bold text-left font-sans">餐饮费</th>
-                  <th style={{ width: colWidths[9] ? `${colWidths[9]}px` : undefined }} className="px-3.5 py-3.5 font-bold text-left font-sans">社保</th>
-                  <th style={{ width: colWidths[10] ? `${colWidths[10]}px` : undefined }} className="px-3.5 py-3.5 font-bold text-left font-sans">服务费</th>
-                  <th style={{ width: colWidths[11] ? `${colWidths[11]}px` : undefined }} className="px-4 py-3.5 font-bold text-left text-blue-700 font-sans">合计工资</th>
-                  <th style={{ width: colWidths[12] ? `${colWidths[12]}px` : undefined }} className="px-4 py-3.5 font-bold text-center font-sans">状态</th>
-                  <th style={{ width: colWidths[13] ? `${colWidths[13]}px` : undefined }} className="px-5 py-3.5 font-bold text-center font-sans">操作</th>
+                  <th style={{ width: colWidths[0] ? `${colWidths[0]}px` : undefined }} className="px-5 py-3.5 font-bold">{lang === 'en' ? "Employee" : lang === 'th' ? "พนักงาน" : "员工详情"}</th>
+                  <th style={{ width: colWidths[1] ? `${colWidths[1]}px` : undefined }} className="px-3.5 py-3.5 font-bold text-left">{lang === 'en' ? "Days" : lang === 'th' ? "วันทำงาน" : "上班数"}</th>
+                  <th style={{ width: colWidths[2] ? `${colWidths[2]}px` : undefined }} className="px-3.5 py-3.5 font-bold text-left">{lang === 'en' ? "Hours" : lang === 'th' ? "ชั่วโมง" : "工时"}</th>
+                  <th style={{ width: colWidths[3] ? `${colWidths[3]}px` : undefined }} className="px-3.5 py-3.5 font-bold text-left">{lang === 'en' ? "OT" : lang === 'th' ? "ครั้ง OT" : "加班"}</th>
+                  <th style={{ width: colWidths[4] ? `${colWidths[4]}px` : undefined }} className="px-3.5 py-3.5 font-bold text-left">{lang === 'en' ? "OT Hours" : lang === 'th' ? "ชั่วโมง OT" : "加班时长"}</th>
+                  <th style={{ width: colWidths[5] ? `${colWidths[5]}px` : undefined }} className="px-3.5 py-3.5 font-bold text-left">{lang === 'en' ? "Salary" : lang === 'th' ? "เงินเดือน" : "薪资"}</th>
+                  <th style={{ width: colWidths[6] ? `${colWidths[6]}px` : undefined }} className="px-3.5 py-3.5 font-bold text-left font-sans">{lang === 'en' ? "OT Pay" : lang === 'th' ? "ค่าล่วงเวลา" : "加班费"}</th>
+                  <th style={{ width: colWidths[7] ? `${colWidths[7]}px` : undefined }} className="px-3.5 py-3.5 font-bold text-left font-sans">{lang === 'en' ? "Incentive" : lang === 'th' ? "เบี้ยขยัน" : "全勤奖"}</th>
+                  <th style={{ width: colWidths[8] ? `${colWidths[8]}px` : undefined }} className="px-3.5 py-3.5 font-bold text-left font-sans">{lang === 'en' ? "Meal" : lang === 'th' ? "ค่าอาหาร" : "餐饮费"}</th>
+                  <th style={{ width: colWidths[9] ? `${colWidths[9]}px` : undefined }} className="px-3.5 py-3.5 font-bold text-left font-sans">{lang === 'en' ? "SSF" : lang === 'th' ? "ประกันสังคม" : "社保"}</th>
+                  <th style={{ width: colWidths[10] ? `${colWidths[10]}px` : undefined }} className="px-3.5 py-3.5 font-bold text-left font-sans">{lang === 'en' ? "Dispatch" : lang === 'th' ? "ค่าส่งตัว" : "派遣抽佣"}</th>
+                  <th style={{ width: colWidths[11] ? `${colWidths[11]}px` : undefined }} className="px-4 py-3.5 font-bold text-left text-blue-700 font-sans">{lang === 'en' ? "Net Pay" : lang === 'th' ? "ยอดสุทธิ" : "合计工资"}</th>
+                  <th style={{ width: colWidths[12] ? `${colWidths[12]}px` : undefined }} className="px-4 py-3.5 font-bold text-center font-sans">{lang === 'en' ? "Status" : lang === 'th' ? "สถานะ" : "状态"}</th>
+                  <th style={{ width: colWidths[13] ? `${colWidths[13]}px` : undefined }} className="px-5 py-3.5 font-bold text-center font-sans">{lang === 'en' ? "Action" : lang === 'th' ? "จัดการ" : "操作"}</th>
                 </tr>
               </thead>
             </table>
@@ -1023,20 +1044,20 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
           <table ref={realTableRef} className="w-full text-left border-collapse min-w-[1380px]">
             <thead ref={realTheadRef}>
               <tr className="bg-slate-50/75 text-slate-500 text-xs uppercase border-b border-slate-100 whitespace-nowrap">
-                <th className="px-5 py-3.5 font-bold min-w-[180px]">员工详情</th>
-                <th className="px-3.5 py-3.5 font-bold text-left min-w-[80px]">上班数</th>
-                <th className="px-3.5 py-3.5 font-bold text-left min-w-[85px]">工时</th>
-                <th className="px-3.5 py-3.5 font-bold text-left min-w-[80px]">加班</th>
-                <th className="px-3.5 py-3.5 font-bold text-left min-w-[90px]">加班时长</th>
-                <th className="px-3.5 py-3.5 font-bold text-left min-w-[95px]">薪资</th>
-                <th className="px-3.5 py-3.5 font-bold text-left font-sans min-w-[95px]">加班费</th>
-                <th className="px-3.5 py-3.5 font-bold text-left font-sans min-w-[90px]">全勤奖</th>
-                <th className="px-3.5 py-3.5 font-bold text-left font-sans min-w-[90px]">餐饮费</th>
-                <th className="px-3.5 py-3.5 font-bold text-left font-sans min-w-[85px]">社保</th>
-                <th className="px-3.5 py-3.5 font-bold text-left font-sans min-w-[85px]">服务费</th>
-                <th className="px-4 py-3.5 font-bold text-left text-blue-700 font-sans min-w-[110px]">合计工资</th>
-                <th className="px-4 py-3.5 font-bold text-center font-sans min-w-[100px]">状态</th>
-                <th className="px-5 py-3.5 font-bold text-center font-sans min-w-[160px]">操作</th>
+                <th className="px-5 py-3.5 font-bold min-w-[180px]">{lang === 'en' ? "Employee" : lang === 'th' ? "พนักงาน" : "员工详情"}</th>
+                <th className="px-3.5 py-3.5 font-bold text-left min-w-[80px]">{lang === 'en' ? "Days" : lang === 'th' ? "วันทำงาน" : "上班数"}</th>
+                <th className="px-3.5 py-3.5 font-bold text-left min-w-[85px]">{lang === 'en' ? "Hours" : lang === 'th' ? "ชั่วโมง" : "工时"}</th>
+                <th className="px-3.5 py-3.5 font-bold text-left min-w-[80px]">{lang === 'en' ? "OT" : lang === 'th' ? "ครั้ง OT" : "加班"}</th>
+                <th className="px-3.5 py-3.5 font-bold text-left min-w-[90px]">{lang === 'en' ? "OT Hours" : lang === 'th' ? "ชั่วโมง OT" : "加班时长"}</th>
+                <th className="px-3.5 py-3.5 font-bold text-left min-w-[95px]">{lang === 'en' ? "Salary" : lang === 'th' ? "เงินเดือน" : "薪资"}</th>
+                <th className="px-3.5 py-3.5 font-bold text-left font-sans min-w-[95px]">{lang === 'en' ? "OT Pay" : lang === 'th' ? "ค่าล่วงเวลา" : "加班费"}</th>
+                <th className="px-3.5 py-3.5 font-bold text-left font-sans min-w-[90px]">{lang === 'en' ? "Incentive" : lang === 'th' ? "เบี้ยขยัน" : "全勤奖"}</th>
+                <th className="px-3.5 py-3.5 font-bold text-left font-sans min-w-[90px]">{lang === 'en' ? "Meal" : lang === 'th' ? "ค่าอาหาร" : "餐饮费"}</th>
+                <th className="px-3.5 py-3.5 font-bold text-left font-sans min-w-[85px]">{lang === 'en' ? "SSF" : lang === 'th' ? "ประกันสังคม" : "社保"}</th>
+                <th className="px-3.5 py-3.5 font-bold text-left font-sans min-w-[85px]">{lang === 'en' ? "Dispatch" : lang === 'th' ? "ค่าส่งตัว" : "派遣抽佣"}</th>
+                <th className="px-4 py-3.5 font-bold text-left text-blue-700 font-sans min-w-[110px]">{lang === 'en' ? "Net Pay" : lang === 'th' ? "ยอดสุทธิ" : "合计工资"}</th>
+                <th className="px-4 py-3.5 font-bold text-center font-sans min-w-[100px]">{lang === 'en' ? "Status" : lang === 'th' ? "สถานะ" : "状态"}</th>
+                <th className="px-5 py-3.5 font-bold text-center font-sans min-w-[160px]">{lang === 'en' ? "Action" : lang === 'th' ? "จัดการ" : "操作"}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -1075,8 +1096,8 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
                             )}
                           </div>
                           <div className="min-w-0">
-                            <p className="font-semibold text-slate-900 truncate max-w-[140px]">{emp.name}</p>
-                            <p className="text-[10px] text-slate-400 mt-0.5 truncate max-w-[140px]">
+                            <p className="font-semibold text-slate-900 truncate max-w-[140px]" title={emp.name}>{emp.name}</p>
+                            <p className="text-[10px] text-slate-400 mt-0.5 truncate max-w-[140px]" title={[emp.dept, emp.role].filter(Boolean).join(" · ") || "未分配"}>
                               {[emp.dept, emp.role].filter(Boolean).join(" · ") || "未分配"}
                             </p>
                           </div>
@@ -1121,7 +1142,7 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
                       </td>
                       <td className="px-3.5 py-4 text-left text-xs font-mono text-slate-600">
                         {serviceFee !== undefined && serviceFee > 0 
-                          ? formatCurrency(serviceFee, emp.currency) 
+                          ? <span className="text-rose-600 font-semibold font-mono">- {formatCurrency(serviceFee, emp.currency)}</span>
                           : '-'}
                       </td>
                       <td className="px-4 py-4 text-left">
@@ -1132,14 +1153,14 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
                       <td className="px-4 py-4 text-center">
                         {isPaid ? (
                           <div className="flex flex-col items-center gap-1.5 justify-center">
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 bg-emerald-50 rounded-lg border border-emerald-100">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse"></span>
-                              已发放
+                            <span className="inline-flex items-center shrink-0 whitespace-nowrap gap-1 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 bg-emerald-50 rounded-lg border border-emerald-100">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse shrink-0"></span>
+                              {lang === 'en' ? "Paid" : lang === 'th' ? "จ่ายแล้ว" : "已发放"}
                             </span>
                             {empConfirmations[`${emp.id}_${selectedMonth}`] ? (
-                              <div className="flex flex-col items-center gap-1">
+                              <div className="flex flex-col items-center gap-1 shrink-0">
                                 {empConfirmations[`${emp.id}_${selectedMonth}`]?.startsWith("data:image/") ? (
-                                  <div className="relative group cursor-zoom-in">
+                                  <div className="relative group cursor-zoom-in shrink-0">
                                     <img 
                                       src={empConfirmations[`${emp.id}_${selectedMonth}`]} 
                                       alt="Signature" 
@@ -1162,62 +1183,73 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
                                     </div>
                                   </div>
                                 ) : (
-                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-bold text-teal-800 bg-teal-50 rounded border border-teal-200" title={`已于APP端核对并签名: ${empConfirmations[`${emp.id}_${selectedMonth}`]}`}>
+                                  <span className="inline-flex items-center shrink-0 whitespace-nowrap gap-0.5 px-1.5 py-0.5 text-[10px] font-bold text-teal-800 bg-teal-50 rounded border border-teal-200" title={`已于APP端核对并签名: ${empConfirmations[`${emp.id}_${selectedMonth}`]}`}>
                                     ✍️ {empConfirmations[`${emp.id}_${selectedMonth}`]}
                                   </span>
                                 )}
                               </div>
                             ) : (
-                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 bg-slate-50 rounded border border-slate-200">
-                                ⏳ 待核签
+                              <span className="inline-flex items-center shrink-0 whitespace-nowrap gap-0.5 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 bg-slate-50 rounded border border-slate-200">
+                                ⏳ {lang === 'en' ? "Unsigned" : lang === 'th' ? "รอเซ็น" : "待核签"}
                               </span>
                             )}
                           </div>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-amber-700 bg-amber-50 rounded-lg border border-amber-100">
-                            待发放
+                          <span className="inline-flex items-center shrink-0 whitespace-nowrap gap-1 px-2.5 py-1 text-xs font-semibold text-amber-700 bg-amber-50 rounded-lg border border-amber-100">
+                            {lang === 'en' ? "Pending" : lang === 'th' ? "รอจ่าย" : "待发放"}
                           </span>
                         )}
                       </td>
                       <td className="px-6 py-4 text-center">
-                        <div className="flex items-center justify-center gap-2">
+                        <div className="flex items-center justify-center gap-2 shrink-0 whitespace-nowrap">
                           {isPaid ? (
                             <div className="flex items-center gap-2">
                               <button
                                 onClick={() => handleOpenPayslip(row)}
-                                className="px-2.5 py-1 text-xs font-semibold text-slate-700 hover:text-brand-600 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition flex items-center gap-1 cursor-pointer"
+                                disabled={actionLoadingId === emp.id}
+                                className="px-2.5 py-1 text-xs font-semibold text-slate-700 hover:text-brand-600 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition flex items-center gap-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 <Receipt className="w-3 h-3" />
-                                <span>查看工资条</span>
+                                <span>{lang === 'en' ? "Payslip" : lang === 'th' ? "สลิป" : "查看工资条"}</span>
                               </button>
                               <button
                                 onClick={() => {
                                   if (hasPermission("payroll_pay")) {
                                     setConfirmDialog({
                                       isOpen: true,
-                                      title: "确认撤回工资条",
-                                      message: `确认要撤回员工 ${emp.name} 的工资发放状态吗？撤回后工资条将恢复为“待发放”状态。`,
-                                      confirmText: "确认撤回",
-                                      cancelText: "取消",
+                                      title: lang === 'en' ? "Confirm Retraction" : lang === 'th' ? "ยืนยันการยกเลิก" : "确认撤回工资条",
+                                      message: lang === 'en' 
+                                        ? `Are you sure you want to retract payment status for ${emp.name}? Payslip will revert to pending.` 
+                                        : lang === 'th'
+                                        ? `คุณแน่ใจหรือไม่ว่าต้องการยกเลิกการจ่ายเงินของ ${emp.name}? สลิปจะกลับสู่สถานะรอจ่าย`
+                                        : `确认要撤回员工 ${emp.name} 的工资发放状态吗？撤回后工资条将恢复为“待发放”状态。`,
+                                      confirmText: lang === 'en' ? "Confirm Retract" : lang === 'th' ? "ยืนยันยกเลิก" : "确认撤回",
+                                      cancelText: lang === 'en' ? "Cancel" : lang === 'th' ? "ยกเลิก" : "取消",
                                       type: "danger",
                                       onConfirm: () => {
                                         handleTogglePayout(emp.id);
                                         setConfirmDialog(prev => ({ ...prev, isOpen: false }));
                                       }
                                     });
+                                  } else {
+                                    addToast?.("您暂无核销与撤回薪资的权限", "error");
                                   }
                                 }}
-                                disabled={!hasPermission("payroll_pay")}
+                                disabled={!hasPermission("payroll_pay") || actionLoadingId === emp.id}
                                 className={cn(
                                   "px-2.5 py-1 text-xs font-semibold rounded-lg transition flex items-center gap-1 border",
                                   hasPermission("payroll_pay")
-                                    ? "text-red-600 hover:text-white hover:bg-red-600 border-red-200 hover:border-red-600 cursor-pointer"
+                                    ? "text-red-600 hover:text-white hover:bg-red-600 border-red-200 hover:border-red-600 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                                     : "text-slate-400 bg-slate-50 border-slate-200 cursor-not-allowed"
                                 )}
                                 title={hasPermission("payroll_pay") ? "撤回工资发放状态" : "无权限撤回工资条"}
                               >
-                                <RotateCcw className="w-3 h-3" />
-                                <span>{!hasPermission("payroll_pay") && "🔒"}撤回</span>
+                                {actionLoadingId === emp.id ? (
+                                  <Loader2 className="w-3 h-3 animate-spin text-red-600" />
+                                ) : (
+                                  <RotateCcw className="w-3 h-3" />
+                                )}
+                                <span>{!hasPermission("payroll_pay") && "🔒"}{actionLoadingId === emp.id ? "撤回中..." : (lang === 'en' ? "Retract" : lang === 'th' ? "ยกเลิก" : "撤回")}</span>
                               </button>
                             </div>
                           ) : (
@@ -1227,23 +1259,20 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
                                   if (hasPermission("payroll_pay")) {
                                     handleOpenPayslip(row);
                                   } else {
-                                    // Fallback: If no payroll_pay, can they still view it in read-only? 
-                                    // Let's allow view, but disable generating. Actually, they cannot generate.
-                                    // Let's let them open payslip in read-only mode if we want, or just disable it entirely.
-                                    // Let's disable generating entirely if they don't have permission.
+                                    addToast?.("您暂无核销与发放薪资的权限", "error");
                                   }
                                 }}
-                                disabled={!hasPermission("payroll_pay")}
+                                disabled={!hasPermission("payroll_pay") || actionLoadingId === emp.id}
                                 className={cn(
                                   "px-2.5 py-1 text-xs font-semibold rounded-lg shadow-sm transition flex items-center gap-1",
                                   hasPermission("payroll_pay")
-                                    ? "text-white bg-brand-600 hover:bg-brand-700 cursor-pointer"
+                                    ? "text-white bg-brand-600 hover:bg-brand-700 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                                     : "text-slate-400 bg-slate-100 border border-slate-200 cursor-not-allowed"
                                 )}
                                 title={hasPermission("payroll_pay") ? "生成工资条" : "无权限生成工资条"}
                               >
                                 <Receipt className="w-3 h-3" />
-                                <span>{!hasPermission("payroll_pay") && "🔒"}生成工资条</span>
+                                <span>{!hasPermission("payroll_pay") && "🔒"}{lang === 'en' ? "Issue Slip" : lang === 'th' ? "ออกสลิป" : "生成工资条"}</span>
                               </button>
                             </div>
                           )}
@@ -1254,6 +1283,28 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
                 })
               )}
               </tbody>
+              {tableRows.length > 0 && !loading && !isTableLoading && (
+                <tfoot className="bg-slate-100/90 border-t-2 border-slate-300 font-bold text-xs text-slate-700 whitespace-nowrap">
+                  <tr>
+                    <td className="px-5 py-3 text-slate-800">
+                      {lang === 'en' ? `Total (${tableRows.length} staff)` : lang === 'th' ? `ยอดรวม (${tableRows.length} คน)` : `合计 (${tableRows.length}人)`}
+                    </td>
+                    <td className="px-3.5 py-3 font-mono text-left">{tableTotals.workingDays}天</td>
+                    <td className="px-3.5 py-3 font-mono text-left">{tableTotals.valid.toFixed(1)}h</td>
+                    <td className="px-3.5 py-3 font-mono text-left">{tableTotals.otCount}次</td>
+                    <td className="px-3.5 py-3 font-mono text-left">{tableTotals.ot.toFixed(1)}h</td>
+                    <td className="px-3.5 py-3 font-mono text-left text-slate-900">{formatCurrency(tableTotals.basePay, currentCurrency)}</td>
+                    <td className="px-3.5 py-3 font-mono text-left text-amber-700">{formatCurrency(tableTotals.otPay, currentCurrency)}</td>
+                    <td className="px-3.5 py-3 font-mono text-left">{tableTotals.bonus > 0 ? formatCurrency(tableTotals.bonus, currentCurrency) : '-'}</td>
+                    <td className="px-3.5 py-3 font-mono text-left">{tableTotals.mealAllowance > 0 ? formatCurrency(tableTotals.mealAllowance, currentCurrency) : '-'}</td>
+                    <td className="px-3.5 py-3 font-mono text-left text-rose-600">{tableTotals.socialSecurity > 0 ? `-${formatCurrency(tableTotals.socialSecurity, currentCurrency)}` : '-'}</td>
+                    <td className="px-3.5 py-3 font-mono text-left text-rose-600">{tableTotals.serviceFee > 0 ? `-${formatCurrency(tableTotals.serviceFee, currentCurrency)}` : '-'}</td>
+                    <td className="px-4 py-3 font-mono text-left text-blue-900 text-sm font-extrabold">{formatCurrency(tableTotals.net, currentCurrency)}</td>
+                    <td className="px-4 py-3 text-center text-slate-400 font-normal">-</td>
+                    <td className="px-5 py-3 text-center text-slate-400 font-normal">-</td>
+                  </tr>
+                </tfoot>
+              )}
             </table>
         </div>
 
@@ -1281,8 +1332,19 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
 
       {/* Interactive Beautiful Payslip Modal (工资单) */}
       {showSlipModal && selectedPayslipEmp && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-100 transform scale-100 transition-all flex flex-col max-h-[90vh]">
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 animate-fade-in cursor-pointer"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowSlipModal(false);
+              setSelectedPayslipEmp(null);
+            }
+          }}
+        >
+          <div 
+            className="bg-white rounded-xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-100 transform scale-100 transition-all flex flex-col max-h-[90vh] cursor-default"
+            onClick={(e) => e.stopPropagation()}
+          >
             
             {/* Modal Header */}
             <div className="bg-brand-600 text-white p-5 flex justify-between items-center">
@@ -1291,9 +1353,10 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
               </div>
               <button 
                 onClick={() => { setShowSlipModal(false); setSelectedPayslipEmp(null); }}
-                className="text-white/80 hover:text-white bg-brand-500/30 hover:bg-brand-500/50 p-1.5 rounded-full transition text-sm-semibold font-mono"
+                className="text-white/80 hover:text-white bg-brand-500/30 hover:bg-brand-500/50 p-1.5 rounded-full transition cursor-pointer"
+                title={lang === 'en' ? "Close" : lang === 'th' ? "ปิด" : "关闭"}
               >
-                ✕
+                <X className="w-5 h-5" />
               </button>
             </div>
 
@@ -1323,13 +1386,42 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
                         KR: lang === "en" ? "🇰🇷 Korea" : lang === "th" ? "🇰🇷 เกาหลี" : lang === "zh-TW" ? "🇰🇷 韓國籍" : "🇰🇷 韩国籍",
                         VN: lang === "en" ? "🇻🇳 Vietnam" : lang === "th" ? "🇻🇳 เวียดนาม" : lang === "zh-TW" ? "🇻🇳 越南籍" : "🇻🇳 越南籍",
                         KH: lang === "en" ? "🇰🇭 Cambodia" : lang === "th" ? "🇰🇭 กัมพูชา" : lang === "zh-TW" ? "🇰🇭 柬埔寨籍" : "🇰🇭 柬埔寨籍",
-                        ID: lang === "en" ? "🇮🇩 Indonesia" : lang === "th" ? "🇮🇩 อินโดนีเซีย" : lang === "zh-TW" ? "🇮🇩 印尼籍" : "🇮🇩 印尼籍"
+                        ID: lang === "en" ? "🇮🇩 Indonesia" : lang === "th" ? "🇮🇩 อินโดนีเซีย" : lang === "zh-TW" ? "🇮🇩 印尼籍" : "🇮🇩 印尼籍",
+                        MY: lang === "en" ? "🇲🇾 Malaysia" : lang === "th" ? "🇲🇾 มาเลเซีย" : lang === "zh-TW" ? "🇲🇾 馬來西亞籍" : "🇲🇾 马来西亚籍"
                       };
                       return map[c] || c;
                     })()}
                   </span>
                 </div>
               </div>
+
+              {/* 当月调薪/规则变动智能提示 */}
+              {(() => {
+                const monthLogs = activeEmpSalaryLogs.filter(l => l.effective_date && l.effective_date.startsWith(selectedMonth));
+                if (monthLogs.length === 0) return null;
+                const latestLog = monthLogs[0];
+                return (
+                  <div className="bg-amber-50/80 border border-amber-200/90 rounded-xl p-3 text-xs space-y-1.5 animate-fade-in shadow-2xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-amber-900 flex items-center gap-1.5">
+                        <TrendingUp className="w-3.5 h-3.5 text-amber-600" />
+                        <span>本计薪月存在薪酬/规则调整记录</span>
+                      </span>
+                      <span className="text-[10px] font-semibold font-mono bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">
+                        {latestLog.effective_date} 生效
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-amber-800/90 leading-relaxed flex flex-wrap items-center gap-2">
+                      <span>调整事由: <strong>{latestLog.change_reason || "常规调整"}</strong></span>
+                      {Array.isArray(latestLog.changed_fields) && latestLog.changed_fields.length > 0 && (
+                        <span>
+                          (变更: {latestLog.changed_fields.map(f => `${f.label || f.field}: ${f.from ?? '-'}➔${f.to ?? '-'}`).join(", ")})
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* If already paid, display the status banner here */}
               {payouts[`${selectedPayslipEmp.emp.id}_${selectedMonth}`] && (
@@ -1450,11 +1542,11 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
 
                   {selectedPayslipEmp.emp.sourceType === '劳务派遣' && (
                     <div className="flex justify-between border-t border-dashed border-slate-200 pt-1.5 mt-1.5">
-                      <span className="text-teal-600 font-semibold">
-                        {lang === 'en' ? `Dispatch Commission (${selectedPayslipEmp.emp.dispatchCommissionRate ?? 0}% - Basic Pay):` : lang === 'th' ? `ค่าธรรมเนียมส่งตัว (${selectedPayslipEmp.emp.dispatchCommissionRate ?? 0}% - ฐานเงินเดือน):` : `派遣抽佣 (${selectedPayslipEmp.emp.dispatchCommissionRate ?? 0}% - 仅限基本薪资):`}
+                      <span className="text-rose-600 font-semibold">
+                        {lang === 'en' ? `Dispatch Commission (${selectedPayslipEmp.emp.dispatchCommissionRate ?? 0}% - Deduct):` : lang === 'th' ? `หักค่าบริการส่งตัว (${selectedPayslipEmp.emp.dispatchCommissionRate ?? 0}%):` : `派遣抽佣代扣 (${selectedPayslipEmp.emp.dispatchCommissionRate ?? 0}% - 仅限基本薪资):`}
                       </span>
-                      <span className="font-bold text-teal-600 text-right">
-                        + {formatCurrency(selectedPayslipEmp.serviceFee ?? 0, selectedPayslipEmp.emp.currency)}
+                      <span className="font-bold text-rose-600 text-right font-mono">
+                        - {formatCurrency(selectedPayslipEmp.serviceFee ?? 0, selectedPayslipEmp.emp.currency)}
                       </span>
                     </div>
                   )}
@@ -1476,7 +1568,27 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
               </div>
 
               {/* Handover physical action signature (used for pay out) */}
-              {!payouts[`${selectedPayslipEmp.emp.id}_${selectedMonth}`] && (
+              {payouts[`${selectedPayslipEmp.emp.id}_${selectedMonth}`] ? (
+                empConfirmations[`${selectedPayslipEmp.emp.id}_${selectedMonth}`] ? (
+                  <div className="bg-emerald-50/80 rounded-lg p-3 border border-emerald-200 flex items-center justify-between text-xs">
+                    <span className="text-emerald-800 font-semibold flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      {lang === 'en' ? "Receipt & Signature Record:" : lang === 'th' ? "บันทึกลายเซ็นผู้รับเงิน:" : "签收核销签名回执:"}
+                    </span>
+                    {empConfirmations[`${selectedPayslipEmp.emp.id}_${selectedMonth}`]?.startsWith("data:image/") ? (
+                      <img 
+                        src={empConfirmations[`${selectedPayslipEmp.emp.id}_${selectedMonth}`]} 
+                        alt="Signature" 
+                        className="h-8 max-w-[100px] object-contain border border-emerald-300 bg-white rounded px-1 -rotate-90"
+                      />
+                    ) : (
+                      <span className="font-bold text-emerald-900 bg-white px-2.5 py-1 rounded border border-emerald-200">
+                        ✍️ {empConfirmations[`${selectedPayslipEmp.emp.id}_${selectedMonth}`]}
+                      </span>
+                    )}
+                  </div>
+                ) : null
+              ) : (
                 <div className="bg-slate-50 rounded-lg p-3.5 border border-slate-200/60 space-y-3">
                   <div className="flex items-start gap-2.5">
                     <input
@@ -1492,15 +1604,15 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 mb-1">
+                    <Label className="block text-xs font-semibold text-slate-500 mb-1">
                       {lang === 'en' ? "Employee e-signature / HR Stamp to Settle:" : lang === 'th' ? "ลายเซ็นพนักงาน / ผู้ดูแลระบบลงชื่อยืนยัน:" : lang === 'zh-TW' ? "員工電子簽名/HR 簽章核銷:" : "员工电子签名/HR 签章核销:"}
-                    </label>
-                    <input
+                    </Label>
+                    <Input
                       type="text"
                       placeholder={lang === 'en' ? "Enter handler or employee signature (e.g. Jane / HR)" : lang === 'th' ? "ลงลายเซ็นผู้ทำรายการหรือพนักงาน (เช่น สมชาย / HR)" : lang === 'zh-TW' ? "輸入經辦人或員工簽名 (如: Thin Thin / HR)" : "输入经办人或员工签名 (如: Thin Thin / HR)"}
                       value={signName}
                       onChange={(e) => setSignName(e.target.value)}
-                      className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs placeholder-slate-400 outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent font-sans"
+                      className="w-full h-8 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs placeholder-slate-400 outline-none focus-visible:ring-2 focus-visible:ring-brand-500 font-sans"
                     />
                   </div>
                 </div>
@@ -1531,15 +1643,19 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
                   <button
                     type="button"
                     onClick={submitPayslipConfirm}
-                    disabled={!isCashPaid || !signName.trim()}
-                    className={`flex-1 py-2 text-white font-bold rounded-lg text-sm transition shadow-sm hover:shadow flex items-center justify-center gap-1 ${
-                      isCashPaid && signName.trim()
-                        ? 'bg-brand-600 hover:bg-brand-700' 
+                    disabled={!isCashPaid || !signName.trim() || isPayslipSubmitting}
+                    className={`flex-1 py-2 text-white font-bold rounded-lg text-sm transition shadow-sm hover:shadow flex items-center justify-center gap-1.5 ${
+                      isCashPaid && signName.trim() && !isPayslipSubmitting
+                        ? 'bg-brand-600 hover:bg-brand-700 cursor-pointer' 
                         : 'bg-slate-300 cursor-not-allowed'
                     }`}
                   >
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>{lang === 'en' ? "Confirm Payment" : lang === 'th' ? "ยืนยันการจ่ายเงิน" : lang === 'zh-TW' ? "確認發放薪資" : "确认发放薪资"}</span>
+                    {isPayslipSubmitting ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="w-4 h-4" />
+                    )}
+                    <span>{isPayslipSubmitting ? "正在发放..." : (lang === 'en' ? "Confirm Payment" : lang === 'th' ? "ยืนยันการจ่ายเงิน" : lang === 'zh-TW' ? "確認發放薪資" : "确认发放薪资")}</span>
                   </button>
                 </>
               )}
@@ -1551,8 +1667,18 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
 
       {/* Custom Confirmation Modal */}
       {confirmDialog.isOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-xl border border-slate-100 max-w-md w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+        <div 
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm cursor-pointer"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !isConfirmingDialog) {
+              setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+            }
+          }}
+        >
+          <div 
+            className="bg-white rounded-xl shadow-xl border border-slate-100 max-w-md w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150 cursor-default"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="p-6">
               <div className="flex items-start gap-4">
                 <div className={`p-2.5 rounded-full shrink-0 ${
@@ -1577,15 +1703,25 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
             <div className="bg-slate-50 px-6 py-4 flex justify-end gap-3 border-t border-slate-100">
               <button
                 type="button"
+                disabled={isConfirmingDialog}
                 onClick={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
-                className="px-4 py-2 text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg transition"
+                className="px-4 py-2 text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
               >
-                {confirmDialog.cancelText || "取消"}
+                {confirmDialog.cancelText || (lang === 'en' ? "Cancel" : lang === 'th' ? "ยกเลิก" : "取消")}
               </button>
               <button
                 type="button"
-                onClick={confirmDialog.onConfirm}
-                className={`px-4 py-2 text-sm font-semibold text-white rounded-lg transition shadow-sm hover:shadow ${
+                disabled={isConfirmingDialog}
+                onClick={async () => {
+                  if (isConfirmingDialog) return;
+                  setIsConfirmingDialog(true);
+                  try {
+                    await confirmDialog.onConfirm();
+                  } finally {
+                    setIsConfirmingDialog(false);
+                  }
+                }}
+                className={`px-4 py-2 text-sm font-semibold text-white rounded-lg transition shadow-sm hover:shadow flex items-center gap-1.5 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${
                   confirmDialog.type === 'danger'
                     ? 'bg-red-600 hover:bg-red-700'
                     : confirmDialog.type === 'warning'
@@ -1593,7 +1729,8 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
                       : 'bg-brand-600 hover:bg-brand-700'
                 }`}
               >
-                {confirmDialog.confirmText || "确定"}
+                {isConfirmingDialog && <Loader2 className="w-4 h-4 animate-spin" />}
+                <span>{isConfirmingDialog ? (lang === 'en' ? "Processing..." : lang === 'th' ? "กำลังดำเนินการ..." : "处理中...") : (confirmDialog.confirmText || (lang === 'en' ? "Confirm" : lang === 'th' ? "ยืนยัน" : "确定"))}</span>
               </button>
             </div>
           </div>

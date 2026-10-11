@@ -9,7 +9,8 @@ import {
   RefreshCw,
   Trash2,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Loader2
 } from "lucide-react";
 import { Button } from "../../ui/button";
 import {
@@ -70,6 +71,8 @@ export function ExpressImportDrawer(props: ExpressImportDrawerProps) {
   const [jntFileName, setJntFileName] = useState<string>("");
   const [showSystemText, setShowSystemText] = useState(false);
   const [showJntText, setShowJntText] = useState(false);
+  const [isParsingSystem, setIsParsingSystem] = useState(false);
+  const [isParsingJnt, setIsParsingJnt] = useState(false);
 
   const systemFileInputRef = useRef<HTMLInputElement>(null);
   const jntFileInputRef = useRef<HTMLInputElement>(null);
@@ -96,16 +99,26 @@ export function ExpressImportDrawer(props: ExpressImportDrawerProps) {
     }
   };
 
-  const handleSystemFileChange = (file: File | undefined) => {
-    if (!file) return;
+  const handleSystemFileChange = async (file: File | undefined) => {
+    if (!file || isParsingSystem) return;
     setSystemFileName(file.name);
-    onUploadFile(file, "system");
+    setIsParsingSystem(true);
+    try {
+      await onUploadFile(file, "system");
+    } finally {
+      setIsParsingSystem(false);
+    }
   };
 
-  const handleJntFileChange = (file: File | undefined) => {
-    if (!file) return;
+  const handleJntFileChange = async (file: File | undefined) => {
+    if (!file || isParsingJnt) return;
     setJntFileName(file.name);
-    onUploadFile(file, "jnt");
+    setIsParsingJnt(true);
+    try {
+      await onUploadFile(file, "jnt");
+    } finally {
+      setIsParsingJnt(false);
+    }
   };
 
   const clearSystemData = () => {
@@ -175,22 +188,32 @@ export function ExpressImportDrawer(props: ExpressImportDrawerProps) {
                 const file = e.dataTransfer.files?.[0];
                 if (file) handleSystemFileChange(file);
               }}
-              onClick={() => systemFileInputRef.current?.click()}
+              onClick={() => !isParsingSystem && systemFileInputRef.current?.click()}
               className={`border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center min-h-[170px] transition-all cursor-pointer select-none group ${
                 dragOverSystem
                   ? "border-brand-500 bg-brand-50/40 scale-[0.99]"
                   : "border-slate-200 hover:border-brand-400 bg-slate-50/50 hover:bg-slate-50/80"
-              }`}
+              } ${isParsingSystem ? "opacity-75 pointer-events-none" : ""}`}
             >
-              <div className="w-12 h-12 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 mb-3 group-hover:scale-110 transition-transform">
-                <FileSpreadsheet className="w-6 h-6" />
-              </div>
-              <p className="text-xs font-bold text-slate-700 mb-1">
-                点击上传 或 拖拽系统发货 Excel 文件到此处
-              </p>
-              <p className="text-[11px] text-slate-400">
-                支持 .xlsx / .xls / .csv（如客服系统导出的 order_*.xlsx）
-              </p>
+              {isParsingSystem ? (
+                <div className="flex flex-col items-center justify-center py-2">
+                  <Loader2 className="w-8 h-8 text-blue-600 animate-spin mb-2" />
+                  <p className="text-xs font-bold text-slate-700">正在解析发货表格...</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5 font-mono">{systemFileName}</p>
+                </div>
+              ) : (
+                <>
+                  <div className="w-12 h-12 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 mb-3 group-hover:scale-110 transition-transform">
+                    <FileSpreadsheet className="w-6 h-6" />
+                  </div>
+                  <p className="text-xs font-bold text-slate-700 mb-1">
+                    点击上传 或 拖拽系统发货 Excel 文件到此处
+                  </p>
+                  <p className="text-[11px] text-slate-400">
+                    支持 .xlsx / .xls / .csv（如客服系统导出的 order_*.xlsx）
+                  </p>
+                </>
+              )}
             </div>
           ) : (
             <div className="bg-blue-50/40 border border-blue-200/80 rounded-xl p-4 flex flex-col gap-3">
@@ -235,14 +258,16 @@ export function ExpressImportDrawer(props: ExpressImportDrawerProps) {
 
               {/* Collapsible raw preview / edit */}
               <div className="pt-2 border-t border-blue-100">
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   onClick={() => setShowSystemText(!showSystemText)}
-                  className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-700 font-medium cursor-pointer"
+                  className="h-6 px-1.5 flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-700 font-medium cursor-pointer"
                 >
                   {showSystemText ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                   <span>{showSystemText ? "收起明细文本" : "查看/编辑文本明细"}</span>
-                </button>
+                </Button>
                 {showSystemText && (
                   <textarea
                     value={systemPastedText}
@@ -326,22 +351,32 @@ export function ExpressImportDrawer(props: ExpressImportDrawerProps) {
                 const file = e.dataTransfer.files?.[0];
                 if (file) handleJntFileChange(file);
               }}
-              onClick={() => jntFileInputRef.current?.click()}
+              onClick={() => !isParsingJnt && jntFileInputRef.current?.click()}
               className={`border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center min-h-[170px] transition-all cursor-pointer select-none group ${
                 dragOverJnt
                   ? "border-orange-500 bg-orange-50/40 scale-[0.99]"
                   : "border-slate-200 hover:border-orange-400 bg-slate-50/50 hover:bg-slate-50/80"
-              }`}
+              } ${isParsingJnt ? "opacity-75 pointer-events-none" : ""}`}
             >
-              <div className="w-12 h-12 rounded-xl bg-orange-50 border border-orange-100 flex items-center justify-center text-orange-600 mb-3 group-hover:scale-110 transition-transform">
-                <FileSpreadsheet className="w-6 h-6" />
-              </div>
-              <p className="text-xs font-bold text-slate-700 mb-1">
-                点击上传 或 拖拽 J&T 官方账单 Excel 文件到此处
-              </p>
-              <p className="text-[11px] text-slate-400">
-                支持 .xlsx / .xls / .csv（如 J&T 月底账单 VIP8021*.xlsx）
-              </p>
+              {isParsingJnt ? (
+                <div className="flex flex-col items-center justify-center py-2">
+                  <Loader2 className="w-8 h-8 text-orange-600 animate-spin mb-2" />
+                  <p className="text-xs font-bold text-slate-700">正在解析官方账单...</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5 font-mono">{jntFileName}</p>
+                </div>
+              ) : (
+                <>
+                  <div className="w-12 h-12 rounded-xl bg-orange-50 border border-orange-100 flex items-center justify-center text-orange-600 mb-3 group-hover:scale-110 transition-transform">
+                    <FileSpreadsheet className="w-6 h-6" />
+                  </div>
+                  <p className="text-xs font-bold text-slate-700 mb-1">
+                    点击上传 或 拖拽 J&T 官方账单 Excel 文件到此处
+                  </p>
+                  <p className="text-[11px] text-slate-400">
+                    支持 .xlsx / .xls / .csv（如 J&T 月底账单 VIP8021*.xlsx）
+                  </p>
+                </>
+              )}
             </div>
           ) : (
             <div className="bg-orange-50/40 border border-orange-200/80 rounded-xl p-4 flex flex-col gap-3">
@@ -386,14 +421,16 @@ export function ExpressImportDrawer(props: ExpressImportDrawerProps) {
 
               {/* Collapsible raw preview / edit */}
               <div className="pt-2 border-t border-orange-100">
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   onClick={() => setShowJntText(!showJntText)}
-                  className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-700 font-medium cursor-pointer"
+                  className="h-6 px-1.5 flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-700 font-medium cursor-pointer"
                 >
                   {showJntText ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                   <span>{showJntText ? "收起明细文本" : "查看/编辑文本明细"}</span>
-                </button>
+                </Button>
                 {showJntText && (
                   <textarea
                     value={jntPastedText}

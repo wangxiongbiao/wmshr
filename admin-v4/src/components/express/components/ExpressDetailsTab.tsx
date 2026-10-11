@@ -1,21 +1,45 @@
-import React from "react";
-import { CheckCircle, AlertTriangle, AlertCircle, FileSpreadsheet } from "lucide-react";
+import React, { useState, useMemo, useEffect } from "react";
+import { CheckCircle, AlertTriangle, AlertCircle, FileSpreadsheet, ChevronLeft, ChevronRight } from "lucide-react";
 import { Badge } from "../../ui/badge";
 import { Button } from "../../ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../../ui/select";
 import { TableHorizontalScroller } from "../../TableHorizontalScroller";
 import { useStickyMirrorHeader } from "../../../lib/useStickyMirrorHeader";
 import { ReconciledItem, ExpressViewMode } from "../types";
-import { STATUS_CONFIG } from "../constants";
+import { STATUS_CONFIG, getCurrencyInfo } from "../constants";
 
 interface ExpressDetailsTabProps {
   records: ReconciledItem[];
   viewMode: ExpressViewMode;
   tableContainerRef: React.RefObject<HTMLDivElement | null>;
-  onLoadDemoData: () => void;
+  targetCurrency?: string;
 }
 
 export function ExpressDetailsTab(props: ExpressDetailsTabProps) {
-  const { records, viewMode, tableContainerRef, onLoadDemoData } = props;
+  const { records, viewMode, tableContainerRef, targetCurrency = "THB" } = props;
+  const curSymbol = getCurrencyInfo(targetCurrency).symbol;
+
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(50);
+
+  // 当外部筛选条件或数据变化时，重置回到第 1 页
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [records, viewMode]);
+
+  const totalPages = Math.max(1, Math.ceil(records.length / pageSize));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+
+  const paginatedRecords = useMemo(() => {
+    const start = (safeCurrentPage - 1) * pageSize;
+    return records.slice(start, start + pageSize);
+  }, [records, safeCurrentPage, pageSize]);
 
   const {
     mirrorHeaderRef,
@@ -29,7 +53,7 @@ export function ExpressDetailsTab(props: ExpressDetailsTabProps) {
     handleTableScroll,
   } = useStickyMirrorHeader({
     tableContainerRef,
-    deps: [records, viewMode],
+    deps: [paginatedRecords, viewMode],
   });
 
   if (records.length === 0) {
@@ -40,17 +64,6 @@ export function ExpressDetailsTab(props: ExpressDetailsTabProps) {
         <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
           请尝试调整上方搜索关键词、状态筛选或客户筛选条件。
         </p>
-        <div className="mt-4">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={onLoadDemoData}
-            className="text-xs gap-1.5 cursor-pointer"
-          >
-            加载演示对账数据
-          </Button>
-        </div>
       </div>
     );
   }
@@ -151,7 +164,7 @@ export function ExpressDetailsTab(props: ExpressDetailsTabProps) {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {records.map((rec, idx) => {
+              {paginatedRecords.map((rec, idx) => {
                 const statusCfg = STATUS_CONFIG[rec.status];
 
                 return (
@@ -190,13 +203,13 @@ export function ExpressDetailsTab(props: ExpressDetailsTabProps) {
                       {rec.weight > 0 ? `${rec.weight.toFixed(2)} kg` : "-"}
                     </td>
                     <td className="py-3 px-3.5 text-right font-mono font-bold text-slate-800">
-                      ฿{rec.jntFee.toFixed(2)}
+                      {curSymbol}{rec.jntFee.toFixed(2)}
                     </td>
                     <td className="py-3 px-3.5 text-right font-mono text-brand-600 font-medium">
-                      ฿{rec.surcharge.toFixed(2)}
+                      {curSymbol}{rec.surcharge.toFixed(2)}
                     </td>
                     <td className="py-3 px-3.5 text-right font-mono font-black text-slate-900 text-sm">
-                      ฿{rec.totalFee.toFixed(2)}
+                      {curSymbol}{rec.totalFee.toFixed(2)}
                     </td>
                     <td className="py-3 px-3.5 text-center">
                       <div className="inline-flex flex-col items-center gap-1">
@@ -290,7 +303,7 @@ export function ExpressDetailsTab(props: ExpressDetailsTabProps) {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-center">
-              {records.map((rec, idx) => {
+              {paginatedRecords.map((rec, idx) => {
                 const statusCfg = STATUS_CONFIG[rec.status];
 
                 return (
@@ -378,6 +391,70 @@ export function ExpressDetailsTab(props: ExpressDetailsTabProps) {
           </table>
         )}
       </div>
+
+      {/* 分页控制栏 */}
+      {records.length > 0 && (
+        <div className="px-4 py-3 bg-slate-50/70 border-t border-slate-200/80 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
+          <div className="flex items-center gap-2">
+            <span>
+              显示第 {(safeCurrentPage - 1) * pageSize + 1} 至{" "}
+              {Math.min(safeCurrentPage * pageSize, records.length)} 条，共{" "}
+              <strong className="font-mono text-slate-800">{records.length}</strong> 条记录
+            </span>
+            <span className="text-slate-300">|</span>
+            <div className="flex items-center gap-1.5">
+              <span>每页显示</span>
+              <Select
+                value={String(pageSize)}
+                onValueChange={(val) => {
+                  setPageSize(Number(val));
+                  setCurrentPage(1);
+                }}
+              >
+                <SelectTrigger className="h-7 w-[78px] text-xs px-2 bg-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="50">50 条</SelectItem>
+                  <SelectItem value="100">100 条</SelectItem>
+                  <SelectItem value="200">200 条</SelectItem>
+                  <SelectItem value="500">500 条</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs">
+              页码 <strong className="font-mono text-slate-800">{safeCurrentPage}</strong> / {totalPages}
+            </span>
+            <div className="flex items-center gap-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={safeCurrentPage <= 1}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                className="h-7 w-7 p-0 cursor-pointer"
+                title="上一页"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={safeCurrentPage >= totalPages}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                className="h-7 w-7 p-0 cursor-pointer"
+                title="下一页"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

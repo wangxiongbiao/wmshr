@@ -249,7 +249,7 @@ export function createInvoiceRouter({ express, directDbPool, supabase }) {
       let paramIdx = 3;
 
       if (keyword) {
-        conditions.push(`(invoice_no ILIKE $${paramIdx} OR customer_name ILIKE $${paramIdx} OR customer_id ILIKE $${paramIdx})`);
+        conditions.push(`(invoice_no ILIKE $${paramIdx} OR customer_name ILIKE $${paramIdx} OR customer_id ILIKE $${paramIdx} OR seller_name ILIKE $${paramIdx} OR id::text ILIKE $${paramIdx})`);
         params.push(`%${keyword}%`);
         paramIdx++;
       }
@@ -261,9 +261,17 @@ export function createInvoiceRouter({ express, directDbPool, supabase }) {
       }
 
       if (invoiceType && invoiceType !== "all") {
-        conditions.push(`invoice_type = $${paramIdx}`);
-        params.push(invoiceType);
-        paramIdx++;
+        if (invoiceType === "vat") {
+          conditions.push(`(invoice_type ILIKE '%专%' OR invoice_type ILIKE '%vat%')`);
+        } else if (invoiceType === "ordinary") {
+          conditions.push(`(invoice_type ILIKE '%普%' OR invoice_type ILIKE '%ordinary%')`);
+        } else if (invoiceType === "proforma") {
+          conditions.push(`(invoice_type ILIKE '%形%' OR invoice_type ILIKE '%proforma%')`);
+        } else {
+          conditions.push(`invoice_type = $${paramIdx}`);
+          params.push(invoiceType);
+          paramIdx++;
+        }
       }
 
       if (month && /^\d{4}-\d{2}$/.test(month)) {

@@ -180,6 +180,7 @@ export async function runDailyAttendanceMaintenance({
             id: empRow.id,
             name: empRow.name,
             status: leaveRec ? "休假" : empRow.status,
+            requiresAttendance: empRow.requires_attendance !== undefined && empRow.requires_attendance !== null ? Boolean(empRow.requires_attendance) : true,
             salaryType: empRow.salary_type || "fixed",
             baseMonthlyWage: empRow.fixed_salary,
             dailyWage:

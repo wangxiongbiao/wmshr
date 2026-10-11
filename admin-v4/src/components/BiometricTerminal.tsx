@@ -391,9 +391,9 @@ export const BiometricTerminal: React.FC<BiometricTerminalProps> = ({
                     : "bg-white border-slate-200 text-slate-700 hover:border-slate-300"
                 }`}
               >
-                <span className={`text-[8.5px] font-bold block uppercase tracking-wider ${attendanceStatusFilter === 'all' ? 'text-slate-300' : 'text-slate-400'}`}>总人数</span>
+                <span className={`text-[8.5px] font-bold block uppercase tracking-wider ${attendanceStatusFilter === 'all' ? 'text-slate-300' : 'text-slate-400'}`}>应到工</span>
                 <span className="text-xs font-black mt-0.5 block font-sans">
-                  {employees.filter(e => e.status !== "离职").length} <span className="text-[9px] font-normal">人</span>
+                  {employees.filter(e => e.status !== "离职" && e.requiresAttendance !== false).length} <span className="text-[9px] font-normal">人</span>
                 </span>
               </div>
               <div 
@@ -419,7 +419,7 @@ export const BiometricTerminal: React.FC<BiometricTerminalProps> = ({
               >
                 <span className={`text-[8.5px] font-bold block uppercase tracking-wider ${attendanceStatusFilter === 'not_punched' ? 'text-rose-100' : 'text-slate-400'}`}>未到工</span>
                 <span className="text-xs font-black mt-0.5 block font-sans">
-                  {employees.filter(e => e.status !== "离职").length - employees.filter(e => e.status !== "离职" && attendance.some(a => a.empId === e.id && a.date === simulatedDate && a.inTime)).length} <span className="text-[9px] font-normal">人</span>
+                  {Math.max(0, employees.filter(e => e.status !== "离职" && e.requiresAttendance !== false).length - employees.filter(e => e.status !== "离职" && e.requiresAttendance !== false && attendance.some(a => a.empId === e.id && a.date === simulatedDate && a.inTime)).length)} <span className="text-[9px] font-normal">人</span>
                 </span>
               </div>
             </div>
@@ -523,7 +523,7 @@ export const BiometricTerminal: React.FC<BiometricTerminalProps> = ({
                       if (attendanceStatusFilter === "punched") {
                         matchesStatus = !!todayPunch?.inTime;
                       } else if (attendanceStatusFilter === "not_punched") {
-                        matchesStatus = !todayPunch?.inTime;
+                        matchesStatus = !todayPunch?.inTime && e.requiresAttendance !== false;
                       }
                       return matchesDept && matchesSearch && matchesStatus;
                     });
@@ -679,12 +679,15 @@ export const BiometricTerminal: React.FC<BiometricTerminalProps> = ({
                   const isSelected = batchSelectedIds.includes(emp.id);
                   const isCompleted = todayPunch?.inTime && todayPunch?.outTime;
                   const isCheckedIn = todayPunch?.inTime && !todayPunch?.outTime;
+                  const isExempt = emp.requiresAttendance === false;
                   
                   const leftBarColor = isCompleted
                     ? "bg-emerald-500"
                     : isCheckedIn
                       ? "bg-amber-500"
-                      : "bg-slate-300";
+                      : isExempt
+                        ? "bg-sky-400"
+                        : "bg-slate-300";
 
                   const avatarGradients = [
                     "from-emerald-400 to-teal-500",
@@ -747,8 +750,11 @@ export const BiometricTerminal: React.FC<BiometricTerminalProps> = ({
                           <span className="text-xs font-black text-slate-800 truncate">{emp.name}</span>
                           <span className="text-[8px] font-bold text-slate-400 shrink-0">#{emp.id}</span>
                         </div>
-                        <div className="text-[9.5px] text-slate-400 font-semibold truncate">
-                          {emp.dept} · {emp.role}
+                        <div className="text-[9.5px] text-slate-400 font-semibold truncate flex items-center gap-1">
+                          <span>{emp.dept} · {emp.role}</span>
+                          {emp.requiresAttendance === false && (
+                            <span className="text-[8px] font-extrabold text-sky-600 bg-sky-50 px-1 py-0.2 rounded border border-sky-150">免打卡</span>
+                          )}
                         </div>
                         
                         {/* Time badges */}
@@ -756,6 +762,10 @@ export const BiometricTerminal: React.FC<BiometricTerminalProps> = ({
                           {todayPunch?.inTime ? (
                             <span className="inline-flex items-center gap-0.5 px-1 py-0.2 rounded bg-emerald-50 border border-emerald-100 text-emerald-700 text-[8.5px] font-extrabold font-mono leading-none">
                               签到 {todayPunch.inTime}
+                            </span>
+                          ) : emp.requiresAttendance === false ? (
+                            <span className="inline-flex items-center gap-0.5 px-1 py-0.2 rounded bg-sky-50 border border-sky-100 text-sky-700 text-[8.5px] font-extrabold font-mono leading-none">
+                              免打卡
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-0.5 px-1 py-0.2 rounded bg-slate-50 border border-slate-150 text-slate-400 text-[8.5px] font-bold font-mono leading-none">

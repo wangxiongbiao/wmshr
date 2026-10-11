@@ -1,0 +1,127 @@
+- generic [ref=f1e3]:
+  - complementary [ref=f1e4]:
+    - generic [ref=f1e5]: WMSHR
+    - navigation [ref=f1e10]:
+      - generic [ref=f1e11]:
+        - button "客户管理" [ref=f1e12] [cursor=pointer]
+        - button "客户列表" [ref=f1e21] [cursor=pointer]
+      - generic [ref=f1e26]:
+        - button "库存管理" [ref=f1e27] [cursor=pointer]
+        - generic [ref=f1e42]:
+          - button "订单列表" [ref=f1e43] [cursor=pointer]
+          - button "入库列表" [ref=f1e48] [cursor=pointer]
+          - button "商品列表" [ref=f1e54] [cursor=pointer]
+      - generic [ref=f1e60]:
+        - button "员工管理" [ref=f1e61] [cursor=pointer]
+        - generic [ref=f1e71]:
+          - button "数据看板" [ref=f1e72] [cursor=pointer]
+          - button "员工列表" [ref=f1e79] [cursor=pointer]
+          - button "考勤列表" [ref=f1e86] [cursor=pointer]
+          - button "请假列表" [ref=f1e91] [cursor=pointer]
+          - button "薪资列表" [ref=f1e95] [cursor=pointer]
+      - generic [ref=f1e100]:
+        - button "财务管理" [ref=f1e101] [cursor=pointer]
+        - generic [ref=f1e111]:
+          - button "报销列表" [ref=f1e112] [cursor=pointer]
+          - button "发票列表" [ref=f1e117] [cursor=pointer]
+          - button "快递列表" [ref=f1e122] [cursor=pointer]
+      - generic [ref=f1e129]:
+        - button "培训管理" [ref=f1e130] [cursor=pointer]
+        - button "培训列表" [ref=f1e139] [cursor=pointer]
+      - generic [ref=f1e144]:
+        - button "厨房管理" [ref=f1e145] [cursor=pointer]
+        - button "菜谱列表" [ref=f1e154] [cursor=pointer]
+      - generic [ref=f1e159]:
+        - button "移动协同" [ref=f1e160] [cursor=pointer]
+        - button "员工考勤APP" [ref=f1e168] [cursor=pointer]
+  - main [ref=f1e172]:
+    - generic [ref=f1e173]:
+      - heading "员工列表" [level=2] [ref=f1e180]
+      - generic [ref=f1e181]:
+        - button "🌐 简体中文" [ref=f1e183] [cursor=pointer]:
+          - generic [ref=f1e184]: 🌐
+          - generic [ref=f1e185]: 简体中文
+        - button "当前国家：🏳️ 未选择" [ref=f1e189] [cursor=pointer]
+        - generic [ref=f1e200]:
+          - generic [ref=f1e201]: 10:12:29
+          - generic [ref=f1e202]: 10月9日 周五
+        - generic [ref=f1e203]:
+          - generic [ref=f1e204]:
+            - generic [ref=f1e205]: 系
+            - generic [ref=f1e206]:
+              - generic [ref=f1e207]: 系统管理员 (Gary)
+              - generic [ref=f1e208]: 超管
+          - button "安全退出" [ref=f1e212] [cursor=pointer]
+    - generic [ref=f1e219]:
+      - generic [ref=f1e220]:
+        - generic [ref=f1e221]:
+          - textbox "搜索姓名、职位或区域..." [ref=f1e223]
+          - tablist [ref=f1e225]:
+            - tab "在职员工" [ref=f1e226] [cursor=pointer]
+            - tab "离职员工" [active] [selected] [ref=f1e227] [cursor=pointer]
+        - generic [ref=f1e228]:
+          - button "假期设置" [ref=f1e229] [cursor=pointer]
+          - button "考勤设置" [ref=f1e230] [cursor=pointer]
+          - button "刷新" [ref=f1e231] [cursor=pointer]
+          - button "新增员工" [ref=f1e232] [cursor=pointer]
+      - generic [ref=f1e1280] [cursor=pointer]:
+        - generic [ref=f1e1281]:
+          - button "查看详情" [ref=f1e1282]
+          - button "管理 APP 账号" [ref=f1e1283]
+          - button "编辑" [ref=f1e1284]
+          - button "删除" [ref=f1e1285]
+        - generic [ref=f1e1286]:
+          - generic [ref=f1e1287]: 真
+          - generic [ref=f1e1289]:
+            - heading "真实走查陈建国" [level=3] [ref=f1e1290]
+            - generic [ref=f1e1291]:
+              - generic "缅甸" [ref=f1e1292]: 🇲🇲
+              - generic [ref=f1e1293]: 缅甸
+              - generic [ref=f1e1294]: 🇹🇭 泰国仓
+              - generic [ref=f1e1295]: 女
+              - generic [ref=f1e1296]: 离职
+        - generic [ref=f1e1297]:
+          - generic [ref=f1e1298]:
+            - paragraph [ref=f1e1299]: 职位
+            - paragraph [ref=f1e1300]: 拣货员
+          - generic [ref=f1e1301]:
+            - paragraph [ref=f1e1302]: 区域
+            - paragraph [ref=f1e1303]: A区-分拣
+          - generic [ref=f1e1304]:
+            - paragraph [ref=f1e1305]: 时薪
+            - paragraph [ref=f1e1306]:
+              - generic "由基础月工资换算：(月薪/30)/8 小时" [ref=f1e1307]:
+                - text: ฿158.33
+                - generic [ref=f1e1308]: (折算)
+          - generic [ref=f1e1309]:
+            - paragraph [ref=f1e1310]: 薪资制
+            - paragraph [ref=f1e1311]: ฿38,000.00/月
+          - generic [ref=f1e1312]:
+            - paragraph [ref=f1e1313]: 用工性质
+            - paragraph [ref=f1e1314]: 自招员工
+          - generic [ref=f1e1315]:
+            - paragraph [ref=f1e1316]: 入职日期
+            - paragraph [ref=f1e1317]: 2026-10-09
+          - generic [ref=f1e1318]:
+            - paragraph [ref=f1e1319]: 全勤奖
+            - paragraph [ref=f1e1320]: ฿1,800.00
+          - generic [ref=f1e1321]:
+            - paragraph [ref=f1e1322]: 社保
+            - paragraph [ref=f1e1323]: ฿850.00
+      - navigation "分页导航" [ref=f1e1207]:
+        - generic [ref=f1e1208]:
+          - generic [ref=f1e1209]:
+            - text: 共
+            - strong [ref=f1e1210]: "1"
+            - text: 条
+          - generic [ref=f1e1211]: ，每页
+          - combobox [ref=f1e1212] [cursor=pointer]:
+            - option "10"
+            - option "20"
+            - option "50" [selected]
+            - option "100"
+          - generic [ref=f1e1213]: 条
+        - generic [ref=f1e1214]:
+          - button "上一页" [disabled] [ref=f1e1215]
+          - button "1" [ref=f1e1219] [cursor=pointer]
+          - button "下一页" [disabled] [ref=f1e1220]

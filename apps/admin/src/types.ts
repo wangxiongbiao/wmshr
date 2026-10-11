@@ -8,7 +8,7 @@ export type TabId = 'dashboard' | 'employees' | 'attendance' | 'leave' | 'payrol
 
 export type Gender = 'male' | 'female';
 
-export type CountryCode = 'MM' | 'TH' | 'CN' | 'VN' | 'KH' | 'PH' | 'ID' | 'LA';
+export type CountryCode = 'MM' | 'TH' | 'CN' | 'VN' | 'KH' | 'PH' | 'ID' | 'MY' | 'LA';
 
 export type SalaryType = 'fixed' | 'hourly';
 export type SalaryAdjustmentType = 'allowance' | 'deduction' | 'other';
@@ -17,11 +17,11 @@ export type PayrollReviewStatus = 'pending' | 'approved' | 'rejected';
 export type LeaveType = 'personal' | 'sick' | 'annual' | 'special';
 export type LeaveApprovalStatus = 'pending' | 'approved' | 'rejected';
 
-export type AttendanceType = 'normal' | 'late' | 'early' | 'absent' | 'leave' | 'sick_leave' | 'overtime';
+export type AttendanceType = 'normal' | 'exempt_present' | 'rest' | 'late' | 'early' | 'absent' | 'leave' | 'sick_leave' | 'overtime';
 
 export type AttendanceSource = 'manual' | 'device' | 'import' | 'system' | 'mobile';
 
-export type AttendanceCalculationStatus = 'pending' | 'checked_in' | 'normal' | 'leave' | 'sick_leave' | 'absent' | 'manual_adjusted' | 'exception';
+export type AttendanceCalculationStatus = 'pending' | 'checked_in' | 'normal' | 'exempt_present' | 'rest' | 'leave' | 'sick_leave' | 'absent' | 'manual_adjusted' | 'exception';
 
 export type EmployeeStatus = 'active' | 'on_leave' | 'probation' | 'resigned';
 
@@ -52,6 +52,7 @@ export interface Employee {
   phone: string;
   role: string;
   dept: string;
+  requiresAttendance?: boolean;
   attendanceRuleId: number;
   attendanceRuleName?: string;
   salaryType: SalaryType;

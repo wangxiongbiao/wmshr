@@ -134,11 +134,43 @@ export function calculateDailyMetrics({ emp, rec, date, config, holidays = [] })
   let type = "absent";
 
   const isEmpLeave = emp.status === "休假" || emp.status === "on_leave";
+  const requiresAttendance = emp.requiresAttendance !== undefined ? Boolean(emp.requiresAttendance) : (emp.requires_attendance !== undefined ? Boolean(emp.requires_attendance) : true);
 
   if (isEmpLeave) {
     type = "leave";
   } else if (!rec) {
-    type = "absent";
+    if (!requiresAttendance) {
+      // 免打卡员工未打卡：判断是否为周末或法定节假日
+      const dayOfWeek = date ? new Date(`${date}T00:00:00Z`).getUTCDay() : 1;
+      const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
+      const rawHolidayList = Array.isArray(config.holidayDates) && config.holidayDates.length > 0
+        ? config.holidayDates
+        : (Array.isArray(holidays) ? holidays : []);
+      const holidayDatesSet = new Set(
+        rawHolidayList
+          .map(h => {
+            if (typeof h === "string") return h.split("::")[0].trim();
+            return h?.date;
+          })
+          .filter(Boolean)
+      );
+      const isHoliday = date ? holidayDatesSet.has(date) : false;
+
+      if (isWeekend || isHoliday) {
+        type = "rest";
+      } else {
+        type = "exempt_present";
+        const standardHours = Number(config.standardHours || 8);
+        details = {
+          valid: roundToTwo(standardHours),
+          ot: 0,
+          raw: roundToTwo(standardHours),
+          breakDeduction: 0
+        };
+      }
+    } else {
+      type = "absent";
+    }
   } else {
     type = rec.type || "normal";
     if (rec.inTime && rec.outTime) {
@@ -154,8 +186,11 @@ export function calculateDailyMetrics({ emp, rec, date, config, holidays = [] })
         if (breakStartH !== null && breakEndH !== null) {
           breakDeduction = calculateOverlapHours(inH, outH < inH ? outH + 24 : outH, breakStartH, breakEndH);
         }
-        const valid = Math.max(0, diff - breakDeduction);
+        let valid = Math.max(0, diff - breakDeduction);
         const standardHours = Number(config.standardHours || 8);
+        if (!requiresAttendance) {
+          valid = Math.max(standardHours, valid);
+        }
         const ot = Math.max(0, valid - standardHours);
         details = {
           valid: roundToTwo(valid),
@@ -164,16 +199,26 @@ export function calculateDailyMetrics({ emp, rec, date, config, holidays = [] })
           breakDeduction: roundToTwo(breakDeduction)
         };
       }
+    } else if (!requiresAttendance) {
+      // 免打卡员工即使打卡记录不完整，也保底正常标准工时出勤
+      const standardHours = Number(config.standardHours || 8);
+      details = {
+        valid: roundToTwo(standardHours),
+        ot: 0,
+        raw: roundToTwo(standardHours),
+        breakDeduction: 0
+      };
+      if (type === "absent") type = "exempt_present";
     }
   }
 
-  const isAbsentOrLeave = isEmpLeave || !rec || type === "absent" || type === "leave" || type === "sick_leave";
+  const isAbsentOrLeave = isEmpLeave || type === "absent" || type === "leave" || type === "sick_leave" || type === "rest";
   if (isAbsentOrLeave) {
     details.valid = 0;
     details.ot = 0;
   }
   const salaryType = emp.salaryType || emp.salary_type || "fixed";
-  const baseMonthlyWage = Number(emp.baseMonthlyWage ?? emp.fixed_salary ?? 0);
+  const baseMonthlyWage = Number(emp.baseMonthlyWage ?? emp.fixedSalary ?? emp.fixed_salary ?? 0);
   const dailyWage = Number(emp.dailyWage ?? emp.daily_wage ?? 0);
   const hourlyRate = Number(emp.hourlyRate ?? emp.hourly_rate ?? 0);
   const standardHours = Number(config.standardHours || 8);
@@ -619,6 +664,7 @@ export function createAttendanceRouter({ express, supabase }) {
         id: empRow.id,
         name: empRow.name,
         status: empRow.status,
+        requiresAttendance: empRow.requires_attendance !== undefined && empRow.requires_attendance !== null ? Boolean(empRow.requires_attendance) : true,
         salaryType: empRow.salary_type,
         baseMonthlyWage: empRow.fixed_salary,
         dailyWage: empRow.daily_wage == null ? (empRow.fixed_salary != null ? Math.round(Number(empRow.fixed_salary) / 30) : null) : Number(empRow.daily_wage),
@@ -1282,6 +1328,7 @@ export function createAttendanceRouter({ express, supabase }) {
             id: empRow.id,
             name: empRow.name,
             status: empRow.status,
+            requiresAttendance: empRow.requires_attendance !== undefined && empRow.requires_attendance !== null ? Boolean(empRow.requires_attendance) : true,
             salaryType: empRow.salary_type,
             baseMonthlyWage: empRow.fixed_salary,
             dailyWage: empRow.daily_wage == null ? (empRow.fixed_salary != null ? Math.round(Number(empRow.fixed_salary) / 30) : null) : Number(empRow.daily_wage),
@@ -1467,6 +1514,7 @@ export function createAttendanceRouter({ express, supabase }) {
             country: emp.country || "MM",
             role: emp.role,
             dept: emp.dept,
+            requiresAttendance: emp.requires_attendance !== undefined && emp.requires_attendance !== null ? Boolean(emp.requires_attendance) : true,
             salaryType: emp.salary_type || "fixed",
             hourlyRate: emp.hourly_rate == null ? null : Number(emp.hourly_rate),
             baseMonthlyWage: emp.fixed_salary == null ? null : Number(emp.fixed_salary),

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Coins, Plus, Trash2, Search, Check } from "lucide-react";
+import { Coins, Plus, Trash2, Search, Check, Loader2, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -20,6 +20,7 @@ interface ExpressSurchargeModalProps {
   editingSurcharge?: { customerName: string; type: "piece" | "flat"; amount: number };
   onSaveSurcharge: (item: {
     customerName: string;
+    originalCustomerName?: string;
     type: "piece" | "flat";
     amount: number;
   }) => void;
@@ -43,8 +44,9 @@ export function ExpressSurchargeModal(props: ExpressSurchargeModalProps) {
   const [selectedCustomer, setSelectedCustomer] = useState<string>("");
   const [customCustomerInput, setCustomCustomerInput] = useState<string>("");
   const [surchargeType, setSurchargeType] = useState<"piece" | "flat">("piece");
-  const [amount, setAmount] = useState<number>(5);
+  const [amountStr, setAmountStr] = useState<string>("5");
   const [customerSearch, setCustomerSearch] = useState<string>("");
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   const effectiveCustomerName = customCustomerInput.trim() || selectedCustomer;
   const curInfo = getCustomerCurrency(effectiveCustomerName, customers);
@@ -62,40 +64,59 @@ export function ExpressSurchargeModal(props: ExpressSurchargeModalProps) {
     setCustomCustomerInput("");
     if (surcharges[name]) {
       setSurchargeType(surcharges[name].type);
-      setAmount(surcharges[name].amount);
+      setAmountStr(String(surcharges[name].amount));
     } else {
       setSurchargeType("piece");
-      setAmount(5);
+      setAmountStr("5");
     }
   };
 
-  
   useEffect(() => {
     if (isOpen) {
       if (editingSurcharge?.customerName) {
+        // 编辑模式：精准回显当前正在编辑的客户
         setSelectedCustomer(editingSurcharge.customerName);
         setCustomCustomerInput("");
         setSurchargeType(editingSurcharge.type);
-        setAmount(editingSurcharge.amount);
-      } else if (!selectedCustomer && uniqueCustomerNames.length > 0) {
-        handleSelectCustomer(uniqueCustomerNames[0]);
+        setAmountStr(String(editingSurcharge.amount));
+      } else {
+        // 新增模式：保持干净状态，绝不自动预选任何客户
+        setSelectedCustomer("");
+        setCustomCustomerInput("");
+        setSurchargeType("piece");
+        setAmountStr("5");
+        setCustomerSearch("");
       }
     }
   }, [isOpen, editingSurcharge]);
 
-
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!effectiveCustomerName) return;
-    onSaveSurcharge({
-      customerName: effectiveCustomerName,
-      type: surchargeType,
-      amount: Number(amount) || 0
-    });
+    if (!effectiveCustomerName || isSubmitting) return;
+    const parsedAmount = parseFloat(amountStr) || 0;
+    setIsSubmitting(true);
+    try {
+      await onSaveSurcharge({
+        customerName: effectiveCustomerName,
+        originalCustomerName: editingSurcharge?.customerName,
+        type: surchargeType,
+        amount: Math.max(0, parsedAmount)
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+    <Dialog
+      open={isOpen}
+      onOpenChange={(open) => {
+        if (!open) {
+          if (isSubmitting) return; // 提交期间锁定遮罩与 Esc，防止误触导致请求悬空
+          onClose();
+        }
+      }}
+    >
       <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto p-0 gap-0">
         <DialogHeader className="p-4 sm:p-5 border-b border-slate-100 bg-slate-50/50">
           <div className="flex items-center gap-2">
@@ -127,9 +148,21 @@ export function ExpressSurchargeModal(props: ExpressSurchargeModalProps) {
                 placeholder="搜索已有客户列表..."
                 value={customerSearch}
                 onChange={(e) => setCustomerSearch(e.target.value)}
-                className="h-8 text-xs pl-7 pr-2 bg-white"
+                className="h-8 text-xs pl-7 pr-7 bg-white"
               />
-              <Search className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Search className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              {customerSearch && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setCustomerSearch("")}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 h-5 w-5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 p-0 cursor-pointer"
+                  title="清空"
+                >
+                  <X className="w-3 h-3" />
+                </Button>
+              )}
             </div>
 
             {/* Customer Pills / List */}
@@ -163,7 +196,9 @@ export function ExpressSurchargeModal(props: ExpressSurchargeModalProps) {
                 })
               ) : (
                 <div className="p-3 text-center text-xs text-slate-400">
-                  未找到匹配客户
+                  {uniqueCustomerNames.length === 0
+                    ? "当前暂无发货客户数据，请在下方直接输入客户名称"
+                    : "未找到匹配客户"}
                 </div>
               )}
             </div>
@@ -190,35 +225,37 @@ export function ExpressSurchargeModal(props: ExpressSurchargeModalProps) {
               2. 加收额外操作费方式 <span className="text-rose-500">*</span>
             </label>
             <div className="grid grid-cols-2 gap-3">
-              <button
+              <Button
                 type="button"
+                variant="outline"
                 onClick={() => setSurchargeType("piece")}
-                className={`p-3 rounded-lg border text-center transition-all cursor-pointer ${
+                className={`h-auto p-3 rounded-lg border text-center transition-all cursor-pointer flex flex-col items-center justify-center gap-0.5 ${
                   surchargeType === "piece"
-                    ? "border-brand-600 bg-brand-50/70 text-brand-800 font-bold shadow-2xs"
+                    ? "border-brand-600 bg-brand-50/70 text-brand-800 font-bold shadow-2xs hover:bg-brand-50"
                     : "border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-medium"
                 }`}
               >
                 <div className="text-xs">按发货件数收取</div>
-                <div className="text-[10px] text-slate-400 mt-0.5">
+                <div className="text-[10px] text-slate-400 font-normal">
                   每发 1 单加收固定操作费
                 </div>
-              </button>
+              </Button>
 
-              <button
+              <Button
                 type="button"
+                variant="outline"
                 onClick={() => setSurchargeType("flat")}
-                className={`p-3 rounded-lg border text-center transition-all cursor-pointer ${
+                className={`h-auto p-3 rounded-lg border text-center transition-all cursor-pointer flex flex-col items-center justify-center gap-0.5 ${
                   surchargeType === "flat"
-                    ? "border-brand-600 bg-brand-50/70 text-brand-800 font-bold shadow-2xs"
+                    ? "border-brand-600 bg-brand-50/70 text-brand-800 font-bold shadow-2xs hover:bg-brand-50"
                     : "border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-medium"
                 }`}
               >
                 <div className="text-xs">固定打包金额</div>
-                <div className="text-[10px] text-slate-400 mt-0.5">
+                <div className="text-[10px] text-slate-400 font-normal">
                   按月统一加收一笔操作费
                 </div>
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -236,13 +273,13 @@ export function ExpressSurchargeModal(props: ExpressSurchargeModalProps) {
                 min="0"
                 step="0.01"
                 required
-                value={amount}
-                onChange={(e) => setAmount(parseFloat(e.target.value) || 0)}
-                className="h-9 text-xs pl-7 pr-16 bg-white font-mono font-bold"
+                value={amountStr}
+                onChange={(e) => setAmountStr(e.target.value)}
+                className="h-9 text-xs pl-7 pr-20 bg-white font-mono font-bold"
                 placeholder={surchargeType === "piece" ? "5.00" : "100.00"}
               />
               <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-mono">
-                {surchargeType === "piece" ? "元 / 件" : "元 / 月"}
+                {surchargeType === "piece" ? `${curInfo.symbol} / 件` : `${curInfo.symbol} / 月`}
               </span>
             </div>
           </div>
@@ -266,14 +303,16 @@ export function ExpressSurchargeModal(props: ExpressSurchargeModalProps) {
                       <span className="font-mono text-brand-700 font-semibold text-[11px]">
                         {sur.type === "piece" ? `${sur.amount}฿/件` : `${sur.amount}฿/月`}
                       </span>
-                      <button
+                      <Button
                         type="button"
+                        variant="ghost"
+                        size="icon"
                         onClick={() => onDeleteSurcharge(sur.customerName)}
-                        className="text-slate-400 hover:text-rose-600 p-0.5 cursor-pointer"
+                        className="h-5 w-5 text-slate-400 hover:text-rose-600 p-0 cursor-pointer"
                         title="删除该规则"
                       >
                         <Trash2 className="w-3 h-3" />
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 ))}
@@ -286,6 +325,7 @@ export function ExpressSurchargeModal(props: ExpressSurchargeModalProps) {
               type="button"
               variant="outline"
               size="sm"
+              disabled={isSubmitting}
               onClick={onClose}
               className="text-xs cursor-pointer"
             >
@@ -294,10 +334,17 @@ export function ExpressSurchargeModal(props: ExpressSurchargeModalProps) {
             <Button
               type="submit"
               size="sm"
-              disabled={!effectiveCustomerName}
-              className="text-xs cursor-pointer"
+              disabled={!effectiveCustomerName || isSubmitting}
+              className="text-xs cursor-pointer min-w-[80px]"
             >
-              保存配置
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />
+                  <span>保存中...</span>
+                </>
+              ) : (
+                <span>保存配置</span>
+              )}
             </Button>
           </DialogFooter>
         </form>

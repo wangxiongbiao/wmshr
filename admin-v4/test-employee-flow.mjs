@@ -3,16 +3,16 @@ import { readFile } from "node:fs/promises";
 
 const [app, list, modal, api, serverEmployees] = await Promise.all([
   readFile(new URL("./src/App.tsx", import.meta.url), "utf8"),
-  readFile(new URL("./src/components/EmployeeList.tsx", import.meta.url), "utf8"),
-  readFile(new URL("./src/components/Modals.tsx", import.meta.url), "utf8"),
+  readFile(new URL("./src/components/employee/components/EmployeeList.tsx", import.meta.url), "utf8"),
+  readFile(new URL("./src/components/employee/components/EmployeeModal.tsx", import.meta.url), "utf8"),
   readFile(new URL("./src/lib/employeeApi.ts", import.meta.url), "utf8"),
   readFile(new URL("../apps/admin/server-v4/employees.js", import.meta.url), "utf8")
 ]);
 
 // 1. Basic Boundary & Flow Assertions
-assert.match(app, /fetchEmployees\("active"/);
-assert.match(app, /fetchEmployees\("resigned"/);
-assert.match(list, /requestIdRef\.current/);
+assert.match(app, /fetchAllEmployees\("active"/);
+assert.match(app, /fetchAllEmployees\("resigned"/);
+assert.match(list, /useEmployeeList/);
 assert.ok(list.includes("<Pagination"));
 assert.match(app, /await (createEmployee|updateEmployee)/);
 assert.match(app, /await resignEmployee/);
@@ -181,5 +181,13 @@ assert.match(list, /currentWarehouseCode/);
 assert.doesNotMatch(list, /warehouseFilter === "ALL"/);
 assert.match(serverEmployees, /activeWarehouse && warehouseCode && warehouseCode !== activeWarehouse/);
 assert.match(serverEmployees, /targetWarehouse/);
+
+// 7. Role Attendance Checkbox & Default Punch Required Assertions
+assert.match(modal, /DEFAULT_ROLE_ATTENDANCE/);
+assert.match(modal, /handleToggleRoleAttendance/);
+assert.match(modal, /requiresAttendance/);
+assert.match(api, /requiresAttendance: employee\.requiresAttendance \?\? true/);
+assert.match(serverEmployees, /requires_attendance/);
+assert.match(serverEmployees, /requiresAttendance: row\.requires_attendance !== undefined && row\.requires_attendance !== null \? Boolean\(row\.requires_attendance\) : true/);
 
 console.log("admin-v4 employee flow & data closed-loop verification passed!");

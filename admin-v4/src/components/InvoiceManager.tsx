@@ -49,6 +49,7 @@ import {
 import { printElement } from "./invoice/utils/printInvoice";
 import { MonthPicker } from "./invoice/components/MonthPicker";
 import { InvoiceDetailCard } from "./invoice/components/InvoiceDetailCard";
+import { InvoiceFormWorkspace } from "./invoice/components/InvoiceFormWorkspace";
 import { Pagination } from "./Pagination";
 import { fetchInvoices, fetchInvoiceStats, createInvoice as apiCreateInvoice, updateInvoice as apiUpdateInvoice, deleteInvoice as apiDeleteInvoice } from "../lib/invoiceApi";
 import { TableHorizontalScroller } from "./TableHorizontalScroller";
@@ -77,10 +78,10 @@ export function InvoiceManager({ customers, addToast, lang, warehouseCode = "TH"
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [stats, setStats] = useState<InvoiceStatsData | null>(null);
 
-  // ????????????????????????
+  // 统计指标数据加载
   const loadStats = useCallback(async () => {
     try {
       const data = await fetchInvoiceStats(warehouseCode);
@@ -92,50 +93,68 @@ export function InvoiceManager({ customers, addToast, lang, warehouseCode = "TH"
     }
   }, [warehouseCode]);
 
-  // Invoices list state (先从本地恢复缓存，并立即通过云端接口拉取真实数据)
   // Invoices list state (默认初始为空列表，通过云端接口拉取当前租户真实发票数据)
   const [invoices, setInvoices] = useState<Invoice[]>([]);
-
-  // 清理旧版本残留的未隔离的本地发票缓存
-  useEffect(() => {
-    try {
-      localStorage.removeItem("wms_invoices");
-    } catch (e) {
-      console.error("Failed to clear legacy invoice cache:", e);
-    }
-  }, []);
+  const [totalCount, setTotalCount] = useState<number>(0);
 
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedKeyword, setDebouncedKeyword] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [dateFilter, setDateFilter] = useState("");
+
+  // Pagination state
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  // Debounce search query (300ms)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedKeyword(searchQuery.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   // Dialog & Active view states
   const [viewInvoice, setViewInvoice] = useState<Invoice | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
-  // 真实云端数据拉取
+  // 真实云端数据拉取 (服务端真分页与防抖竞态防护)
+  const abortControllerRef = useRef<AbortController | null>(null);
+
   const loadInvoices = useCallback(async (isManual = false) => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setIsLoading(true);
     if (isManual) setIsRefreshing(true);
     try {
       const res = await fetchInvoices({
-        page: 1,
-        pageSize: 200,
+        page,
+        pageSize,
         warehouseCode,
         status: statusFilter !== "all" ? statusFilter : undefined,
         invoiceType: typeFilter !== "all" ? typeFilter : undefined,
-        keyword: searchQuery.trim() || undefined,
-        month: dateFilter || undefined
+        keyword: debouncedKeyword || undefined,
+        month: dateFilter || undefined,
+        signal: controller.signal,
       });
       if (Array.isArray(res.items)) {
         setInvoices(res.items);
+        setTotalCount(res.total ?? res.items.length);
       }
       if (isManual) {
         addToast(lang === "en" ? "Refreshed invoices list from cloud" : "发票列表已从云端实时刷新", "success");
       }
     } catch (err: any) {
+      if (err.name === "AbortError") {
+        return;
+      }
       console.error("Failed to load invoices from API:", err);
       if (isManual) {
         addToast(err.message || "获取发票列表失败", "error");
@@ -144,7 +163,7 @@ export function InvoiceManager({ customers, addToast, lang, warehouseCode = "TH"
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [warehouseCode, statusFilter, typeFilter, searchQuery, dateFilter, lang, addToast]);
+  }, [page, pageSize, warehouseCode, statusFilter, typeFilter, debouncedKeyword, dateFilter, lang, addToast]);
 
   // 挂载及仓库切换时自动请求云端接口
   useEffect(() => {
@@ -157,10 +176,11 @@ export function InvoiceManager({ customers, addToast, lang, warehouseCode = "TH"
   };
 
   const handleDeleteInvoice = async (id: string) => {
-    setIsDeleting(true);
+    setDeletingId(id);
     try {
       await apiDeleteInvoice(id, warehouseCode);
       setInvoices((prev) => prev.filter((inv) => inv.id !== id));
+      setTotalCount((prev) => Math.max(0, prev - 1));
       setDeleteConfirmId(null);
       addToast(getInvoiceTrans("toast_deleted", lang), "success");
       loadInvoices();
@@ -169,11 +189,11 @@ export function InvoiceManager({ customers, addToast, lang, warehouseCode = "TH"
       console.error("Delete invoice failed:", err);
       addToast(err.message || "删除发票失败", "error");
     } finally {
-      setIsDeleting(false);
+      setDeletingId(null);
     }
   };
 
-  // Status statistics for Tabs badge counts (???????????????????/????????)
+  // 状态统计与 Badge 计数
   const statusCounts = useMemo(() => {
     if (stats) {
       return {
@@ -194,52 +214,20 @@ export function InvoiceManager({ customers, addToast, lang, warehouseCode = "TH"
     return counts;
   }, [stats, invoices]);
 
-  // Filtered invoices list
-  const filteredInvoices = useMemo(() => {
-    return invoices.filter((inv) => {
-      const searchStr = searchQuery.toLowerCase();
-      const matchSearch =
-        inv.invoiceNo.toLowerCase().includes(searchStr) ||
-        inv.customerName.toLowerCase().includes(searchStr) ||
-        inv.id.toLowerCase().includes(searchStr);
-
-      const matchType =
-        typeFilter === "all" ||
-        inv.invoiceType === typeFilter ||
-        (typeFilter === "vat" && (inv.invoiceType?.includes("专") || inv.invoiceType?.toLowerCase().includes("vat"))) ||
-        (typeFilter === "ordinary" && (inv.invoiceType?.includes("普") || inv.invoiceType === "ordinary")) ||
-        (typeFilter === "proforma" && (inv.invoiceType?.includes("形") || inv.invoiceType?.toLowerCase().includes("proforma")));
-      const matchStatus = statusFilter === "all" || inv.status === statusFilter;
-      const matchDate = !dateFilter || inv.issueDate.startsWith(dateFilter);
-
-      return matchSearch && matchType && matchStatus && matchDate;
-    });
-  }, [invoices, searchQuery, typeFilter, statusFilter, dateFilter]);
+  // Reset page to 1 on filter changes
+  useEffect(() => {
+    setPage(1);
+  }, [typeFilter, statusFilter, dateFilter]);
 
   // Table horizontal scroller ref
   const tableContainerRef = useRef<HTMLDivElement>(null);
 
-  // Pagination state
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
-
-  // Reset page to 1 on filter or search changes
-  useEffect(() => {
-    setPage(1);
-  }, [searchQuery, typeFilter, statusFilter, dateFilter]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredInvoices.length / pageSize));
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   useEffect(() => {
     if (page > totalPages) {
       setPage(1);
     }
   }, [totalPages, page]);
-
-  // Paginated invoices slice
-  const pagedInvoices = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return filteredInvoices.slice(start, start + pageSize);
-  }, [filteredInvoices, page, pageSize]);
 
   const {
     mirrorHeaderRef,
@@ -253,7 +241,7 @@ export function InvoiceManager({ customers, addToast, lang, warehouseCode = "TH"
     handleTableScroll,
   } = useStickyMirrorHeader({
     tableContainerRef,
-    deps: [pagedInvoices, isRefreshing],
+    deps: [invoices, isRefreshing],
   });
 
   const handlePrintView = () => {
@@ -1127,7 +1115,7 @@ export function InvoiceManager({ customers, addToast, lang, warehouseCode = "TH"
               <div ref={actionBarRef} className="px-4 py-3 flex justify-between items-center">
                 <h3 className="font-semibold text-slate-800 text-sm flex items-center gap-2">
                   <span>{lang === "en" ? "Invoice List" : lang === "th" ? "รายการใบแจ้งหนี้" : "发票列表"}</span>
-                  <span className="text-xs font-normal text-slate-400">（共 {filteredInvoices.length} 条）</span>
+                  <span className="text-xs font-normal text-slate-400">（共 {totalCount} 条）</span>
                 </h3>
                 <div className="flex items-center gap-2">
                   <TableHorizontalScroller targetRef={tableContainerRef} alwaysShow={true} />
@@ -1177,7 +1165,7 @@ export function InvoiceManager({ customers, addToast, lang, warehouseCode = "TH"
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs text-slate-700">
-                  {isRefreshing ? (
+                  {isLoading || isRefreshing ? (
                     <tr>
                       <td colSpan={8} className="py-16 text-center text-slate-400 font-medium">
                         <div className="flex flex-col items-center justify-center gap-2">
@@ -1188,7 +1176,7 @@ export function InvoiceManager({ customers, addToast, lang, warehouseCode = "TH"
                         </div>
                       </td>
                     </tr>
-                  ) : filteredInvoices.length === 0 ? (
+                  ) : invoices.length === 0 ? (
                     <tr>
                       <td colSpan={8} className="py-12 text-center text-slate-400 font-bold">
                         <div className="flex flex-col items-center justify-center space-y-2">
@@ -1214,7 +1202,7 @@ export function InvoiceManager({ customers, addToast, lang, warehouseCode = "TH"
                       </td>
                     </tr>
                   ) : (
-                    pagedInvoices.map((inv) => (
+                    invoices.map((inv) => (
                       <tr key={inv.id} className="hover:bg-slate-50/60 transition">
                         <td className="px-3.5 py-3 font-mono font-bold text-slate-900">{inv.invoiceNo}</td>
                         <td className="px-3 py-3 font-medium text-slate-800 truncate max-w-[180px]" title={inv.sellerName}>{inv.sellerName}</td>
@@ -1264,11 +1252,16 @@ export function InvoiceManager({ customers, addToast, lang, warehouseCode = "TH"
                               type="button"
                               variant="ghost"
                               size="icon"
+                              disabled={deletingId === inv.id}
                               onClick={() => setDeleteConfirmId(inv.id)}
                               className="h-7 w-7 text-slate-400 hover:text-rose-600 hover:bg-rose-50"
                               title={getInvoiceTrans("btn_delete", lang)}
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              {deletingId === inv.id ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-500" />
+                              ) : (
+                                <Trash2 className="w-3.5 h-3.5" />
+                              )}
                             </Button>
                           </div>
                         </td>
@@ -1284,13 +1277,13 @@ export function InvoiceManager({ customers, addToast, lang, warehouseCode = "TH"
               <div className="px-4 py-3 border-t border-slate-200/80 bg-slate-50/50 flex items-center justify-between">
                 <span className="text-xs text-slate-500">
                   {lang === "en"
-                    ? `Showing ${(page - 1) * pageSize + 1} to ${Math.min(page * pageSize, filteredInvoices.length)} of ${filteredInvoices.length} invoices`
-                    : `显示第 ${(page - 1) * pageSize + 1} 至 ${Math.min(page * pageSize, filteredInvoices.length)} 条，共 ${filteredInvoices.length} 条发票`}
+                    ? `Showing ${(page - 1) * pageSize + 1} to ${Math.min(page * pageSize, totalCount)} of ${totalCount} invoices`
+                    : `显示第 ${(page - 1) * pageSize + 1} 至 ${Math.min(page * pageSize, totalCount)} 条，共 ${totalCount} 条发票`}
                 </span>
                 <Pagination
                   page={page}
                   pageSize={pageSize}
-                  total={filteredInvoices.length}
+                  total={totalCount}
                   onPageChange={setPage}
                 />
               </div>
@@ -1368,6 +1361,7 @@ export function InvoiceManager({ customers, addToast, lang, warehouseCode = "TH"
                 <Button
                   type="button"
                   variant="outline"
+                  disabled={Boolean(deletingId)}
                   onClick={() => setDeleteConfirmId(null)}
                   className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-extrabold"
                 >
@@ -1375,14 +1369,16 @@ export function InvoiceManager({ customers, addToast, lang, warehouseCode = "TH"
                 </Button>
                 <Button
                   type="button"
+                  disabled={Boolean(deletingId)}
                   onClick={() => {
                     if (deleteConfirmId) {
                       handleDeleteInvoice(deleteConfirmId);
                     }
                   }}
-                  className="py-2.5 px-4 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-extrabold shadow-md shadow-brand-500/15"
+                  className="py-2.5 px-4 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-extrabold shadow-md shadow-brand-500/15 flex items-center justify-center gap-1.5"
                 >
-                  {lang === "en" ? "Confirm" : lang === "th" ? "ยืนยันการลบ" : "确认删除"}
+                  {deletingId && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  <span>{lang === "en" ? "Confirm" : lang === "th" ? "ยืนยันการลบ" : "确认删除"}</span>
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -1392,1262 +1388,103 @@ export function InvoiceManager({ customers, addToast, lang, warehouseCode = "TH"
 
       {/* CREATE & EDIT WORKSPACE (Double Column Split Screen with Live Real-time Preview) */}
       {isFormOpen && (
-        <div className="bg-white w-full rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden h-[calc(100vh-8.5rem)] min-h-[650px]">
-            
-            {/* Split Screen Header */}
-            <div className="px-6 py-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-50/80">
-              <div className="flex items-center gap-3.5">
-                <button
-                  type="button"
-                  onClick={() => setIsFormOpen(false)}
-                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-600 hover:text-slate-950 hover:bg-slate-100 border border-slate-200 rounded-xl transition cursor-pointer shadow-3xs"
-                >
-                  <ArrowLeft className="w-3.5 h-3.5" />
-                  {getInvoiceTrans("back_to_list", lang)}
-                </button>
-                <div className="h-6 w-[1px] bg-slate-200 hidden sm:block" />
-                <div>
-                  <h3 className="font-extrabold text-slate-900 text-base flex items-center gap-2">
-                    {editingInvoice ? (
-                      <>
-                        <FileSignature className="w-5 h-5 text-brand-600" />
-                        {getInvoiceTrans("workspace_title_edit", lang)}
-                      </>
-                    ) : (
-                      <>
-                        <Plus className="w-5 h-5 text-brand-600" />
-                        {getInvoiceTrans("workspace_title_create", lang)}
-                      </>
-                    )}
-                  </h3>
-                </div>
-              </div>
-
-              {/* Action buttons */}
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  disabled={isSaving} onClick={handleSaveInvoice}
-                  className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-xl text-xs font-black shadow-xs hover:shadow-md transition duration-200 cursor-pointer flex items-center gap-1.5"
-                >
-                  <Check className="w-3.5 h-3.5" />
-                  {getInvoiceTrans("save_and_ledger", lang)}
-                </button>
-
-                {/* Print from preview inside modal */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    printElement("modal-live-preview-pane", `Invoice - ${formInvoiceNo || "PDF"}`);
-                  }}
-                  className="hidden md:flex bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-xl text-xs font-bold transition items-center gap-1.5 cursor-pointer"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  {getInvoiceTrans("print_current", lang)}
-                </button>
-              </div>
-            </div>
-
-            {/* Mobile View Toggle Tabs */}
-            <div className="flex md:hidden border-b border-slate-100 bg-slate-50 text-xs font-bold text-center">
-              <button
-                type="button"
-                onClick={() => setMobileEditorTab("edit")}
-                className={cn(
-                  "flex-1 py-3 border-b-2 transition",
-                  mobileEditorTab === "edit" ? "border-brand-500 text-brand-600 bg-white" : "border-transparent text-slate-500"
-                )}
-              >
-                {getInvoiceTrans("form_tab_edit", lang)}
-              </button>
-              <button
-                type="button"
-                onClick={() => setMobileEditorTab("preview")}
-                className={cn(
-                  "flex-1 py-3 border-b-2 transition",
-                  mobileEditorTab === "preview" ? "border-brand-500 text-brand-600 bg-white" : "border-transparent text-slate-500"
-                )}
-              >
-                {getInvoiceTrans("form_tab_preview", lang)}
-              </button>
-            </div>
-
-            {/* Main Split Screen Container */}
-            <div className="flex-1 grid grid-cols-1 md:grid-cols-12 overflow-hidden bg-slate-100/50">
-              
-              {/* LEFT COLUMN: Inputs Editor (Scrollable) */}
-              <div className={cn(
-                "col-span-12 md:col-span-6 lg:col-span-5 h-full overflow-y-auto p-6 space-y-6 bg-white border-r border-slate-200",
-                mobileEditorTab === "edit" ? "block" : "hidden md:block"
-              )}>
-                
-
-
-                {/* Panel Section 1: Basis Settings */}
-                <div className="space-y-4">
-                  <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider border-l-3 border-brand-500 pl-2">
-                    {getInvoiceTrans("sec_meta", lang)}
-                  </h4>
-                  
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {/* Invoice No */}
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-slate-500 flex items-center justify-between">
-                        <span>{getInvoiceTrans("invoice_num_lbl", lang)}</span>
-                        <button
-                          type="button"
-                          onClick={handleGenerateInvoiceNo}
-                          className="text-[9px] text-brand-600 hover:text-brand-700 font-bold cursor-pointer"
-                        >
-                          {getInvoiceTrans("random_btn", lang)}
-                        </button>
-                      </label>
-                      <input
-                        type="text"
-                        value={formInvoiceNo}
-                        onChange={(e) => setFormInvoiceNo(e.target.value)}
-                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 outline-none focus:bg-white focus:border-brand-500 transition"
-                      />
-                    </div>
-
-                    {/* Invoice Type */}
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-slate-500">{getInvoiceTrans("invoice_type_lbl", lang)}</label>
-                      <input
-                        type="text"
-                        value={formInvoiceType}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setFormInvoiceType(val);
-                          if (val.toLowerCase().includes("形式") || val.toLowerCase().includes("proforma")) {
-                            setFormTaxRate(0);
-                          }
-                        }}
-                        placeholder={getInvoiceTrans("invoice_type_placeholder", lang)}
-                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 outline-none focus:bg-white focus:border-brand-500 transition"
-                      />
-                    </div>
-
-                    {/* Issue Date */}
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-slate-500">{getInvoiceTrans("issue_due_dates_lbl", lang)}</label>
-                      <DatePicker
-                        value={formIssueDate}
-                        onChange={(val) => setFormIssueDate(val)}
-                        lang={lang}
-                        placeholder={lang === 'en' ? 'YYYY/MM/DD' : '年 / 月 / 日'}
-                      />
-                    </div>
-
-                    {/* Due Date */}
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-slate-500">{getInvoiceTrans("due_date_lbl_form", lang)}</label>
-                      <DatePicker
-                        value={formDueDate}
-                        onChange={(val) => setFormDueDate(val)}
-                        lang={lang}
-                        placeholder={lang === 'en' ? 'YYYY/MM/DD' : '年 / 月 / 日'}
-                      />
-                    </div>
-
-                    {/* Tax Rate */}
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-slate-500">
-                        {getInvoiceTrans("tax_rate_lbl", lang)} {(formInvoiceType === "proforma" || formInvoiceType?.toLowerCase().includes("形式") || formInvoiceType?.toLowerCase().includes("proforma")) && getInvoiceTrans("tax_free_proforma", lang)}
-                      </label>
-                      <input
-                        type="number"
-                        disabled={formInvoiceType === "proforma" || formInvoiceType?.toLowerCase().includes("形式") || formInvoiceType?.toLowerCase().includes("proforma")}
-                        value={formTaxRate}
-                        onChange={(e) => setFormTaxRate(Number(e.target.value))}
-                        min={0}
-                        max={100}
-                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 outline-none focus:bg-white focus:border-brand-500 disabled:opacity-50 transition"
-                      />
-                    </div>
-
-                    {/* Settlement Currency */}
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-slate-500">{getInvoiceTrans("currency_settle_lbl", lang)}</label>
-                      <select
-                        value={formCurrency}
-                        onChange={(e) => setFormCurrency(e.target.value)}
-                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 outline-none focus:bg-white focus:border-brand-500 transition"
-                      >
-                        <option value="CNY">{getInvoiceTrans("cur_option_cny", lang)}</option>
-                        <option value="THB">{getInvoiceTrans("cur_option_thb", lang)}</option>
-                        <option value="USD">{getInvoiceTrans("cur_option_usd", lang)}</option>
-                        <option value="EUR">{getInvoiceTrans("cur_option_eur", lang)}</option>
-                      </select>
-                    </div>
-
-                  </div>
-                </div>
-
-                {/* Panel Section 2: Seller Custom Block */}
-                <div className="space-y-4 border-t border-slate-100 pt-5">
-                  <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider border-l-3 border-emerald-500 pl-2">
-                    {getInvoiceTrans("sec_seller", lang)}
-                  </h4>
-
-                  {/* Seller Logo Uploading */}
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-slate-500">{getInvoiceTrans("logo_seller_lbl", lang)}</label>
-                    <div className="flex items-center gap-3 flex-wrap">
-                      <button
-                        type="button"
-                        onClick={() => document.getElementById('seller-logo-file-input')?.click()}
-                        className="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-3xs h-8"
-                      >
-                        <Upload className="w-3.5 h-3.5 text-slate-500" />
-                        <span>{getInvoiceTrans("select_file_btn", lang)}</span>
-                      </button>
-                      <input
-                        type="file"
-                        id="seller-logo-file-input"
-                        className="hidden"
-                        accept="image/*"
-                        onChange={(e) => handleLogoUpload(e, true)}
-                      />
-                      {formSellerLogo && (
-                        <div className="flex items-center gap-2">
-                          <div className="relative h-8 w-12 border border-slate-200 rounded-md overflow-hidden bg-white">
-                            <img src={formSellerLogo} className="h-full w-full object-contain" referrerPolicy="no-referrer" />
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleClearLogo(true)}
-                            className="text-xs font-bold text-rose-500 hover:text-rose-600 hover:bg-rose-50 px-2 py-1 rounded-md transition cursor-pointer"
-                          >
-                            {lang === "zh-CN" || lang === "zh-TW" ? "删除" : "Remove"}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Seller fields inputs */}
-                  <div className="space-y-3">
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-slate-500">{getInvoiceTrans("seller_name_input", lang)}</label>
-                      <input
-                        type="text"
-                        value={formSellerName}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setFormSellerName(val);
-                          localStorage.setItem("last_formSellerName", val);
-                        }}
-                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 outline-none focus:bg-white focus:border-brand-500 transition"
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <label className="text-[11px] font-bold text-slate-500">{getInvoiceTrans("seller_tax_input", lang)}</label>
-                        <input
-                          type="text"
-                          value={formSellerTaxNo}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setFormSellerTaxNo(val);
-                            localStorage.setItem("last_formSellerTaxNo", val);
-                          }}
-                          className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 outline-none focus:bg-white focus:border-brand-500 transition"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[11px] font-bold text-slate-500">{getInvoiceTrans("seller_contact_input", lang)}</label>
-                        <input
-                          type="text"
-                          value={formSellerContact}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setFormSellerContact(val);
-                            localStorage.setItem("last_formSellerContact", val);
-                          }}
-                          className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 outline-none focus:bg-white focus:border-brand-500 transition"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <label className="text-[11px] font-bold text-slate-500">{getInvoiceTrans("seller_address_input", lang)}</label>
-                        <input
-                          type="text"
-                          value={formSellerAddress}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setFormSellerAddress(val);
-                            localStorage.setItem("last_formSellerAddress", val);
-                          }}
-                          className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 outline-none focus:bg-white focus:border-brand-500 transition"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[11px] font-bold text-slate-500">{getInvoiceTrans("seller_phone_input", lang)}</label>
-                        <input
-                          type="text"
-                          value={formSellerPhone}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setFormSellerPhone(val);
-                            localStorage.setItem("last_formSellerPhone", val);
-                          }}
-                          className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 outline-none focus:bg-white focus:border-brand-500 transition"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <label className="text-[11px] font-bold text-slate-500">{getInvoiceTrans("seller_bank_input", lang)}</label>
-                        <input
-                          type="text"
-                          value={formSellerBankName}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setFormSellerBankName(val);
-                            localStorage.setItem("last_formSellerBankName", val);
-                          }}
-                          className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 outline-none focus:bg-white focus:border-brand-500 transition"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[11px] font-bold text-slate-500">{getInvoiceTrans("seller_account_input", lang)}</label>
-                        <input
-                          type="text"
-                          value={formSellerBankAccount}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setFormSellerBankAccount(val);
-                            localStorage.setItem("last_formSellerBankAccount", val);
-                          }}
-                          className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 outline-none focus:bg-white focus:border-brand-500 transition"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Seller Signature & Stamp Section */}
-                    <div className="space-y-2 border-t border-slate-100 pt-4">
-                      <label className="text-[11px] font-bold text-slate-500 block">
-                        {lang === "zh-CN" || lang === "zh-TW" ? "开票人签名与印章" : "Seller Signature & Stamp"}
-                      </label>
-                      
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {/* Digital Signature Pad */}
-                        <div className="space-y-2 p-3 bg-slate-50/50 rounded-xl border border-slate-200 flex flex-col justify-between">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[11px] font-extrabold text-slate-700 flex items-center gap-1">
-                              <FileSignature className="w-3.5 h-3.5 text-brand-600" />
-                              {lang === "zh-CN" || lang === "zh-TW" ? "在线手写签名" : "Draw Digital Signature"}
-                            </span>
-                          </div>
-
-                          {formSellerSignature ? (
-                            <div className="space-y-2">
-                              <div 
-                                onClick={() => setIsSigModalOpen(true)}
-                                className="relative bg-white border border-slate-200 rounded-lg overflow-hidden h-28 flex items-center justify-center cursor-pointer hover:border-brand-400 group transition shadow-3xs"
-                                title={lang === "zh-CN" || lang === "zh-TW" ? "点击重新手写签名" : "Click to redraw signature"}
-                              >
-                                <img src={formSellerSignature} className="max-h-24 max-w-full object-contain p-2 transition-transform group-hover:scale-105" alt="Current Signature" referrerPolicy="no-referrer" />
-                                <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition text-white text-[10px] font-bold gap-1">
-                                  <FileSignature className="w-3.5 h-3.5" />
-                                  <span>{lang === "zh-CN" || lang === "zh-TW" ? "点击重新手写" : "Click to redraw"}</span>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center justify-end gap-2">
-                                {(formSigX !== 0 || formSigY !== 0) && (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setFormSigX(0);
-                                      setFormSigY(0);
-                                    }}
-                                    className="px-2 py-1 text-[10px] font-extrabold text-indigo-600 hover:bg-indigo-50 rounded-md border border-indigo-200 transition cursor-pointer flex items-center gap-1"
-                                    title={lang === "zh-CN" || lang === "zh-TW" ? "重置签名在预览中的拖拽位置" : "Reset drag position"}
-                                  >
-                                    <Move className="w-3 h-3" />
-                                    {lang === "zh-CN" || lang === "zh-TW" ? "重置位置" : "Reset Pos"}
-                                  </button>
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={() => document.getElementById('prewritten-signature-upload-input')?.click()}
-                                  className="px-2 py-1 text-[10px] font-extrabold text-brand-700 hover:bg-brand-50 rounded-md border border-brand-200 transition cursor-pointer flex items-center gap-1"
-                                >
-                                  <Upload className="w-3 h-3" />
-                                  {lang === "zh-CN" || lang === "zh-TW" ? "重新上传图片" : "Upload File"}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setFormSellerSignature("")}
-                                  className="px-2 py-1 text-[10px] font-extrabold text-rose-500 hover:bg-rose-50 rounded-md border border-rose-200 transition cursor-pointer flex items-center gap-1"
-                                >
-                                  <Trash2 className="w-3 h-3" />
-                                  {lang === "zh-CN" || lang === "zh-TW" ? "清除" : "Clear"}
-                                </button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="space-y-2">
-                              {/* Large Clickable Area */}
-                              <div 
-                                onClick={() => setIsSigModalOpen(true)}
-                                className="border-2 border-dashed border-slate-200 hover:border-brand-500 bg-white rounded-lg h-28 flex flex-col items-center justify-center gap-1 text-center cursor-pointer transition p-3 hover:bg-brand-50/10 group shadow-3xs"
-                              >
-                                <div className="p-2 rounded-full bg-brand-50 text-brand-600 group-hover:bg-brand-100 transition">
-                                  <FileSignature className="w-5 h-5 animate-pulse" />
-                                </div>
-                                <span className="text-[11px] font-black text-slate-700">
-                                  {lang === "zh-CN" || lang === "zh-TW" ? "点击此处开始在线手写签名" : "Click here to draw signature"}
-                                </span>
-                                <span className="text-[9px] text-slate-400 font-bold">
-                                  {lang === "zh-CN" || lang === "zh-TW" ? "(弹窗放大，支持鼠标/移动触屏书写)" : "(Pops up enlarged drawing window)"}
-                                </span>
-                              </div>
-
-                              <div className="flex justify-center">
-                                <button
-                                  type="button"
-                                  onClick={() => document.getElementById('prewritten-signature-upload-input')?.click()}
-                                  className="px-3 py-1 text-[10px] font-bold text-slate-650 hover:text-slate-800 bg-white hover:bg-slate-100 rounded-lg border border-slate-200 transition cursor-pointer flex items-center gap-1.5 shadow-3xs"
-                                >
-                                  <Upload className="w-3.5 h-3.5 text-brand-600" />
-                                  <span>{lang === "zh-CN" || lang === "zh-TW" ? "直接上传提前写好的签名图片" : "Upload Pre-written Signature Image"}</span>
-                                </button>
-                              </div>
-                            </div>
-                          )}
-
-                          <input
-                            type="file"
-                            id="prewritten-signature-upload-input"
-                            className="hidden"
-                            accept="image/*"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) {
-                                const reader = new FileReader();
-                                reader.onload = (event) => {
-                                  if (event.target?.result) {
-                                    setFormSellerSignature(event.target.result as string);
-                                  }
-                                };
-                                reader.readAsDataURL(file);
-                              }
-                            }}
-                          />
-                        </div>
-
-                        {/* Stamp/Seal Image Upload */}
-                        <div className="space-y-2 p-3 bg-slate-50/50 rounded-xl border border-slate-200 flex flex-col justify-between">
-                          <div className="space-y-2">
-                            <span className="text-[11px] font-extrabold text-slate-700 flex items-center gap-1">
-                              <ImageIcon className="w-3.5 h-3.5 text-emerald-600" />
-                              {lang === "zh-CN" || lang === "zh-TW" ? "上传印章/盖章图片" : "Upload Seal / Stamp Image"}
-                            </span>
-                            
-                            <p className="text-[10px] font-bold text-slate-400">
-                              {lang === "zh-CN" || lang === "zh-TW" ? "推荐上传透明背景的 PNG 格式图片" : "Transparent PNG stamps recommended."}
-                            </p>
-
-                            <div className="flex items-center gap-3">
-                              <button
-                                type="button"
-                                onClick={() => document.getElementById('seller-sig-file-input')?.click()}
-                                className="px-3 py-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 rounded-lg text-[10px] font-bold transition flex items-center gap-1.5 cursor-pointer shadow-3xs"
-                              >
-                                <Upload className="w-3.5 h-3.5 text-slate-500" />
-                                <span>{lang === "zh-CN" || lang === "zh-TW" ? "选择印章图片" : "Select Image"}</span>
-                              </button>
-                              <input
-                                type="file"
-                                id="seller-sig-file-input"
-                                className="hidden"
-                                accept="image/*"
-                                onChange={(e) => {
-                                  const file = e.target.files?.[0];
-                                  if (file) {
-                                    const reader = new FileReader();
-                                    reader.onload = (event) => {
-                                      if (event.target?.result) {
-                                        setFormSellerStamp(event.target.result as string);
-                                      }
-                                    };
-                                    reader.readAsDataURL(file);
-                                  }
-                                }}
-                              />
-                            </div>
-                          </div>
-
-                          {formSellerStamp && (
-                            <div className="bg-white border border-slate-200 rounded-lg p-2 flex items-center justify-between gap-3 mt-1 shadow-3xs">
-                              <div className="flex items-center gap-2">
-                                <span className="text-[10px] font-bold text-slate-400">{lang === "zh-CN" || lang === "zh-TW" ? "预览:" : "Preview:"}</span>
-                                <div className="h-10 w-20 border border-slate-100 rounded bg-slate-50 flex items-center justify-center overflow-hidden">
-                                  <img src={formSellerStamp} className="max-h-full max-w-full object-contain" alt="Current Stamp" referrerPolicy="no-referrer" />
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-1.5">
-                                {(formStampX !== 0 || formStampY !== 0) && (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setFormStampX(0);
-                                      setFormStampY(0);
-                                    }}
-                                    className="text-[10px] font-black text-indigo-500 hover:text-indigo-600 hover:bg-indigo-50 px-2 py-1 rounded transition cursor-pointer border border-indigo-100"
-                                  >
-                                    {lang === "zh-CN" || lang === "zh-TW" ? "重置位置" : "Reset Pos"}
-                                  </button>
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={() => setFormSellerStamp("")}
-                                  className="text-[10px] font-black text-rose-500 hover:text-rose-600 hover:bg-rose-50 px-2 py-1 rounded transition cursor-pointer border border-rose-100"
-                                >
-                                  {lang === "zh-CN" || lang === "zh-TW" ? "删除印章" : "Delete Stamp"}
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Panel Section 3: Buyer/Customer Custom Block */}
-                <div className="space-y-4 border-t border-slate-100 pt-5">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider border-l-3 border-amber-500 pl-2">
-                      {getInvoiceTrans("sec_buyer", lang)}
-                    </h4>
-                    <span className="text-[10px] text-slate-400 font-bold bg-amber-50 px-2 py-0.5 rounded border border-amber-200">{getInvoiceTrans("crm_tip", lang)}</span>
-                  </div>
-
-                  {/* Dropdown choosing to select existing Customer or Custom manual with search/filter */}
-                  <div className="space-y-1.5">
-                    <label className="text-[11px] font-bold text-slate-500">
-                      {getInvoiceTrans("crm_link_lbl", lang)}
-                    </label>
-                    <div className="relative" ref={custDropdownRef}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsCustDropdownOpen(!isCustDropdownOpen);
-                          setCustSearchQuery("");
-                        }}
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 outline-none hover:bg-white hover:border-brand-300 focus:border-brand-500 transition flex items-center justify-between cursor-pointer"
-                      >
-                        <span className="truncate">
-                          {formCustomerId && formCustomerId !== "custom" ? (
-                            (() => {
-                              const c = customers.find(x => x.id === formCustomerId);
-                              return c ? `[${c.id}] ${c.name} (${getInvoiceTrans("currency_lbl", lang)}: ${c.currency})` : getInvoiceTrans("crm_custom_opt", lang);
-                            })()
-                          ) : (
-                            getInvoiceTrans("crm_custom_opt", lang)
-                          )}
-                        </span>
-                        <ChevronDown className="w-3.5 h-3.5 text-slate-400 ml-1.5 shrink-0" />
-                      </button>
-
-                      {isCustDropdownOpen && (
-                        <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg z-50 p-2 space-y-2 max-h-64 overflow-hidden flex flex-col">
-                          {/* Search Input Box */}
-                          <div className="relative flex items-center shrink-0">
-                            <Search className="absolute left-2.5 w-3.5 h-3.5 text-slate-400" />
-                            <input
-                              type="text"
-                              value={custSearchQuery}
-                              onChange={(e) => setCustSearchQuery(e.target.value)}
-                              placeholder={lang === "en" ? "Search ID or name..." : "搜索客户姓名或ID..."}
-                              className="w-full pl-8 pr-7 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-700 outline-none focus:bg-white focus:border-brand-500"
-                              autoFocus
-                            />
-                            {custSearchQuery && (
-                              <button
-                                type="button"
-                                onClick={() => setCustSearchQuery("")}
-                                className="absolute right-2.5 p-0.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600"
-                              >
-                                <X className="w-3 h-3" />
-                              </button>
-                            )}
-                          </div>
-
-                          {/* Options List with Scroll */}
-                          <div className="overflow-y-auto divide-y divide-slate-50 flex-1 max-h-48 pr-1">
-                            {/* Manual entry option */}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                handleCustomerChange("custom");
-                                setIsCustDropdownOpen(false);
-                              }}
-                              className={cn(
-                                "w-full text-left px-2.5 py-2 text-xs font-medium rounded-md transition duration-150 flex items-center justify-between hover:bg-slate-50 cursor-pointer",
-                                (!formCustomerId || formCustomerId === "custom") ? "bg-brand-50/40 text-brand-700 font-bold" : "text-slate-600"
-                              )}
-                            >
-                              <span>{getInvoiceTrans("crm_custom_opt", lang)}</span>
-                              {(!formCustomerId || formCustomerId === "custom") && <Check className="w-3.5 h-3.5 text-brand-600" />}
-                            </button>
-
-                            {/* Dynamically Filtered Partners list */}
-                            {(() => {
-                              const filtered = customers.filter(c => {
-                                const q = custSearchQuery.trim().toLowerCase();
-                                if (!q) return true;
-                                const nameMatch = c.name.toLowerCase().includes(q);
-                                const cleanId = c.id.toLowerCase().replace(/^cust-?/i, '');
-                                const idMatch = c.id.toLowerCase().startsWith(q) || cleanId.includes(q);
-                                const contactMatch = c.contact?.toLowerCase().includes(q) || false;
-                                return nameMatch || idMatch || contactMatch;
-                              });
-
-                              if (filtered.length === 0) {
-                                return (
-                                  <div className="px-2.5 py-4 text-center text-xs text-slate-400 font-medium">
-                                    {lang === "en" ? "No matching customers" : "未找到匹配的客户"}
-                                  </div>
-                                );
-                              }
-
-                              return filtered.map(c => {
-                                const isSelected = formCustomerId === c.id;
-                                return (
-                                  <button
-                                    key={c.id}
-                                    type="button"
-                                    onClick={() => {
-                                      handleCustomerChange(c.id);
-                                      setIsCustDropdownOpen(false);
-                                    }}
-                                    className={cn(
-                                      "w-full text-left px-2.5 py-2 text-xs font-medium rounded-md transition duration-150 flex items-center justify-between hover:bg-slate-50 cursor-pointer",
-                                      isSelected ? "bg-brand-50/40 text-brand-700 font-bold" : "text-slate-600"
-                                    )}
-                                  >
-                                    <div className="flex flex-col min-w-0 pr-2">
-                                      <span className="font-bold truncate">[{c.id}] {c.name}</span>
-                                      <span className="text-[10px] text-slate-400 mt-0.5 truncate">
-                                        {getInvoiceTrans("currency_lbl", lang)}: {c.currency} {c.contact ? `| ${c.contact}` : ""}
-                                      </span>
-                                    </div>
-                                    {isSelected && <Check className="w-3.5 h-3.5 text-brand-600 shrink-0" />}
-                                  </button>
-                                );
-                              });
-                            })()}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Buyer Logo Uploading */}
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-slate-500">{getInvoiceTrans("logo_buyer_lbl", lang)}</label>
-                    <div className="flex items-center gap-3 flex-wrap">
-                      <button
-                        type="button"
-                        onClick={() => document.getElementById('buyer-logo-file-input')?.click()}
-                        className="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-3xs h-8"
-                      >
-                        <Upload className="w-3.5 h-3.5 text-slate-500" />
-                        <span>{getInvoiceTrans("select_file_btn", lang)}</span>
-                      </button>
-                      <input
-                        type="file"
-                        id="buyer-logo-file-input"
-                        className="hidden"
-                        accept="image/*"
-                        onChange={(e) => handleLogoUpload(e, false)}
-                      />
-                      {formBuyerLogo && (
-                        <div className="flex items-center gap-2">
-                          <div className="relative h-8 w-12 border border-slate-200 rounded-md overflow-hidden bg-white">
-                            <img src={formBuyerLogo} className="h-full w-full object-contain" referrerPolicy="no-referrer" />
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleClearLogo(false)}
-                            className="text-xs font-bold text-rose-500 hover:text-rose-600 hover:bg-rose-50 px-2 py-1 rounded-md transition cursor-pointer"
-                          >
-                            {lang === "zh-CN" || lang === "zh-TW" ? "删除" : "Remove"}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Buyer fields inputs */}
-                  <div className="space-y-3">
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-slate-500">{getInvoiceTrans("buyer_name_input", lang)}</label>
-                      <input
-                        type="text"
-                        value={formBuyerName}
-                        onChange={(e) => setFormBuyerName(e.target.value)}
-                        placeholder={getInvoiceTrans("buyer_name_placeholder", lang)}
-                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 outline-none focus:bg-white focus:border-brand-500 transition"
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <label className="text-[11px] font-bold text-slate-500">{getInvoiceTrans("buyer_tax_input", lang)}</label>
-                        <input
-                          type="text"
-                          value={formBuyerTaxNo}
-                          onChange={(e) => setFormBuyerTaxNo(e.target.value)}
-                          placeholder={lang === 'en' ? 'Optional' : lang === 'th' ? 'เลือกได้' : '可空'}
-                          className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 outline-none focus:bg-white focus:border-brand-500 transition"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[11px] font-bold text-slate-500">{getInvoiceTrans("buyer_contact_input", lang)}</label>
-                        <input
-                          type="text"
-                          value={formBuyerContact}
-                          onChange={(e) => setFormBuyerContact(e.target.value)}
-                          placeholder={lang === 'en' ? 'Optional' : lang === 'th' ? 'เลือกได้' : '可空'}
-                          className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 outline-none focus:bg-white focus:border-brand-500 transition"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <label className="text-[11px] font-bold text-slate-500">{getInvoiceTrans("buyer_address_input", lang)}</label>
-                        <input
-                          type="text"
-                          value={formBuyerAddress}
-                          onChange={(e) => setFormBuyerAddress(e.target.value)}
-                          placeholder={lang === 'en' ? 'Optional' : lang === 'th' ? 'เลือกได้' : '可空'}
-                          className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 outline-none focus:bg-white focus:border-brand-500 transition"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[11px] font-bold text-slate-500">{getInvoiceTrans("buyer_phone_input", lang)}</label>
-                        <input
-                          type="text"
-                          value={formBuyerPhone}
-                          onChange={(e) => setFormBuyerPhone(e.target.value)}
-                          placeholder={lang === 'en' ? 'Optional' : lang === 'th' ? 'เลือกได้' : '可空'}
-                          className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 outline-none focus:bg-white focus:border-brand-500 transition"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <label className="text-[11px] font-bold text-slate-500">{getInvoiceTrans("buyer_account_input", lang)}</label>
-                        <input
-                          type="text"
-                          value={formBuyerBankAccount}
-                          onChange={(e) => setFormBuyerBankAccount(e.target.value)}
-                          placeholder={lang === 'en' ? 'Optional' : lang === 'th' ? 'เลือกได้' : '可空'}
-                          className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 outline-none focus:bg-white focus:border-brand-500 transition"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[11px] font-bold text-slate-500">{getInvoiceTrans("buyer_bank_input", lang)}</label>
-                        <input
-                          type="text"
-                          value={formBuyerBankName}
-                          onChange={(e) => setFormBuyerBankName(e.target.value)}
-                          placeholder={lang === 'en' ? 'Optional' : lang === 'th' ? 'เลือกได้' : '可空'}
-                          className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 outline-none focus:bg-white focus:border-brand-500 transition"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Panel Section 4: Line Items Editor Grid */}
-                <div className="space-y-4 border-t border-slate-100 pt-5">
-                  <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider border-l-3 border-brand-500 pl-2">
-                    {getInvoiceTrans("sec_items", lang)}
-                  </h4>
-
-                  {/* Add Row Form Container */}
-                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3 shadow-3xs">
-                    <p className="text-[10px] font-black text-slate-500">{getInvoiceTrans("add_item_sec", lang)}</p>
-                    
-                    <div className="space-y-2">
-                      <textarea
-                        placeholder={getInvoiceTrans("item_desc_placeholder", lang)}
-                        value={itemDesc}
-                        onChange={(e) => setItemDesc(e.target.value)}
-                        rows={2}
-                        className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 outline-none focus:border-brand-500 transition resize-y min-h-[50px]"
-                      />
-                      
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <input
-                            type="number"
-                            placeholder={getInvoiceTrans("item_qty_placeholder", lang)}
-                            value={itemQty}
-                            onChange={(e) => setItemQty(e.target.value ? Number(e.target.value) : "")}
-                            min={1}
-                            className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 outline-none focus:border-brand-500 transition"
-                          />
-                        </div>
-                        <div>
-                          <input
-                            type="number"
-                            step="0.01"
-                            placeholder={getInvoiceTrans("item_price_placeholder", lang)}
-                            value={itemPrice}
-                            onChange={(e) => setItemPrice(e.target.value ? Number(e.target.value) : "")}
-                            min={0.01}
-                            className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 outline-none focus:border-brand-500 transition"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={handleAddItem}
-                      className="w-full bg-brand-50 hover:bg-brand-100 text-brand-700 border border-brand-200 py-1.5 rounded-lg text-xs font-black transition flex items-center justify-center gap-1.5 cursor-pointer"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      {getInvoiceTrans("item_add_btn_text", lang)}
-                    </button>
-                  </div>
-
-                  {/* Added Items table listing */}
-                  <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
-                    <div className="bg-slate-50/70 p-2 border-b border-slate-200 text-[10px] font-extrabold text-slate-400 uppercase">
-                      {getInvoiceTrans("added_items_title", lang)} ({formItems.length} {getInvoiceTrans("num_items_count", lang)})
-                    </div>
-                    {formItems.length === 0 ? (
-                      <div className="p-6 text-center text-slate-400 text-xs font-bold flex flex-col items-center gap-1">
-                        <AlertCircle className="w-5 h-5 text-slate-300" />
-                        <span>{getInvoiceTrans("form_no_items_tip_text", lang)}</span>
-                      </div>
-                    ) : (
-                      <div className="divide-y divide-slate-100 text-xs font-semibold">
-                        {formItems.map((item, index) => (
-                          <div key={item.id} className="p-3 flex items-start justify-between gap-2 hover:bg-slate-50/30">
-                            <div className="space-y-0.5">
-                              <p className="font-extrabold text-slate-800 whitespace-pre-wrap">{index + 1}. {item.description}</p>
-                              <p className="text-[10px] text-slate-400 font-bold">
-                                {item.qty} {lang === 'en' ? 'Pcs' : lang === 'th' ? 'ชิ้น' : '件/次'} × {formatCurrency(item.unitPrice, formCurrency as any)}
-                              </p>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-bold text-slate-900 font-mono">
-                                {formatCurrency(item.amount, formCurrency as any)}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveItem(item.id)}
-                                className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-
-                        {/* Math Summary Box inside inputs */}
-                        <div className="p-3 bg-slate-50 border-t border-slate-200 space-y-1.5 text-right font-semibold">
-                          <p className="text-[11px] text-slate-500">
-                            {getInvoiceTrans("subtotal_lbl", lang)} <span className="text-slate-800 font-mono">{formatCurrency(itemNetSubtotal, formCurrency as any)}</span>
-                          </p>
-                          {formInvoiceType !== "proforma" && (
-                            <p className="text-[11px] text-slate-500">
-                              {getInvoiceTrans("tax_lbl", lang)} ({formTaxRate}%): <span className="text-slate-800 font-mono">{formatCurrency(itemTaxAmount, formCurrency as any)}</span>
-                            </p>
-                          )}
-                          <p className="text-xs font-extrabold text-slate-900">
-                            {getInvoiceTrans("total_lbl", lang)} <span className="text-brand-600 font-black text-sm font-mono">{formatCurrency(itemSubtotal, formCurrency as any)}</span>
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Panel Section 5: Note Terms */}
-                <div className="space-y-3 border-t border-slate-100 pt-5">
-                  <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider border-l-3 border-slate-400 pl-2">
-                    {getInvoiceTrans("sec_notes", lang)}
-                  </h4>
-                  <textarea
-                    rows={3}
-                    value={formNote}
-                    onChange={(e) => setFormNote(e.target.value)}
-                    placeholder={getInvoiceTrans("notes_placeholder", lang)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 outline-none focus:bg-white focus:border-brand-500 transition resize-none"
-                  />
-                </div>
-
-                {/* Final bottom action */}
-                <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-100">
-                  <button
-                    type="button"
-                    onClick={() => setIsFormOpen(false)}
-                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition cursor-pointer"
-                  >
-                    {getInvoiceTrans("btn_cancel_short", lang)}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isSaving} onClick={handleSaveInvoice}
-                    className="bg-brand-600 hover:bg-brand-700 text-white px-5 py-2.5 rounded-xl text-xs font-black shadow-xs hover:shadow-md transition duration-200 cursor-pointer flex items-center gap-1"
-                  >
-                    <Check className="w-4 h-4" />
-                    {getInvoiceTrans("save_and_ledger", lang)}
-                  </button>
-                </div>
-              </div>
-
-              {/* RIGHT COLUMN: Real-Time A4 Live Invoice Preview Panel (Scrollable) */}
-              <div className={cn(
-                "col-span-12 md:col-span-6 lg:col-span-7 h-full overflow-y-auto p-4 md:p-8 flex justify-center items-start bg-slate-100",
-                mobileEditorTab === "preview" ? "block" : "hidden md:block"
-              )}>
-                {/* Scroll Sticky Helper wrapper to contain the paper nicely */}
-                <div className="w-full max-w-3xl space-y-4 sticky top-0">
-                  
-                  <div className="flex items-center justify-between no-print px-1 text-slate-500 text-[10px] font-extrabold uppercase tracking-wider">
-                    <span>{getInvoiceTrans("preview_title_live", lang)}</span>
-                    <span className="text-emerald-600 animate-pulse flex items-center gap-1">{getInvoiceTrans("preview_sync_tip", lang)}</span>
-                  </div>
-
-                  {/* Standard Paper Document container */}
-                  <div className="bg-white p-6 md:p-10 rounded-xl shadow-lg border border-slate-200 border-t-8 border-t-indigo-600 w-full min-h-[1000px] flex flex-col justify-between space-y-8 print-no-shadow print-p-0 relative" id="modal-live-preview-pane">
-                    <div>
-                      {/* Document Top Row Header */}
-                      <div className="flex justify-between items-start gap-4 pb-6 border-b-2 border-indigo-100">
-                        <div className="flex-1 min-w-0 space-y-2">
-                          <div className="flex items-center gap-3 min-w-0">
-                            {formSellerLogo ? (
-                              <div 
-                                className="relative group cursor-pointer shrink-0"
-                                onClick={() => document.getElementById('seller-logo-file-input')?.click()}
-                                title={getInvoiceTrans("click_to_upload", lang)}
-                              >
-                                <div className="relative rounded-lg overflow-hidden border border-slate-200 p-1 bg-white hover:border-brand-500 hover:shadow-xs transition duration-200">
-                                  <img 
-                                    src={formSellerLogo} 
-                                    alt="Live Seller Logo" 
-                                    className="h-9 sm:h-10 w-auto object-contain max-w-[140px] sm:max-w-[160px] rounded" 
-                                    referrerPolicy="no-referrer"
-                                  />
-                                  <div className="absolute inset-0 bg-indigo-950/60 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-white transition duration-200 gap-0.5 rounded">
-                                    <Upload className="w-3 h-3 text-white animate-bounce" />
-                                    <span className="text-[7px] font-black uppercase tracking-wider">{getInvoiceTrans("click_to_upload", lang)}</span>
-                                  </div>
-                                </div>
-                              </div>
-                            ) : null}
-
-                            <h2 className="text-sm sm:text-base font-extrabold text-indigo-950 tracking-tight leading-tight truncate">
-                              {formSellerName || "WMS HR Logistics"}
-                            </h2>
-                          </div>
-
-                          <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-[11px] text-slate-700 leading-snug">
-                            {formSellerAddress && (
-                              <>
-                                <span className="text-slate-400 font-medium whitespace-nowrap shrink-0">{getInvoiceTrans("address_lbl", lang)}:</span>
-                                <span className="text-slate-700 font-medium break-all min-w-0">{formSellerAddress}</span>
-                              </>
-                            )}
-                            {formSellerContact && (
-                              <>
-                                <span className="text-slate-400 font-medium whitespace-nowrap shrink-0">{getInvoiceTrans("contact_lbl", lang)}:</span>
-                                <span className="text-slate-700 font-medium break-all min-w-0">{formSellerContact}</span>
-                              </>
-                            )}
-                            {formSellerPhone && (
-                              <>
-                                <span className="text-slate-400 font-medium whitespace-nowrap shrink-0">{getInvoiceTrans("phone_lbl", lang)}:</span>
-                                <span className="text-slate-700 font-medium break-all min-w-0">{formSellerPhone}</span>
-                              </>
-                            )}
-                            {formSellerTaxNo && (
-                              <>
-                                <span className="text-slate-400 font-medium whitespace-nowrap shrink-0">{getInvoiceTrans("tax_no_lbl", lang)}:</span>
-                                <span className="text-slate-700 font-mono font-medium break-all min-w-0">{formSellerTaxNo}</span>
-                              </>
-                            )}
-                            {formSellerBankName && (
-                              <>
-                                <span className="text-slate-400 font-medium whitespace-nowrap shrink-0">{getInvoiceTrans("seller_bank_input", lang)}:</span>
-                                <span className="text-slate-700 font-medium break-all min-w-0">{formSellerBankName}</span>
-                              </>
-                            )}
-                            {formSellerBankAccount && (
-                              <>
-                                <span className="text-slate-400 font-medium whitespace-nowrap shrink-0">{getInvoiceTrans("seller_account_input", lang)}:</span>
-                                <span className="text-slate-700 font-mono font-medium break-all min-w-0">{formSellerBankAccount}</span>
-                              </>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="text-right space-y-1 flex flex-col items-end flex-shrink-0">
-                          <h1 className="text-lg md:text-xl font-extrabold text-indigo-950 tracking-tight font-sans">
-                            {getInvoiceTypeLabel(formInvoiceType, lang)}
-                          </h1>
-                          {formCopyText && (
-                            <span className="inline-block text-[9px] font-extrabold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-sm border border-indigo-200 mt-1 uppercase tracking-wider">
-                              {formCopyText}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Bilateral Company details summary block (Left = Buyer, Right = Details) */}
-                      <div className="grid grid-cols-12 gap-6 pt-6 pb-2">
-                        {/* Buyer summary on the left - 7-8 cols */}
-                        <div className="col-span-12 sm:col-span-7 md:col-span-8 border-b sm:border-b-0 sm:border-r border-slate-100 pb-4 sm:pb-0 sm:pr-4 space-y-2">
-                          {(formBuyerLogo || formBuyerName) && (
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              {formBuyerLogo ? (
-                                <div 
-                                  className="relative group cursor-pointer shrink-0 animate-fade-in"
-                                  onClick={() => document.getElementById('buyer-logo-file-input')?.click()}
-                                  title={getInvoiceTrans("click_to_upload", lang)}
-                                >
-                                  <div className="relative rounded-lg overflow-hidden border border-slate-200 p-0.5 bg-white hover:border-brand-500 hover:shadow-xs transition duration-200">
-                                    <img 
-                                      src={formBuyerLogo} 
-                                      alt="Live Buyer Logo" 
-                                      className="h-8 sm:h-9 w-auto object-contain max-w-[120px] rounded" 
-                                      referrerPolicy="no-referrer"
-                                    />
-                                    <div className="absolute inset-0 bg-indigo-950/60 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-white transition duration-200 gap-0.5 rounded">
-                                      <Upload className="w-3 h-3 text-white animate-bounce" />
-                                      <span className="text-[7px] font-black uppercase tracking-wider">{getInvoiceTrans("click_to_upload", lang)}</span>
-                                    </div>
-                                  </div>
-                                </div>
-                              ) : null}
-                              {formBuyerName && (
-                                <p className="font-extrabold text-slate-900 text-sm tracking-tight leading-tight truncate">
-                                  {formBuyerName}
-                                </p>
-                              )}
-                            </div>
-                          )}
-
-                          {(formBuyerTaxNo || formBuyerBankName || formBuyerBankAccount || formBuyerAddress || formBuyerContact || formBuyerPhone) ? (
-                            <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-[11px] text-slate-700 leading-snug">
-                              {formBuyerAddress && (
-                                <>
-                                  <span className="text-slate-400 font-medium whitespace-nowrap shrink-0">{getInvoiceTrans("buyer_address_input", lang)}:</span>
-                                  <span className="text-slate-700 font-medium break-all min-w-0">{formBuyerAddress}</span>
-                                </>
-                              )}
-                              {formBuyerContact && (
-                                <>
-                                  <span className="text-slate-400 font-medium whitespace-nowrap shrink-0">{getInvoiceTrans("buyer_contact_input", lang)}:</span>
-                                  <span className="text-slate-700 font-medium break-all min-w-0">{formBuyerContact}</span>
-                                </>
-                              )}
-                              {formBuyerPhone && (
-                                <>
-                                  <span className="text-slate-400 font-medium whitespace-nowrap shrink-0">{getInvoiceTrans("buyer_phone_input", lang)}:</span>
-                                  <span className="text-slate-700 font-medium break-all min-w-0">{formBuyerPhone}</span>
-                                </>
-                              )}
-                              {formBuyerTaxNo && (
-                                <>
-                                  <span className="text-slate-400 font-medium whitespace-nowrap shrink-0">{getInvoiceTrans("buyer_tax_input", lang)}:</span>
-                                  <span className="text-slate-700 font-mono font-medium break-all min-w-0">{formBuyerTaxNo}</span>
-                                </>
-                              )}
-                              {formBuyerBankAccount && (
-                                <>
-                                  <span className="text-slate-400 font-medium whitespace-nowrap shrink-0">{getInvoiceTrans("buyer_account_input", lang)}:</span>
-                                  <span className="text-slate-700 font-mono font-medium break-all min-w-0">{formBuyerBankAccount}</span>
-                                </>
-                              )}
-                              {formBuyerBankName && (
-                                <>
-                                  <span className="text-slate-400 font-medium whitespace-nowrap shrink-0">{getInvoiceTrans("buyer_bank_input", lang)}:</span>
-                                  <span className="text-slate-700 font-medium break-all min-w-0">{formBuyerBankName}</span>
-                                </>
-                              )}
-                            </div>
-                          ) : null}
-                        </div>
-
-                        {/* Invoice metadata columns on the right - 5 cols */}
-                        <div className={`col-span-12 sm:col-span-5 md:col-span-4 flex justify-end items-start ${formBuyerName ? "pt-1 sm:pt-[28px]" : "pt-1.5"}`}>
-                          <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-[11px] leading-snug">
-                            <div className="text-slate-400 font-medium text-right whitespace-nowrap">
-                              {getInvoiceTrans("due_date_lbl", lang)}:
-                            </div>
-                            <div className="font-bold text-slate-800 text-left">
-                              {formDueDate || getInvoiceTrans("unlimited_lbl", lang)}
-                            </div>
-                            <div className="text-slate-400 font-medium text-right whitespace-nowrap">
-                              {getInvoiceTrans("currency_lbl", lang)}:
-                            </div>
-                            <div className="font-bold text-slate-800 text-left">
-                              {getCurrencyDisplayName(formCurrency, lang)}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Items Listing Table inside Preview */}
-                      <div className="space-y-2 mt-6">
-                        <div className="bg-indigo-50/70 text-indigo-950 text-xs font-black px-2 py-1.5 rounded-t-lg border-b border-indigo-100 uppercase tracking-wider">
-                          {getInvoiceTrans("items_sec_lbl", lang)}
-                        </div>
-                        <table className="w-full text-left border-collapse text-xs text-slate-700">
-                          <thead>
-                            <tr className="border-b border-slate-200 text-slate-400 text-[10px] font-bold uppercase bg-slate-50">
-                              <th className="py-2 px-2 w-10 text-center">{getInvoiceTrans("th_hash", lang)}</th>
-                              <th className="py-2 px-2">{getInvoiceTrans("th_description", lang)}</th>
-                              <th className="py-2 px-2 text-right w-20">{getInvoiceTrans("th_qty", lang)}</th>
-                              <th className="py-2 px-2 text-right w-28">{getInvoiceTrans("th_price", lang)}</th>
-                              <th className="py-2 px-2 text-right w-32">{getInvoiceTrans("th_amount", lang)}</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {formItems.length === 0 ? (
-                              <tr>
-                                <td colSpan={5} className="py-8 text-center text-slate-400 text-xs font-bold">
-                                  {getInvoiceTrans("form_no_items_tip", lang)}
-                                </td>
-                              </tr>
-                            ) : (
-                              formItems.map((item, index) => (
-                                <tr key={item.id} className="hover:bg-slate-50/30">
-                                  <td className="py-2.5 px-2 text-center text-slate-400 font-mono">{index + 1}</td>
-                                  <td className="py-2.5 px-2 font-medium text-slate-900 whitespace-pre-wrap">{item.description}</td>
-                                  <td className="py-2.5 px-2 text-right font-mono text-slate-600">{item.qty}</td>
-                                  <td className="py-2.5 px-2 text-right font-mono text-slate-600">{formatCurrency(item.unitPrice, formCurrency as any)}</td>
-                                  <td className="py-2.5 px-2 text-right font-bold font-mono text-slate-900">
-                                    {formatCurrency(item.amount, formCurrency as any)}
-                                  </td>
-                                </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-
-                      {/* Totals Summary */}
-                      <div className="flex justify-end pt-4 border-t border-slate-200 mt-4">
-                        <div className="w-80 space-y-2 text-xs">
-                          <div className="flex justify-between text-slate-500 px-2">
-                            <span>{getInvoiceTrans("subtotal_lbl", lang)}</span>
-                            <span className="font-mono font-semibold text-slate-800">{formatCurrency(itemNetSubtotal, formCurrency as any)}</span>
-                          </div>
-                          {formInvoiceType !== "proforma" && (
-                            <div className="flex justify-between text-slate-500 px-2">
-                              <span>{getInvoiceTrans("tax_lbl", lang)} ({formTaxRate}%):</span>
-                              <span className="font-mono font-semibold text-slate-800">{formatCurrency(itemTaxAmount, formCurrency as any)}</span>
-                            </div>
-                          )}
-                          
-                          {/* Highlighted Grand Total row */}
-                          <div className="flex justify-between items-center text-sm font-black text-indigo-950 bg-indigo-50/80 px-3 py-2 rounded-lg border border-indigo-100">
-                            <span>{getInvoiceTrans("total_lbl", lang)}</span>
-                            <span className="font-mono text-lg text-indigo-600 font-black">
-                              {formatCurrency(itemSubtotal, formCurrency as any)}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-
-
-                    </div>
-
-                    {/* Footer stamps / notes / signatures */}
-                    <div className="pt-6 border-t border-slate-100 mt-6 space-y-6">
-                      {/* Note info */}
-                      <div className="space-y-1.5 text-xs text-slate-500 font-normal">
-                        <p className="font-bold text-slate-700 text-[10px] uppercase tracking-wider">{getInvoiceTrans("notes_terms_lbl", lang)}</p>
-                        <p className="leading-relaxed text-[10px] text-slate-400">
-                          {formNote || getInvoiceTrans("default_notes_desc", lang)}
-                        </p>
-                      </div>
-
-                      {/* Double Signatures block */}
-                      <div className="grid grid-cols-2 gap-24 md:gap-32 pt-4">
-                        {/* Customer signature */}
-                        <div className="text-center space-y-6 flex flex-col justify-end items-center">
-                          <p className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider">{getInvoiceTrans("client_sig_lbl", lang)}</p>
-                          <div className="w-48 border-b border-slate-300 h-10"></div>
-                          <div className="text-[10px] text-slate-500 leading-normal">
-                            <p className="whitespace-nowrap">{getInvoiceTrans("date_prefix_lbl", lang)}{getInvoiceTrans("date_cn_year", lang)}</p>
-                          </div>
-                        </div>
-
-                        {/* Issuer signature */}
-                        <div className="text-center space-y-6 flex flex-col justify-end items-center relative min-h-[90px] border border-dashed border-slate-100 hover:border-indigo-200 rounded-lg p-1 transition select-none">
-                          {formSellerSignature && (
-                            <div 
-                              className={cn(
-                                "absolute top-0 h-16 w-32 flex items-center justify-center z-10 cursor-grab active:cursor-grabbing hover:bg-brand-50/10 rounded-md border border-transparent hover:border-brand-300 hover:shadow-xs transition-shadow group/sig select-none touch-none",
-                                isDraggingSig && "cursor-grabbing border-brand-500 bg-brand-50/20 shadow-sm"
-                              )}
-                              style={{ transform: `translate(${formSigX}px, ${formSigY}px)` }}
-                              onMouseDown={handleSigStart}
-                              onTouchStart={handleSigStart}
-                              title={lang === "zh-CN" || lang === "zh-TW" ? "鼠标/触屏拖拽移动签名位置" : "Drag to move signature position"}
-                            >
-                              <img src={formSellerSignature} className="max-h-full max-w-full object-contain pointer-events-none select-none" alt="signature" referrerPolicy="no-referrer" />
-                              <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-indigo-600 text-[8px] font-black text-white px-1 rounded-sm opacity-0 group-hover/sig:opacity-100 transition whitespace-nowrap shadow-3xs">
-                                {lang === "zh-CN" || lang === "zh-TW" ? "拖拽移动" : "Drag to move"}
-                              </div>
-                            </div>
-                          )}
-
-                          {formSellerStamp && (
-                            <div 
-                              className={cn(
-                                "absolute -top-4 -right-2 h-24 w-24 flex items-center justify-center opacity-85 z-20 cursor-grab active:cursor-grabbing hover:bg-brand-50/10 rounded-full border border-transparent hover:border-brand-300 transition-shadow group/stamp select-none touch-none",
-                                isDraggingStamp && "cursor-grabbing border-brand-500 bg-brand-50/20 shadow-sm"
-                              )}
-                              style={{ transform: `rotate(6deg) translate(${formStampX}px, ${formStampY}px)` }}
-                              onMouseDown={handleStampStart}
-                              onTouchStart={handleStampStart}
-                              title={lang === "zh-CN" || lang === "zh-TW" ? "鼠标/触屏拖拽移动印章位置" : "Drag to move stamp position"}
-                            >
-                              <img src={formSellerStamp} className="max-h-full max-w-full object-contain pointer-events-none select-none" alt="stamp" referrerPolicy="no-referrer" />
-                              <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-amber-600 text-[8px] font-black text-white px-1 rounded-sm opacity-0 group-hover/stamp:opacity-100 transition whitespace-nowrap shadow-3xs">
-                                {lang === "zh-CN" || lang === "zh-TW" ? "拖拽移动" : "Drag to move"}
-                              </div>
-                            </div>
-                          )}
-
-                          <p className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider">{getInvoiceTrans("auth_sig_lbl", lang)}</p>
-                          <div className="w-48 border-b border-slate-300 h-10"></div>
-                          <div className="text-[10px] text-slate-500 leading-normal">
-                            <p>{getInvoiceTrans("date_prefix_lbl", lang)}{formIssueDate || "2026-07-08"}</p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                  </div>
-                </div>
-              </div>
-
-          </div>
-        </div>
+        <InvoiceFormWorkspace
+          isFormOpen={isFormOpen}
+          setIsFormOpen={setIsFormOpen}
+          editingInvoice={editingInvoice}
+          isSaving={isSaving}
+          handleSaveInvoice={handleSaveInvoice}
+          customers={customers}
+          lang={lang}
+          formCustomerId={formCustomerId}
+          setFormCustomerId={setFormCustomerId}
+          formInvoiceNo={formInvoiceNo}
+          setFormInvoiceNo={setFormInvoiceNo}
+          formIssueDate={formIssueDate}
+          setFormIssueDate={setFormIssueDate}
+          formDueDate={formDueDate}
+          setFormDueDate={setFormDueDate}
+          formInvoiceType={formInvoiceType}
+          setFormInvoiceType={setFormInvoiceType}
+          formCopyText={formCopyText}
+          setFormCopyText={setFormCopyText}
+          formTaxRate={formTaxRate}
+          setFormTaxRate={setFormTaxRate}
+          formCurrency={formCurrency}
+          setFormCurrency={setFormCurrency}
+          formNote={formNote}
+          setFormNote={setFormNote}
+          formStatus={formStatus}
+          setFormStatus={setFormStatus}
+          formItems={formItems}
+          setFormItems={setFormItems}
+          itemDesc={itemDesc}
+          setItemDesc={setItemDesc}
+          itemQty={itemQty}
+          setItemQty={setItemQty}
+          itemPrice={itemPrice}
+          setItemPrice={setItemPrice}
+          formSellerName={formSellerName}
+          setFormSellerName={setFormSellerName}
+          formSellerTaxNo={formSellerTaxNo}
+          setFormSellerTaxNo={setFormSellerTaxNo}
+          formSellerBankName={formSellerBankName}
+          setFormSellerBankName={setFormSellerBankName}
+          formSellerBankAccount={formSellerBankAccount}
+          setFormSellerBankAccount={setFormSellerBankAccount}
+          formSellerAddress={formSellerAddress}
+          setFormSellerAddress={setFormSellerAddress}
+          formSellerContact={formSellerContact}
+          setFormSellerContact={setFormSellerContact}
+          formSellerPhone={formSellerPhone}
+          setFormSellerPhone={setFormSellerPhone}
+          formSellerLogo={formSellerLogo}
+          setFormSellerLogo={setFormSellerLogo}
+          formSellerSignature={formSellerSignature}
+          setFormSellerSignature={setFormSellerSignature}
+          formSellerStamp={formSellerStamp}
+          setFormSellerStamp={setFormSellerStamp}
+          formBuyerName={formBuyerName}
+          setFormBuyerName={setFormBuyerName}
+          formBuyerTaxNo={formBuyerTaxNo}
+          setFormBuyerTaxNo={setFormBuyerTaxNo}
+          formBuyerBankName={formBuyerBankName}
+          setFormBuyerBankName={setFormBuyerBankName}
+          formBuyerBankAccount={formBuyerBankAccount}
+          setFormBuyerBankAccount={setFormBuyerBankAccount}
+          formBuyerAddress={formBuyerAddress}
+          setFormBuyerAddress={setFormBuyerAddress}
+          formBuyerContact={formBuyerContact}
+          setFormBuyerContact={setFormBuyerContact}
+          formBuyerPhone={formBuyerPhone}
+          setFormBuyerPhone={setFormBuyerPhone}
+          formBuyerLogo={formBuyerLogo}
+          setFormBuyerLogo={setFormBuyerLogo}
+          formSigX={formSigX}
+          setFormSigX={setFormSigX}
+          formSigY={formSigY}
+          setFormSigY={setFormSigY}
+          formStampX={formStampX}
+          setFormStampX={setFormStampX}
+          formStampY={formStampY}
+          setFormStampY={setFormStampY}
+          isDraggingSig={isDraggingSig}
+          isDraggingStamp={isDraggingStamp}
+          handleSigStart={handleSigStart}
+          handleStampStart={handleStampStart}
+          handleGenerateInvoiceNo={handleGenerateInvoiceNo}
+          handleAddItem={handleAddItem}
+          handleRemoveItem={handleRemoveItem}
+          handleLogoUpload={handleLogoUpload}
+          handleClearLogo={handleClearLogo}
+          handleCustomerChange={handleCustomerChange}
+          setIsSigModalOpen={setIsSigModalOpen}
+          itemSubtotal={itemSubtotal}
+          itemTaxAmount={itemTaxAmount}
+          itemNetSubtotal={itemNetSubtotal}
+          mobileEditorTab={mobileEditorTab}
+          setMobileEditorTab={setMobileEditorTab}
+        />
       )}
 
 

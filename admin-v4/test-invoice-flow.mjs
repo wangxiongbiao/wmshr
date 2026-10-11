@@ -23,11 +23,14 @@ lines.forEach((l, i) => {
 });
 assert.equal(decls.length, 1, `handleDeleteInvoice must be declared exactly once, found ${decls.length}`);
 
+const invoiceFormWorkspacePath = path.join(__dirname, "src/components/invoice/components/InvoiceFormWorkspace.tsx");
+const workspaceContent = fs.existsSync(invoiceFormWorkspacePath) ? fs.readFileSync(invoiceFormWorkspacePath, "utf-8") : "";
+
 // Check interactive handlers
 assert.ok(content.includes("handleOpenCreate"), "Must have handleOpenCreate handler");
 assert.ok(content.includes("handleOpenEdit"), "Must have handleOpenEdit handler");
 assert.ok(content.includes("handleSaveInvoice"), "Must have handleSaveInvoice handler");
-assert.ok(content.includes("modal-live-preview-pane"), "Must have real-time live preview pane");
+assert.ok(content.includes("modal-live-preview-pane") || workspaceContent.includes("modal-live-preview-pane"), "Must have real-time live preview pane");
 assert.ok(content.includes("Loader2"), "Must include Loader2 for in-table loading state");
 assert.ok(content.includes("RefreshCw"), "Must include RefreshCw icon for manual refresh button");
 assert.ok(content.includes("Pagination"), "Must import and mount Pagination component");

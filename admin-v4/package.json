@@ -11,7 +11,10 @@
     "lint": "tsc --noEmit",
     "test:employee": "node test-employee-flow.mjs",
     "test:attendance": "node test-attendance-flow.mjs",
-    "test:salary": "node test-salary-list-flow.mjs"
+    "test:salary": "node test-salary-list-flow.mjs",
+    "test:linkage": "node test-stage1-cross-module-linkage.mjs",
+    "test:express": "node test-express-fidelity-flow.mjs",
+    "test:express:matrix": "node test-express-lifecycle-matrix.mjs"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",

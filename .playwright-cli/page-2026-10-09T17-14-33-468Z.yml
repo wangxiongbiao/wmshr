@@ -1,0 +1,253 @@
+- generic:
+  - generic [aria-hidden]:
+    - generic:
+      - complementary:
+        - generic: WMSHR
+        - navigation:
+          - generic:
+            - button:
+              - generic: 客户管理
+            - generic:
+              - button:
+                - generic: 客户列表
+          - generic:
+            - button:
+              - generic: 库存管理
+            - generic:
+              - button:
+                - generic: 订单列表
+              - button:
+                - generic: 入库列表
+              - button:
+                - generic: 商品列表
+          - generic:
+            - button:
+              - generic: 员工管理
+            - generic:
+              - button:
+                - generic: 数据看板
+              - button:
+                - generic: 员工列表
+              - button:
+                - generic: 考勤列表
+              - button:
+                - generic: 请假列表
+              - button:
+                - generic: 薪资列表
+          - generic:
+            - button:
+              - generic: 财务管理
+            - generic:
+              - button:
+                - generic: 报销列表
+              - button:
+                - generic: 发票列表
+              - button:
+                - generic: 快递列表
+          - generic:
+            - button:
+              - generic: 培训管理
+            - generic:
+              - button:
+                - generic: 培训列表
+          - generic:
+            - button:
+              - generic: 厨房管理
+            - generic:
+              - button:
+                - generic: 菜谱列表
+          - generic:
+            - button:
+              - generic: 移动协同
+            - generic:
+              - button:
+                - generic: 员工考勤APP
+      - main:
+        - generic:
+          - generic:
+            - heading [level=2]: 员工列表
+          - generic:
+            - generic:
+              - button:
+                - generic: 🌐
+                - generic: 简体中文
+            - generic:
+              - button:
+                - generic: 当前国家：🏳️ 未选择
+            - generic:
+              - generic:
+                - generic: 10:14:33
+                - generic: 10月9日 周五
+            - generic:
+              - generic:
+                - generic: 系
+                - generic:
+                  - generic: 系统管理员 (Gary)
+                  - generic: 超管
+              - button:
+                - generic: 安全退出
+        - generic:
+          - generic:
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - textbox:
+                      - /placeholder: 搜索姓名、职位或区域...
+                  - generic:
+                    - tablist:
+                      - tab [selected]: 在职员工
+                      - tab: 离职员工
+                - generic:
+                  - button: 假期设置
+                  - button: 考勤设置
+                  - button: 刷新
+                  - button: 新增员工
+              - generic:
+                - generic:
+                  - generic:
+                    - button
+                    - button
+                    - button
+                    - button
+                  - generic:
+                    - generic:
+                      - heading [level=3]: Nono Hot Path Updated
+                      - generic:
+                        - generic: 🇲🇲
+                        - generic: 缅甸
+                        - generic: 🇹🇭 泰国仓
+                        - generic: 女
+                        - generic: 在职
+                  - generic:
+                    - generic:
+                      - paragraph: 职位
+                      - paragraph: 分拣主管
+                    - generic:
+                      - paragraph: 区域
+                      - paragraph: 操作部
+                    - generic:
+                      - paragraph: 时薪
+                      - paragraph:
+                        - generic:
+                          - text: ฿200.00
+                          - generic: (折算)
+                    - generic:
+                      - paragraph: 薪资制
+                      - paragraph: ฿48,000.00/月
+                    - generic:
+                      - paragraph: 用工性质
+                      - paragraph: 自招员工
+                    - generic:
+                      - paragraph: 入职日期
+                      - paragraph: 2026-06-01
+                    - generic:
+                      - paragraph: 全勤奖
+                      - paragraph: "-"
+                    - generic:
+                      - paragraph: 社保
+                      - paragraph: "-"
+                - generic:
+                  - generic:
+                    - button
+                    - button
+                    - button
+                    - button
+                  - generic:
+                    - generic:
+                      - heading [level=3]: Nono Latency Check Updated
+                      - generic:
+                        - generic: 🇲🇲
+                        - generic: 缅甸
+                        - generic: 🇹🇭 泰国仓
+                        - generic: 女
+                        - generic: 在职
+                  - generic:
+                    - generic:
+                      - paragraph: 职位
+                      - paragraph: 分拣主管
+                    - generic:
+                      - paragraph: 区域
+                      - paragraph: 操作部
+                    - generic:
+                      - paragraph: 时薪
+                      - paragraph:
+                        - generic:
+                          - text: ฿200.00
+                          - generic: (折算)
+                    - generic:
+                      - paragraph: 薪资制
+                      - paragraph: ฿48,000.00/月
+                    - generic:
+                      - paragraph: 用工性质
+                      - paragraph: 自招员工
+                    - generic:
+                      - paragraph: 入职日期
+                      - paragraph: 2026-06-01
+                    - generic:
+                      - paragraph: 全勤奖
+                      - paragraph: "-"
+                    - generic:
+                      - paragraph: 社保
+                      - paragraph: "-"
+              - generic:
+                - navigation:
+                  - generic:
+                    - generic:
+                      - text: 共
+                      - strong: "2"
+                      - text: 条
+                    - generic: ，每页
+                    - combobox
+                    - generic: 条
+                  - generic:
+                    - button [disabled]:
+                      - generic: 上一页
+                    - button: "1"
+                    - button [disabled]:
+                      - generic: 下一页
+  - dialog [ref=f1e1460]:
+    - heading "假期设置" [level=2] [ref=f1e1462]
+    - generic [ref=f1e1465]:
+      - generic [ref=f1e1466]:
+        - paragraph [ref=f1e1467]: ⚠️ 加班费计算规则说明：
+        - paragraph [ref=f1e1468]: 1. 在此列表中保存的日期，将被系统判定为「法定节假日」，加班费用按基准时薪的 3.0 倍 计算。
+        - paragraph [ref=f1e1469]: 2. 周六、周日（非节假日）将被自动识别为「周末加班」，加班费用按 2.0 倍 计算。
+        - paragraph [ref=f1e1470]: 3. 普通工作日的加班费用按 1.5 倍 计算。
+      - generic [ref=f1e1471]:
+        - generic [ref=f1e1472]: 💡 快速导入 2026 预设法定节假日：
+        - generic [ref=f1e1473]:
+          - button "🇨🇳 中国 (CN)" [active] [ref=f1e1474] [cursor=pointer]
+          - button "🇹🇭 泰国 (TH)" [ref=f1e1475] [cursor=pointer]
+          - button "🇲🇾 马来西亚 (MY)" [ref=f1e1476] [cursor=pointer]
+          - button "🇮🇩 印尼 (ID)" [ref=f1e1477] [cursor=pointer]
+          - button "🇸🇬 新加坡 (SG)" [ref=f1e1478] [cursor=pointer]
+          - button "🇵🇭 菲律宾 (PH)" [ref=f1e1479] [cursor=pointer]
+          - button "🇰🇷 韩国 (KR)" [ref=f1e1480] [cursor=pointer]
+          - button "🇯🇵 日本 (JP)" [ref=f1e1481] [cursor=pointer]
+          - button "🇧🇳 文莱 (BN)" [ref=f1e1482] [cursor=pointer]
+          - button "🇲🇲 缅甸 (MM)" [ref=f1e1483] [cursor=pointer]
+          - button "🇻🇳 越南 (VN)" [ref=f1e1484] [cursor=pointer]
+          - button "🇰🇭 柬埔寨 (KH)" [ref=f1e1485] [cursor=pointer]
+      - generic [ref=f1e1486]:
+        - generic [ref=f1e1487]: ➕ 手动新增自定义假期：
+        - generic [ref=f1e1488]:
+          - generic [ref=f1e1489]:
+            - generic [ref=f1e1490]: 日期
+            - button "选择日期" [ref=f1e1492] [cursor=pointer]
+          - generic [ref=f1e1497]:
+            - generic [ref=f1e1498]: 节日名称
+            - 'textbox "例如: 春节、国庆节" [ref=f1e1499]'
+          - generic [ref=f1e1500]:
+            - generic [ref=f1e1501]: 所属国家
+            - generic [ref=f1e1502]:
+              - combobox [ref=f1e1503] [cursor=pointer]:
+                - generic: 🇨🇳 中国 (CN)
+              - button "添加" [disabled]
+      - generic [ref=f1e1506]:
+        - generic [ref=f1e1507]: 📅 已设置假期 (0 天)：
+        - generic [ref=f1e1509]: 目前尚未添加任何假期。点击上方按钮可快速一键导入常用假期，或手动添加。
+    - generic [ref=f1e1510]:
+      - generic [ref=f1e1511]: 如需更多国家，请联系：smartbillpro@gamil.com
+      - button "保存并完成" [ref=f1e1512] [cursor=pointer]
+    - button "Close" [ref=f1e1513] [cursor=pointer]

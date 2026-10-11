@@ -1,7 +1,7 @@
 import { hashPassword } from "../server/auth-v4.js";
 
 const DEFAULT_EMPLOYEE_PASSWORD = "Aa123456";
-const EMPLOYEE_COLUMNS = "id, employee_no, name, nickname, gender, warehouse_code, nationality, country, phone, role, dept, join_date, status, attendance_rule_id, salary_type, hourly_rate, fixed_salary, daily_wage, overtime_hourly_fee, overtime_rule_enabled, ot_rule_type, ot_base_rate, ot_multiplier_workday, ot_multiplier_weekend, ot_multiplier_holiday, is_dispatch_personnel, attendance_bonus, social_security, meal_allowance, service_fee_rate, currency, bank_card_number, bank_name, id_card, photo, is_deleted, updated_at, license_fee, tax_rate";
+const EMPLOYEE_COLUMNS = "id, employee_no, name, nickname, gender, warehouse_code, nationality, country, phone, role, dept, requires_attendance, join_date, status, attendance_rule_id, salary_type, hourly_rate, fixed_salary, daily_wage, overtime_hourly_fee, overtime_rule_enabled, ot_rule_type, ot_base_rate, ot_multiplier_workday, ot_multiplier_weekend, ot_multiplier_holiday, is_dispatch_personnel, attendance_bonus, social_security, meal_allowance, service_fee_rate, currency, bank_card_number, bank_name, id_card, photo, is_deleted, updated_at, license_fee, tax_rate";
 
 const normalizeGender = g => (g === "male" || g === "男" ? "male" : "female");
 
@@ -68,6 +68,7 @@ export function mapEmployeeRow(row) {
     phone: row.phone,
     role: row.role,
     dept: row.dept,
+    requiresAttendance: row.requires_attendance !== undefined && row.requires_attendance !== null ? Boolean(row.requires_attendance) : true,
     joinDate: normalizeDateValue(row.join_date),
     status: row.status,
     attendanceRuleId: row.attendance_rule_id == null ? 0 : Number(row.attendance_rule_id),
@@ -102,6 +103,69 @@ export function mapEmployeeRow(row) {
   };
 }
 
+const SALARY_AUDIT_FIELDS = [
+  { key: "salaryType", dbCol: "salary_type", label: "计薪模式" },
+  { key: "fixedSalary", dbCol: "fixed_salary", label: "基础月薪" },
+  { key: "dailyWage", dbCol: "daily_wage", label: "固定日薪" },
+  { key: "hourlyRate", dbCol: "hourly_rate", label: "标准时薪" },
+  { key: "currency", dbCol: "currency", label: "支付币种" },
+  { key: "taxRate", dbCol: "tax_rate", label: "个人所得税比例" },
+  { key: "attendanceBonus", dbCol: "attendance_bonus", label: "全勤奖" },
+  { key: "socialSecurity", dbCol: "social_security", label: "社保代扣" },
+  { key: "mealAllowance", dbCol: "meal_allowance", label: "每日餐补" },
+  { key: "licenseFee", dbCol: "license_fee", label: "牌照津贴" },
+  { key: "serviceFeeRate", dbCol: "service_fee_rate", label: "劳务派遣佣金率" },
+  { key: "otRuleType", dbCol: "ot_rule_type", label: "加班计算规则" },
+  { key: "overtimeHourlyFee", dbCol: "overtime_hourly_fee", label: "固定加班费" },
+  { key: "otBaseRate", dbCol: "ot_base_rate", label: "加班计算基准" },
+  { key: "otMultiplierWorkday", dbCol: "ot_multiplier_workday", label: "工作日加班倍率" },
+  { key: "otMultiplierWeekend", dbCol: "ot_multiplier_weekend", label: "周末加班倍率" },
+  { key: "otMultiplierHoliday", dbCol: "ot_multiplier_holiday", label: "节假日加班倍率" }
+];
+
+function computeSalaryDiff(beforeRow = {}, afterPayload = {}) {
+  const diffs = [];
+  const beforeSnapshot = {};
+  const afterSnapshot = {};
+
+  for (const item of SALARY_AUDIT_FIELDS) {
+    const rawBefore = beforeRow[item.dbCol] !== undefined ? beforeRow[item.dbCol] : beforeRow[item.key];
+    const rawAfter = afterPayload[item.key];
+
+    const norm = (val) => {
+      if (val === undefined || val === null || val === "") return null;
+      const num = Number(val);
+      if (Number.isFinite(num)) {
+        return num <= 0 ? null : Math.round(num * 100) / 100;
+      }
+      const str = String(val).trim();
+      return str === "" ? null : str;
+    };
+
+    const valBefore = norm(rawBefore);
+    const valAfter = norm(rawAfter);
+
+    beforeSnapshot[item.key] = valBefore;
+    afterSnapshot[item.key] = valAfter;
+
+    if (valBefore !== valAfter) {
+      diffs.push({
+        field: item.key,
+        label: item.label,
+        from: valBefore,
+        to: valAfter
+      });
+    }
+  }
+
+  return {
+    hasChanged: diffs.length > 0,
+    diffs,
+    beforeSnapshot,
+    afterSnapshot
+  };
+}
+
 function employeePayload(body = {}, authUser = {}) {
   const rawWarehouseCode = String(body.warehouseCode || body.warehouse || "").trim().toUpperCase();
   const isInvalidWarehouse = !rawWarehouseCode || rawWarehouseCode === "MM" || rawWarehouseCode === "KH";
@@ -117,6 +181,7 @@ function employeePayload(body = {}, authUser = {}) {
     phone: String(body.phone || "").trim(),
     role: String(body.role || "").trim(),
     dept: String(body.dept || "").trim(),
+    requiresAttendance: body.requiresAttendance !== undefined ? Boolean(body.requiresAttendance) : true,
     joinDate: normalizeDateValue(body.joinDate),
     status: normalizeStatus(body.status),
     ...(() => {
@@ -169,10 +234,10 @@ function employeePayload(body = {}, authUser = {}) {
     socialSecurity: nonNegative(body.socialSecurity),
     mealAllowance: nonNegative(body.mealAllowance !== undefined ? body.mealAllowance : body.mealAllowanceDaily),
     licenseFee: nonNegative(body.licenseFee),
-    serviceFeeRate: nonNegative(body.serviceFeeRate),
+    serviceFeeRate: nonNegative(body.serviceFeeRate !== undefined ? body.serviceFeeRate : body.dispatchCommissionRate),
     taxRate: (() => {
       const raw = normalizeAmount(body.taxRate);
-      return raw !== null && Number.isFinite(raw) && raw >= 0 ? raw : 5;
+      return raw !== null && Number.isFinite(raw) && raw >= 0 ? raw : null;
     })(),
     salaryEffectiveStartDate: normalizeDateValue(body.salaryEffectiveStartDate || body.joinDate),
     currency: String(body.currency || "THB"),
@@ -203,6 +268,14 @@ function validatePayload(payload) {
 function employeeNo() {
   // 时间戳后8位 + 4位随机数（1000-9999），碰撞概率 < 0.01%/ms
   return `EMP${Date.now().toString().slice(-8)}${String(Math.floor(Math.random() * 9000) + 1000)}`;
+}
+
+function generateAppAccount(warehouseCode = "TH") {
+  // 员工 APP 账号生成规则：仓库所属国家代码（如 MY、TH 等）+ 4位数字（1000-9999）
+  const code = String(warehouseCode || "TH").trim().toUpperCase();
+  const match = code.match(/^[A-Z]{2}/);
+  const prefix = match ? match[0] : "TH";
+  return `${prefix}${String(Math.floor(Math.random() * 9000) + 1000)}`;
 }
 
 async function compatibilityRuleId(supabase, ownerUserId, warehouseCode = "TH") {
@@ -303,7 +376,25 @@ async function ensureEmployeeAccount(supabase, employee, ownerUserId, customAcco
     }
     return existing.data;
   }
-  const accountToUse = customAccount || employee.employee_no;
+  let accountToUse = (customAccount && typeof customAccount === "string" && customAccount.trim()) ? customAccount.trim() : null;
+  if (!accountToUse) {
+    const wh = employee.warehouse_code || employee.country || "TH";
+    for (let i = 0; i < 10; i++) {
+      const candidate = generateAppAccount(wh);
+      const { data: check } = await supabase.from("workspace_accounts")
+        .select("id")
+        .eq("owner_user_id", ownerUserId)
+        .eq("account", candidate)
+        .maybeSingle();
+      if (!check) {
+        accountToUse = candidate;
+        break;
+      }
+    }
+    if (!accountToUse) {
+      accountToUse = generateAppAccount(wh);
+    }
+  }
   const passwordToUse = (customPassword && typeof customPassword === "string" && customPassword.trim().length >= 6) ? customPassword.trim() : DEFAULT_EMPLOYEE_PASSWORD;
   const result = await supabase.from("workspace_accounts").insert({
     owner_user_id: ownerUserId, employee_id: Number(employee.id), account: accountToUse,
@@ -442,7 +533,24 @@ async function ensureEmployeeAccountDirect(client, employee, ownerUserId, custom
     return acc;
   }
 
-  const accountToUse = customAccount || employee.employee_no;
+  let accountToUse = (customAccount && typeof customAccount === "string" && customAccount.trim()) ? customAccount.trim() : null;
+  if (!accountToUse) {
+    const wh = employee.warehouse_code || employee.country || "TH";
+    for (let i = 0; i < 10; i++) {
+      const candidate = generateAppAccount(wh);
+      const check = await client.query(
+        "SELECT id FROM workspace_accounts WHERE owner_user_id = $1 AND account = $2 LIMIT 1",
+        [ownerUserId, candidate]
+      );
+      if (check.rows.length === 0) {
+        accountToUse = candidate;
+        break;
+      }
+    }
+    if (!accountToUse) {
+      accountToUse = generateAppAccount(wh);
+    }
+  }
   const passwordToUse = (customPassword && typeof customPassword === "string" && customPassword.trim().length >= 6) ? customPassword.trim() : DEFAULT_EMPLOYEE_PASSWORD;
   const passwordHash = await hashPassword(passwordToUse);
   let createdAccount;
@@ -532,6 +640,27 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
   if (directDbPool) {
     directDbPool.query("ALTER TABLE workspace_employees ADD COLUMN IF NOT EXISTS tax_rate NUMERIC(6,2) DEFAULT 5.0;")
       .catch(err => console.warn("[admin-v4/employees] tax_rate schema auto-check:", err.message));
+
+    directDbPool.query("ALTER TABLE workspace_employees ADD COLUMN IF NOT EXISTS requires_attendance BOOLEAN NOT NULL DEFAULT true;")
+      .catch(err => console.warn("[admin-v4/employees] requires_attendance schema auto-check:", err.message));
+
+    directDbPool.query(`
+      CREATE TABLE IF NOT EXISTS workspace_salary_change_logs (
+        id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+        owner_user_id UUID NOT NULL,
+        employee_id BIGINT NOT NULL,
+        operator_id UUID,
+        operator_name TEXT,
+        effective_date DATE NOT NULL DEFAULT CURRENT_DATE,
+        change_reason TEXT,
+        before_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+        after_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+        changed_fields JSONB NOT NULL DEFAULT '[]'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+      );
+      CREATE INDEX IF NOT EXISTS idx_v4_salary_change_logs_emp
+        ON workspace_salary_change_logs (owner_user_id, employee_id, created_at DESC);
+    `).catch(err => console.warn("[admin-v4/employees] salary_change_logs table auto-check:", err.message));
   }
 
   const safeFailure = (res, error, message) => {
@@ -758,7 +887,7 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
           const insertRes = await client.query(`
             INSERT INTO workspace_employees (
               owner_user_id, warehouse_code, employee_no, name, nickname, gender,
-              nationality, country, phone, role, dept, join_date, status,
+              nationality, country, phone, role, dept, requires_attendance, join_date, status,
               attendance_rule_id, salary_type, hourly_rate, fixed_salary, daily_wage,
               overtime_hourly_fee, ot_rule_type, ot_base_rate, ot_multiplier_workday,
               ot_multiplier_weekend, ot_multiplier_holiday, is_dispatch_personnel,
@@ -767,17 +896,17 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
               created_at, updated_at
             ) VALUES (
               $1, $2, $3, $4, $5, $6,
-              $7, $8, $9, $10, $11, $12, $13,
-              $14, $15, $16, $17, $18,
-              $19, $20, $21, $22,
-              $23, $24, $25,
-              $26, $27, $28, $29,
-              $30, $31, $32, $33, $34, $35, $36, false,
+              $7, $8, $9, $10, $11, $12, $13, $14,
+              $15, $16, $17, $18, $19,
+              $20, $21, $22, $23,
+              $24, $25, $26,
+              $27, $28, $29, $30,
+              $31, $32, $33, $34, $35, $36, $37, false,
               NOW(), NOW()
             ) RETURNING *;
           `, [
             req.authUser.id, payload.warehouseCode, empNo, payload.name, payload.nickname, payload.gender,
-            payload.nationality, payload.country, payload.phone, payload.role, payload.dept, payload.joinDate, payload.status,
+            payload.nationality, payload.country, payload.phone, payload.role, payload.dept, payload.requiresAttendance, payload.joinDate, payload.status,
             ruleId, payload.salaryType, payload.hourlyRate, payload.fixedSalary, payload.dailyWage,
             payload.overtimeHourlyFee, payload.otRuleType, payload.otBaseRate, payload.otMultiplierWorkday,
             payload.otMultiplierWeekend, payload.otMultiplierHoliday, payload.isDispatchPersonnel,
@@ -805,7 +934,7 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
               const insertRes2 = await client.query(`
                 INSERT INTO workspace_employees (
                   owner_user_id, warehouse_code, employee_no, name, nickname, gender,
-                  nationality, country, phone, role, dept, join_date, status,
+                  nationality, country, phone, role, dept, requires_attendance, join_date, status,
                   attendance_rule_id, salary_type, hourly_rate, fixed_salary, daily_wage,
                   overtime_hourly_fee, ot_rule_type, ot_base_rate, ot_multiplier_workday,
                   ot_multiplier_weekend, ot_multiplier_holiday, is_dispatch_personnel,
@@ -814,17 +943,17 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
                   created_at, updated_at
                 ) VALUES (
                   $1, $2, $3, $4, $5, $6,
-                  $7, $8, $9, $10, $11, $12, $13,
-                  $14, $15, $16, $17, $18,
-                  $19, $20, $21, $22,
-                  $23, $24, $25,
-                  $26, $27, $28, $29,
-                  $30, $31, $32, $33, $34, $35, $36, false,
+                  $7, $8, $9, $10, $11, $12, $13, $14,
+                  $15, $16, $17, $18, $19,
+                  $20, $21, $22, $23,
+                  $24, $25, $26,
+                  $27, $28, $29, $30,
+                  $31, $32, $33, $34, $35, $36, $37, false,
                   NOW(), NOW()
                 ) RETURNING *;
               `, [
                 req.authUser.id, payload.warehouseCode, empNo2, payload.name, payload.nickname, payload.gender,
-                payload.nationality, payload.country, payload.phone, payload.role, payload.dept, payload.joinDate, payload.status,
+                payload.nationality, payload.country, payload.phone, payload.role, payload.dept, payload.requiresAttendance, payload.joinDate, payload.status,
                 ruleId2, payload.salaryType, payload.hourlyRate, payload.fixedSalary, payload.dailyWage,
                 payload.overtimeHourlyFee, payload.otRuleType, payload.otBaseRate, payload.otMultiplierWorkday,
                 payload.otMultiplierWeekend, payload.otMultiplierHoliday, payload.isDispatchPersonnel,
@@ -868,6 +997,7 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
         phone: payload.phone,
         role: payload.role,
         dept: payload.dept,
+        requires_attendance: payload.requiresAttendance,
         join_date: payload.joinDate,
         status: payload.status,
         attendance_rule_id: ruleId,
@@ -931,7 +1061,10 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
           client = await directDbPool.connect();
           await client.query("BEGIN");
           const scopeRes = await client.query(`
-            SELECT id, warehouse_code, updated_at
+            SELECT id, warehouse_code, updated_at, salary_type, hourly_rate, fixed_salary, daily_wage,
+                   overtime_hourly_fee, ot_rule_type, ot_base_rate, ot_multiplier_workday,
+                   ot_multiplier_weekend, ot_multiplier_holiday, attendance_bonus, social_security,
+                   meal_allowance, license_fee, service_fee_rate, currency, tax_rate
             FROM workspace_employees
             WHERE owner_user_id = $1 AND id = $2 AND is_deleted = false
             FOR UPDATE
@@ -964,10 +1097,11 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
               bank_card_number = $27, bank_name = $28, id_card = $29,
               license_fee = $30,
               tax_rate = $31,
-              warehouse_code = COALESCE($32, warehouse_code),
-              photo = CASE WHEN $33::boolean THEN $34 ELSE photo END,
+              requires_attendance = $32,
+              warehouse_code = COALESCE($33, warehouse_code),
+              photo = CASE WHEN $34::boolean THEN $35 ELSE photo END,
               updated_at = NOW()
-            WHERE owner_user_id = $35 AND id = $36
+            WHERE owner_user_id = $36 AND id = $37
             RETURNING *;
           `, [
             payload.name, payload.nickname, payload.gender, payload.nationality, payload.country,
@@ -980,6 +1114,7 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
             payload.bankCardNumber, payload.bankName, payload.idCard,
             payload.licenseFee,
             payload.taxRate,
+            payload.requiresAttendance,
             payload.warehouseCode || null,
             hasPhoto, photoVal,
             req.authUser.id, employeeId
@@ -988,6 +1123,49 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
           const data = updateRes.rows[0];
           await ensureSalaryProfileDirect(client, data, req.authUser.id, payload.salaryEffectiveStartDate);
           const appAccount = await ensureEmployeeAccountDirect(client, data, req.authUser.id, payload.username, payload.password, payload.permissions);
+
+          // 记录薪酬与规则字段调整履历（事务强一致，不可静默吞错）
+          const salaryDiff = computeSalaryDiff(scopeRes.rows[0], payload);
+          if (salaryDiff.hasChanged) {
+            const rawEffectiveDate = String(req.body?.effectiveDate || payload.salaryEffectiveStartDate || "").trim();
+            let effectiveDate = /^\d{4}-\d{2}-\d{2}$/.test(rawEffectiveDate) ? rawEffectiveDate : new Date().toISOString().split("T")[0];
+
+            // 业务校验（方案 B）：若修改后员工属于固定月薪制，生效日期必须锁定为每月 1 号（YYYY-MM-01）
+            const isMonthlyFixed = payload.salaryType === "fixed" || (payload.fixedSalary !== null && Number(payload.fixedSalary) > 0);
+            if (isMonthlyFixed && !effectiveDate.endsWith("-01")) {
+              // 自动规整为该月份 1 号，保证月薪自然月计薪闭环
+              effectiveDate = `${effectiveDate.slice(0, 7)}-01`;
+            }
+
+            // 校验不得早于员工入职所属月份 1 号
+            const empJoinMonthFirst = payload.joinDate ? `${payload.joinDate.slice(0, 7)}-01` : null;
+            if (empJoinMonthFirst && effectiveDate < empJoinMonthFirst) {
+              effectiveDate = empJoinMonthFirst;
+            }
+
+            const changeReason = typeof req.body?.changeReason === "string" && req.body.changeReason.trim()
+              ? req.body.changeReason.trim()
+              : "薪酬规则常规调整";
+            const operatorName = req.authUser.name || req.authUser.account || "管理员";
+
+            await client.query(`
+              INSERT INTO workspace_salary_change_logs (
+                owner_user_id, employee_id, operator_id, operator_name,
+                effective_date, change_reason, before_snapshot, after_snapshot, changed_fields
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            `, [
+              req.authUser.id,
+              employeeId,
+              req.authUser.userId || null,
+              operatorName,
+              effectiveDate,
+              changeReason,
+              JSON.stringify(salaryDiff.beforeSnapshot),
+              JSON.stringify(salaryDiff.afterSnapshot),
+              JSON.stringify(salaryDiff.diffs)
+            ]);
+          }
+
           await client.query("COMMIT");
           const empDto = mapEmployeeRow(data);
           if (appAccount?.account) empDto.username = appAccount.account;
@@ -1015,6 +1193,7 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
         phone: payload.phone,
         role: payload.role,
         dept: payload.dept,
+        requires_attendance: payload.requiresAttendance,
         join_date: payload.joinDate,
         status: payload.status,
         salary_type: payload.salaryType,
@@ -1062,6 +1241,36 @@ export function createEmployeeRouter({ express, supabase, directDbPool, identity
       }
       res.json({ employee: empDto, ruleHistory: [] });
     } catch (error) { safeFailure(res, error, "更新员工失败"); }
+  });
+
+  router.get("/employees/:id/salary-history", async (req, res) => {
+    try {
+      if (!permissionAllowed(req, "employees_view", "employees_manage")) return res.status(403).json({ error: "无权查看员工薪酬调整记录" });
+      const employeeId = Number(req.params.id);
+      if (!employeeId || Number.isNaN(employeeId)) return res.status(400).json({ error: "无效的员工 ID" });
+
+      if (directDbPool) {
+        const { rows } = await directDbPool.query(`
+          SELECT id, employee_id, operator_name, effective_date, change_reason,
+                 before_snapshot, after_snapshot, changed_fields, created_at
+          FROM workspace_salary_change_logs
+          WHERE owner_user_id = $1 AND employee_id = $2
+          ORDER BY created_at DESC
+        `, [req.authUser.id, employeeId]);
+
+        return res.json({ items: rows });
+      }
+
+      const { data, error } = await supabase
+        .from("workspace_salary_change_logs")
+        .select("id, employee_id, operator_name, effective_date, change_reason, before_snapshot, after_snapshot, changed_fields, created_at")
+        .eq("owner_user_id", req.authUser.id)
+        .eq("employee_id", employeeId)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      res.json({ items: data || [] });
+    } catch (error) { safeFailure(res, error, "员工薪酬调整记录加载失败"); }
   });
 
   router.delete("/employees/:id", async (req, res) => {

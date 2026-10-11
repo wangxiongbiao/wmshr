@@ -1,0 +1,641 @@
+- generic:
+  - generic [aria-hidden]:
+    - generic:
+      - complementary:
+        - generic: WMSHR
+        - navigation:
+          - generic:
+            - button:
+              - generic: 客户管理
+            - generic:
+              - button:
+                - generic: 客户列表
+          - generic:
+            - button:
+              - generic: 库存管理
+            - generic:
+              - button:
+                - generic: 订单列表
+              - button:
+                - generic: 入库列表
+              - button:
+                - generic: 商品列表
+          - generic:
+            - button:
+              - generic: 员工管理
+            - generic:
+              - button:
+                - generic: 数据看板
+              - button:
+                - generic: 员工列表
+              - button:
+                - generic: 考勤列表
+              - button:
+                - generic: 请假列表
+              - button:
+                - generic: 薪资列表
+          - generic:
+            - button:
+              - generic: 财务管理
+            - generic:
+              - button:
+                - generic: 报销列表
+              - button:
+                - generic: 发票列表
+              - button:
+                - generic: 快递列表
+          - generic:
+            - button:
+              - generic: 培训管理
+            - generic:
+              - button:
+                - generic: 培训列表
+          - generic:
+            - button:
+              - generic: 厨房管理
+            - generic:
+              - button:
+                - generic: 菜谱列表
+          - generic:
+            - button:
+              - generic: 移动协同
+            - generic:
+              - button:
+                - generic: 员工考勤APP
+      - main:
+        - generic:
+          - generic:
+            - heading [level=2]: 员工列表
+          - generic:
+            - generic:
+              - button:
+                - generic: 🌐
+                - generic: 简体中文
+            - generic:
+              - button:
+                - generic: 当前国家：🏳️ 未选择
+            - generic:
+              - generic:
+                - generic: 10:07:25
+                - generic: 10月9日 周五
+            - generic:
+              - generic:
+                - generic: 系
+                - generic:
+                  - generic: 系统管理员 (Gary)
+                  - generic: 超管
+              - button:
+                - generic: 安全退出
+        - generic:
+          - generic:
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - textbox:
+                      - /placeholder: 搜索姓名、职位或区域...
+                  - generic:
+                    - tablist:
+                      - tab [selected]: 在职员工
+                      - tab: 离职员工
+                - generic:
+                  - button: 假期设置
+                  - button: 考勤设置
+                  - button: 刷新
+                  - button: 新增员工
+              - generic:
+                - generic:
+                  - generic:
+                    - button
+                    - button
+                    - button
+                    - button
+                  - generic:
+                    - generic:
+                      - heading [level=3]: Nono Hot Path Updated
+                      - generic:
+                        - generic: 🇲🇲
+                        - generic: 缅甸
+                        - generic: 🇹🇭 泰国仓
+                        - generic: 女
+                        - generic: 在职
+                  - generic:
+                    - generic:
+                      - paragraph: 职位
+                      - paragraph: 分拣主管
+                    - generic:
+                      - paragraph: 区域
+                      - paragraph: 操作部
+                    - generic:
+                      - paragraph: 时薪
+                      - paragraph:
+                        - generic:
+                          - text: ฿200.00
+                          - generic: (折算)
+                    - generic:
+                      - paragraph: 薪资制
+                      - paragraph: ฿48,000.00/月
+                    - generic:
+                      - paragraph: 用工性质
+                      - paragraph: 自招员工
+                    - generic:
+                      - paragraph: 入职日期
+                      - paragraph: 2026-06-01
+                    - generic:
+                      - paragraph: 全勤奖
+                      - paragraph: "-"
+                    - generic:
+                      - paragraph: 社保
+                      - paragraph: "-"
+                - generic:
+                  - generic:
+                    - button
+                    - button
+                    - button
+                    - button
+                  - generic:
+                    - generic:
+                      - heading [level=3]: Nono Latency Check Updated
+                      - generic:
+                        - generic: 🇲🇲
+                        - generic: 缅甸
+                        - generic: 🇹🇭 泰国仓
+                        - generic: 女
+                        - generic: 在职
+                  - generic:
+                    - generic:
+                      - paragraph: 职位
+                      - paragraph: 分拣主管
+                    - generic:
+                      - paragraph: 区域
+                      - paragraph: 操作部
+                    - generic:
+                      - paragraph: 时薪
+                      - paragraph:
+                        - generic:
+                          - text: ฿200.00
+                          - generic: (折算)
+                    - generic:
+                      - paragraph: 薪资制
+                      - paragraph: ฿48,000.00/月
+                    - generic:
+                      - paragraph: 用工性质
+                      - paragraph: 自招员工
+                    - generic:
+                      - paragraph: 入职日期
+                      - paragraph: 2026-06-01
+                    - generic:
+                      - paragraph: 全勤奖
+                      - paragraph: "-"
+                    - generic:
+                      - paragraph: 社保
+                      - paragraph: "-"
+                - generic:
+                  - generic:
+                    - button
+                    - button
+                    - button
+                    - button
+                  - generic:
+                    - generic: 真
+                    - generic:
+                      - heading [level=3]: 真实走查陈建国
+                      - generic:
+                        - generic: 🇲🇲
+                        - generic: 缅甸
+                        - generic: 🇹🇭 泰国仓
+                        - generic: 女
+                        - generic: 在职
+                  - generic:
+                    - generic:
+                      - paragraph: 职位
+                      - paragraph: 拣货员
+                    - generic:
+                      - paragraph: 区域
+                      - paragraph: A区-分拣
+                    - generic:
+                      - paragraph: 时薪
+                      - paragraph:
+                        - generic:
+                          - text: ฿133.33
+                          - generic: (折算)
+                    - generic:
+                      - paragraph: 薪资制
+                      - paragraph: ฿32,000.00/月
+                    - generic:
+                      - paragraph: 用工性质
+                      - paragraph: 自招员工
+                    - generic:
+                      - paragraph: 入职日期
+                      - paragraph: 2026-10-09
+                    - generic:
+                      - paragraph: 全勤奖
+                      - paragraph: ฿1,800.00
+                    - generic:
+                      - paragraph: 社保
+                      - paragraph: ฿850.00
+              - generic:
+                - navigation:
+                  - generic:
+                    - generic:
+                      - text: 共
+                      - strong: "3"
+                      - text: 条
+                    - generic: ，每页
+                    - combobox
+                    - generic: 条
+                  - generic:
+                    - button [disabled]:
+                      - generic: 上一页
+                    - button: "1"
+                    - button [disabled]:
+                      - generic: 下一页
+  - dialog [aria-hidden]:
+    - generic:
+      - heading [level=2]: 编辑员工档案
+    - generic:
+      - generic:
+        - generic:
+          - heading [level=4]: 1、基本个人信息
+          - generic:
+            - generic:
+              - generic: 上传照片
+              - generic:
+                - generic:
+                  - generic: 员工姓名 *
+                  - textbox:
+                    - /placeholder: 例：张伟 / Somchai
+                    - text: 真实走查陈建国
+                - generic:
+                  - generic: 性别
+                  - combobox:
+                    - generic: 女
+                  - combobox [aria-hidden]
+                - generic:
+                  - generic: 国籍
+                  - combobox:
+                    - generic: 🇲🇲 缅甸籍
+                  - combobox [aria-hidden]
+                - generic:
+                  - generic: 员工状态 *
+                  - combobox:
+                    - generic: 在职
+                  - combobox [aria-hidden]
+                - generic:
+                  - generic: 入职日期 *
+                  - generic:
+                    - button:
+                      - generic: 2026-10-09
+                      - button
+                - generic:
+                  - generic: 所属区域
+                  - textbox:
+                    - /placeholder: 如：A区-入库
+                    - text: A区-分拣
+                - generic:
+                  - generic: 所属海外仓
+                  - combobox:
+                    - generic: 🇹🇭 泰国仓
+                  - combobox [aria-hidden]
+        - generic:
+          - heading [level=4]: 4、薪酬福利设置
+          - generic:
+            - generic:
+              - generic:
+                - generic: 用工性质 / 来源类型
+                - combobox:
+                  - generic: 自招员工
+                - combobox [aria-hidden]
+              - generic:
+                - generic:
+                  - generic: 派遣服务抽佣比例
+                  - generic: 自招员工：不计算派遣抽佣服务费
+              - generic:
+                - generic:
+                  - generic:
+                    - generic: "*"
+                    - text: 薪资标准（输入固定月薪，或输入固定日薪 / 时薪）
+                  - generic: 已启用固定月薪模式：时薪与日薪已置灰锁定
+              - generic:
+                - generic:
+                  - generic: 时薪
+                  - generic: (已置灰)
+                - generic:
+                  - spinbutton [disabled]
+              - generic:
+                - generic:
+                  - generic: 固定日薪
+                  - generic: (已置灰)
+                - generic:
+                  - spinbutton [disabled]
+              - generic:
+                - generic:
+                  - generic: 固定月薪
+                  - generic: (生效中)
+                - generic:
+                  - spinbutton: "38000"
+                  - generic: ≈ 158.3 THB/时折算
+              - generic:
+                - generic: 工资币种
+                - combobox:
+                  - generic: ฿ THB (泰铢)
+                - combobox [aria-hidden]
+              - generic:
+                - generic: 固定全勤奖金
+                - spinbutton: "1800"
+              - generic:
+                - generic: 代扣代缴社保费
+                - spinbutton: "850"
+              - generic:
+                - generic: 餐费补贴 (按天计发)
+                - spinbutton: "100"
+              - generic:
+                - generic: 证书 / 技能补贴 (License fee)
+                - spinbutton: "600"
+              - generic:
+                - generic: 加班算薪规则
+                - generic:
+                  - generic:
+                    - generic: 加班薪资计算规则
+                    - combobox:
+                      - generic: 固定加班费用
+                    - combobox [aria-hidden]
+                  - generic:
+                    - generic: 固定加班费用 (每小时)
+                    - spinbutton: "90"
+                    - generic: 加班薪资 = 加班工时 × 固定费用，默认为 0。
+                  - generic:
+                    - generic:
+                      - generic: 个人所得税比例 (%)
+                      - generic: 默认：5%
+                    - generic:
+                      - spinbutton: "5"
+                      - generic: "%"
+                    - generic: 月度工资核算时代扣个人所得税比例，若不填则默认按 5% 计算
+        - generic:
+          - heading [level=4]: 2、银行账户信息
+          - generic:
+            - generic:
+              - generic:
+                - generic: 发薪银行
+                - textbox:
+                  - /placeholder: 如：盘谷银行 (Bangkok Bank)、大城银行、中国工商银行
+                  - text: Kasikorn Bank
+              - generic:
+                - generic: 发薪卡号 / 银行账号
+                - textbox:
+                  - /placeholder: 请输入发薪银行卡号或账户号
+                  - text: "6222021234567890"
+              - generic:
+                - generic: 身份证号 / IC Card / 护照号
+                - textbox:
+                  - /placeholder: 请输入身份证号、IC Card或护照号
+                  - text: "110101199003072345"
+        - generic:
+          - heading [level=4]: 4、APP 登录账户配置
+          - generic:
+            - generic:
+              - generic:
+                - generic: APP 登录账号
+                - textbox:
+                  - /placeholder: 系统默认：姓名拼音或字母
+                  - text: test_e2e_playwright
+              - generic:
+                - generic: 安全登录密码
+                - generic:
+                  - textbox:
+                    - /placeholder: 留空则保持原密码不变
+                  - button: 随机密码
+        - generic:
+          - heading [level=4]: 5、后台角色与系统操作权限
+          - generic:
+            - generic:
+              - generic: 一键应用角色权限模板
+              - generic:
+                - button: 管理员
+                - button: 考勤专员
+                - button: 仓储主管
+                - button: 财务出纳
+                - button: 普通员工
+              - paragraph: "* 提示：选择预设角色将自动重置权限勾选。您也可以在下方单独勾选或取消勾选某些权限，支持精细化自由配置。"
+            - generic:
+              - generic: 系统权限明细
+              - generic:
+                - generic:
+                  - generic:
+                    - generic: 数据看板
+                    - button: 全选本组
+                  - generic:
+                    - generic:
+                      - checkbox
+                      - generic:
+                        - paragraph: 数据看板查看
+                        - paragraph: 查看看板整体经营与出勤统计
+                - generic:
+                  - generic:
+                    - generic: 员工花名册
+                    - button: 全选本组
+                  - generic:
+                    - generic:
+                      - checkbox
+                      - generic:
+                        - paragraph: 查看员工列表
+                        - paragraph: 查看花名册、账号及岗位信息
+                    - generic:
+                      - checkbox
+                      - generic:
+                        - paragraph: 新增/编辑员工
+                        - paragraph: 新增员工及修改用工与薪资设置
+                    - generic:
+                      - checkbox
+                      - generic:
+                        - paragraph: 办理离职与归档
+                        - paragraph: 标记员工离职并安全归档考勤与薪酬
+                    - generic:
+                      - checkbox
+                      - generic:
+                        - paragraph: 重置APP密码
+                        - paragraph: 一键重置移动端协同APP安全密码
+                - generic:
+                  - generic:
+                    - generic: 考勤与请假
+                    - button: 全选本组
+                  - generic:
+                    - generic:
+                      - checkbox
+                      - generic:
+                        - paragraph: 查看考勤记录
+                        - paragraph: 查看打卡时间、GPS距离及异常状态
+                    - generic:
+                      - checkbox
+                      - generic:
+                        - paragraph: 考勤补卡与调整
+                        - paragraph: 手工调整考勤、补卡及修正考勤异常
+                    - generic:
+                      - checkbox
+                      - generic:
+                        - paragraph: 查看请假列表
+                        - paragraph: 查看所有请假日志、事由及统计
+                    - generic:
+                      - checkbox
+                      - generic:
+                        - paragraph: 审批请假单
+                        - paragraph: 审核并批准或驳回员工请假申请
+                - generic:
+                  - generic:
+                    - generic: 财务与薪资
+                    - button: 全选本组
+                  - generic:
+                    - generic:
+                      - checkbox
+                      - generic:
+                        - paragraph: 查看薪资核算
+                        - paragraph: 查看月度工资表及自动核算明细
+                    - generic:
+                      - checkbox
+                      - generic:
+                        - paragraph: 发放/锁定薪资
+                        - paragraph: 确认发放薪资条并锁定不可篡改
+                    - generic:
+                      - checkbox
+                      - generic:
+                        - paragraph: 查看费用报表
+                        - paragraph: 查看垫付、报销与日常支出流水
+                    - generic:
+                      - checkbox
+                      - generic:
+                        - paragraph: 审批费用报销
+                        - paragraph: 审批驳回员工发起的日常报销与垫付
+                    - generic:
+                      - checkbox
+                      - generic:
+                        - paragraph: 新建费用支出
+                        - paragraph: 手工录入公司营运支出流水
+                - generic:
+                  - generic:
+                    - generic: 跨境商户
+                    - button: 全选本组
+                  - generic:
+                    - generic:
+                      - checkbox
+                      - generic:
+                        - paragraph: 查看商户列表
+                        - paragraph: 查看签约商户、绑定店铺与授信额度
+                    - generic:
+                      - checkbox
+                      - generic:
+                        - paragraph: 维护商户档案
+                        - paragraph: 编辑商户签约信息与平台授权
+                    - generic:
+                      - checkbox
+                      - generic:
+                        - paragraph: 商户余额充值
+                        - paragraph: 录入线下打款并增加商户可用账户余额
+                - generic:
+                  - generic:
+                    - generic: 海外仓储
+                    - button: 全选本组
+                  - generic:
+                    - generic:
+                      - checkbox
+                      - generic:
+                        - paragraph: 查看入库列表
+                        - paragraph: 查看商户到货单、到件规格与唛头
+                    - generic:
+                      - checkbox
+                      - generic:
+                        - paragraph: 新建/签收入库
+                        - paragraph: 录入到货并电子签名确认入库
+                    - generic:
+                      - checkbox
+                      - generic:
+                        - paragraph: 查看商品与货位
+                        - paragraph: 查看SKU库存、货位分布及尺寸重量
+                    - generic:
+                      - checkbox
+                      - generic:
+                        - paragraph: 商品盘点与维护
+                        - paragraph: 调整货位布局与实盘库存修正
+                    - generic:
+                      - checkbox
+                      - generic:
+                        - paragraph: 查看出库订单
+                        - paragraph: 查看电商物流面单与拣货发运单
+                    - generic:
+                      - checkbox
+                      - generic:
+                        - paragraph: 打单分拨与出货
+                        - paragraph: 一键拉单、打印面单及分拨出库
+                - generic:
+                  - generic:
+                    - generic: 培训与菜谱 (SOP)
+                    - button: 全选本组
+                  - generic:
+                    - generic:
+                      - checkbox
+                      - generic:
+                        - paragraph: 查看培训与SOP
+                        - paragraph: 查阅标准作业程序与流程配方
+                    - generic:
+                      - checkbox
+                      - generic:
+                        - paragraph: 编辑/起草SOP
+                        - paragraph: 编写操作规程流程与图文说明
+                    - generic:
+                      - checkbox
+                      - generic:
+                        - paragraph: 审核并发布SOP
+                        - paragraph: 发布课程与SOP实时同步至员工端APP
+    - generic:
+      - button: 取消
+      - button: 保存员工档案
+    - button:
+      - generic: Close
+  - dialog [ref=f1e908]:
+    - generic [ref=f1e914]:
+      - heading "确认员工薪酬及规则调整" [level=2] [ref=f1e915]
+      - paragraph [ref=f1e917]: 员工：真实走查陈建国
+    - generic [ref=f1e918]:
+      - generic [ref=f1e919]:
+        - generic [ref=f1e920]:
+          - generic [ref=f1e921]: 薪酬规则变动对比
+          - generic [ref=f1e923]: 共 1 项变动
+        - generic [ref=f1e925]:
+          - generic [ref=f1e926]: 固定月薪
+          - generic [ref=f1e931]:
+            - generic [ref=f1e932]: "32000"
+            - generic [ref=f1e935]: "38000"
+            - generic [ref=f1e936]: +6,000
+      - generic [ref=f1e937]:
+        - generic [ref=f1e938]: 本次调整原因（选填）
+        - textbox "如：岗位晋升、转正定薪、年度调薪、规则微调等" [active] [ref=f1e939]
+        - generic [ref=f1e940]:
+          - button "职务晋升" [ref=f1e941] [cursor=pointer]
+          - button "转正定薪" [ref=f1e942] [cursor=pointer]
+          - button "年度调薪" [ref=f1e943] [cursor=pointer]
+          - button "岗位调整" [ref=f1e944] [cursor=pointer]
+          - button "税率规则变更" [ref=f1e945] [cursor=pointer]
+      - generic [ref=f1e946]:
+        - generic [ref=f1e947]:
+          - generic [ref=f1e948]: 生效日期
+          - generic [ref=f1e949]: 固定月薪计薪周期为完整自然月，生效日须为每月 1 号
+        - generic [ref=f1e950]:
+          - generic [ref=f1e951]:
+            - button "2026-11-01 推荐 次月 1 号起计薪（下期发薪生效 · 推荐）" [ref=f1e952] [cursor=pointer]:
+              - generic [ref=f1e953]:
+                - generic [ref=f1e954]: 2026-11-01
+                - generic [ref=f1e955]: 推荐
+              - paragraph [ref=f1e956]: 次月 1 号起计薪（下期发薪生效 · 推荐）
+            - button "2026-10-01 追溯 本月 1 号起计薪（当月全月生效）" [ref=f1e957] [cursor=pointer]:
+              - generic [ref=f1e958]:
+                - generic [ref=f1e959]: 2026-10-01
+                - generic [ref=f1e960]: 追溯
+              - paragraph [ref=f1e961]: 本月 1 号起计薪（当月全月生效）
+          - generic [ref=f1e962]:
+            - generic [ref=f1e963]: 或选择其他月份 1 号：
+            - button "2026-11-01" [ref=f1e965] [cursor=pointer]:
+              - button "清空" [ref=f1e970]
+    - generic [ref=f1e974]:
+      - button "返回修改" [ref=f1e975] [cursor=pointer]
+      - button "确认并保存调整" [ref=f1e976] [cursor=pointer]
+    - button "Close" [ref=f1e978] [cursor=pointer]

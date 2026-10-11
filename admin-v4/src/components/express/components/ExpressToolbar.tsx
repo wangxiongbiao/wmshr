@@ -6,10 +6,12 @@ import {
   Upload,
   Coins,
   Download,
-  Trash2,
   RotateCcw,
   SlidersHorizontal,
-  Table as TableIcon
+  Table as TableIcon,
+  History,
+  RefreshCw,
+  Loader2
 } from "lucide-react";
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
@@ -40,10 +42,12 @@ interface ExpressToolbarProps {
   onToggleImport: () => void;
   onToggleSurcharge: () => void;
   surchargeCount: number;
-  onLoadDemoData: () => void;
+  onOpenImportLogs: () => void;
+  importLogsCount: number;
   onExportCsv: () => void;
-  onClearData: () => void;
+  onClearData?: () => void;
   hasData: boolean;
+  onRefresh?: () => void;
   summaryCustomerCount: number;
   totalFilteredCount: number;
   discrepancyCount: number;
@@ -67,15 +71,20 @@ export function ExpressToolbar(props: ExpressToolbarProps) {
     onToggleImport,
     onToggleSurcharge,
     surchargeCount,
-    onLoadDemoData,
+    onOpenImportLogs,
+    importLogsCount,
     onExportCsv,
     onClearData,
     hasData,
+    onRefresh,
     summaryCustomerCount,
     totalFilteredCount,
     discrepancyCount,
     tableContainerRef
   } = props;
+
+  const [isRefreshing, setIsRefreshing] = React.useState(false);
+  const [isExporting, setIsExporting] = React.useState(false);
 
   const hasFilterActive =
     Boolean(searchQuery.trim()) ||
@@ -86,6 +95,25 @@ export function ExpressToolbar(props: ExpressToolbarProps) {
     onSearchChange("");
     onStatusFilterChange("all");
     onCustomerFilterChange("all");
+  };
+
+  const handleManualRefresh = () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    setTimeout(() => {
+      onRefresh?.();
+      setIsRefreshing(false);
+    }, 600);
+  };
+
+  const handleExportWithDebounce = () => {
+    if (isExporting) return;
+    setIsExporting(true);
+    try {
+      onExportCsv();
+    } finally {
+      setTimeout(() => setIsExporting(false), 800);
+    }
   };
 
   return (
@@ -122,52 +150,52 @@ export function ExpressToolbar(props: ExpressToolbarProps) {
         <div className="flex items-center gap-2 justify-end shrink-0 flex-wrap">
           <Button
             type="button"
-            variant="outline"
-            size="sm"
-            onClick={onLoadDemoData}
-            className="h-8 text-xs font-medium shadow-xs flex items-center justify-center gap-1.5 px-2.5 bg-white border-slate-200 hover:bg-slate-50 text-slate-700 cursor-pointer"
-            title="加载内置演示系统与J&T账单数据"
-          >
-            <Database className="w-3.5 h-3.5 text-blue-500" />
-            <span>加载演示数据</span>
-          </Button>
-
-          <Button
-            type="button"
-            variant={activeDrawer === "import" ? "default" : "outline"}
+            variant="default"
             size="sm"
             onClick={onToggleImport}
-            className="h-8 text-xs font-medium shadow-xs flex items-center justify-center gap-1.5 px-2.5 cursor-pointer"
-            title={activeDrawer === "import" ? "点击收起数据导入区" : "展开数据导入区 (与客户操作列表互斥)"}
+            className="h-8 text-xs font-semibold shadow-xs flex items-center justify-center gap-1.5 px-3 bg-brand-600 hover:bg-brand-700 text-white cursor-pointer"
+            title="打开数据导入弹窗，支持 Excel 文件上传与剪贴板文本粘贴"
           >
             <Upload className="w-3.5 h-3.5" />
-            <span>{activeDrawer === "import" ? "收起导入区" : "导入/粘贴数据"}</span>
+            <span>导入数据</span>
           </Button>
 
           <Button
             type="button"
-            variant={activeDrawer === "surcharge" ? "default" : "outline"}
+            variant="outline"
             size="sm"
             onClick={onToggleSurcharge}
-            className={`h-8 text-xs font-medium shadow-xs flex items-center justify-center gap-1.5 px-2.5 cursor-pointer ${
-              activeDrawer === "surcharge"
-                ? ""
-                : "bg-white border-slate-200 hover:bg-slate-50 text-slate-700"
-            }`}
-            title={activeDrawer === "surcharge" ? "点击收起客户操作列表" : "展开客户操作费列表 (与导入区互斥)"}
+            className="h-8 text-xs font-medium shadow-xs flex items-center justify-center gap-1.5 px-2.5 bg-white border-slate-200 hover:bg-slate-50 text-slate-700 cursor-pointer"
+            title="查看与配置客户操作费规则列表"
           >
-            <Coins className={`w-3.5 h-3.5 ${activeDrawer === "surcharge" ? "text-white" : "text-amber-500"}`} />
-            <span>{activeDrawer === "surcharge" ? "收起操作列表" : "客户操作列表"}</span>
+            <Coins className="w-3.5 h-3.5 text-amber-500" />
+            <span>客户操作列表</span>
             <Badge
               variant="secondary"
-              className={`h-4 px-1 text-[10px] font-mono border-none ${
-                activeDrawer === "surcharge"
-                  ? "bg-white/20 text-white"
-                  : "bg-amber-100 text-amber-800"
-              }`}
+              className="h-4 px-1 text-[10px] font-mono border-none bg-amber-100 text-amber-800"
             >
               {surchargeCount}
             </Badge>
+          </Button>
+
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={onOpenImportLogs}
+            className="h-8 text-xs font-medium shadow-xs flex items-center justify-center gap-1.5 px-2.5 bg-white border-slate-200 hover:bg-slate-50 text-slate-700 cursor-pointer"
+            title="查看历史导入批次记录与一键回载"
+          >
+            <History className="w-3.5 h-3.5 text-blue-500" />
+            <span>导入记录</span>
+            {importLogsCount > 0 && (
+              <Badge
+                variant="secondary"
+                className="h-4 px-1 text-[10px] font-mono border-none bg-blue-100 text-blue-800"
+              >
+                {importLogsCount}
+              </Badge>
+            )}
           </Button>
 
           {hasData && (
@@ -175,25 +203,31 @@ export function ExpressToolbar(props: ExpressToolbarProps) {
               type="button"
               variant="outline"
               size="sm"
-              onClick={onExportCsv}
-              className="h-8 text-xs font-medium shadow-xs flex items-center justify-center gap-1.5 px-2.5 bg-white border-slate-200 hover:bg-slate-50 text-emerald-700 cursor-pointer"
+              disabled={isRefreshing}
+              onClick={handleManualRefresh}
+              className="h-8 text-xs font-medium shadow-xs flex items-center justify-center gap-1.5 px-2.5 bg-white border-slate-200 hover:bg-slate-50 text-slate-700 cursor-pointer"
+              title="重新计算与手动刷新对账结果"
             >
-              <Download className="w-3.5 h-3.5 text-emerald-600" />
-              <span>导出比对明细</span>
+              <RefreshCw className={`w-3.5 h-3.5 text-slate-500 ${isRefreshing ? "animate-spin text-brand-600" : ""}`} />
+              <span>{isRefreshing ? "核算中..." : "重新核对"}</span>
             </Button>
           )}
 
           {hasData && (
             <Button
               type="button"
-              variant="ghost"
+              variant="outline"
               size="sm"
-              onClick={onClearData}
-              className="h-8 text-xs font-medium text-rose-600 hover:bg-rose-50 hover:text-rose-700 px-2 cursor-pointer"
-              title="清空已导入对账数据"
+              disabled={isExporting}
+              onClick={handleExportWithDebounce}
+              className="h-8 text-xs font-medium shadow-xs flex items-center justify-center gap-1.5 px-2.5 bg-white border-slate-200 hover:bg-slate-50 text-emerald-700 cursor-pointer"
             >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">清空</span>
+              {isExporting ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" />
+              ) : (
+                <Download className="w-3.5 h-3.5 text-emerald-600" />
+              )}
+              <span>{isExporting ? "导出中..." : "导出比对明细"}</span>
             </Button>
           )}
         </div>
@@ -205,13 +239,15 @@ export function ExpressToolbar(props: ExpressToolbarProps) {
         <div className="flex flex-wrap items-center gap-2">
           {/* SubTab Buttons with Badges */}
           <div className="flex items-center bg-slate-200/60 p-0.5 rounded-lg border border-slate-200/40">
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               onClick={() => onSubTabChange("summary")}
               className={`h-[26px] px-2.5 text-xs font-medium rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${
                 activeSubTab === "summary"
-                  ? "bg-white text-slate-900 shadow-xs font-semibold"
-                  : "text-slate-600 hover:text-slate-900"
+                  ? "bg-white text-slate-900 shadow-xs font-semibold hover:bg-white"
+                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/50"
               }`}
             >
               <span>客户账单汇总</span>
@@ -221,15 +257,17 @@ export function ExpressToolbar(props: ExpressToolbarProps) {
               >
                 {summaryCustomerCount}
               </Badge>
-            </button>
+            </Button>
 
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               onClick={() => onSubTabChange("details")}
               className={`h-[26px] px-2.5 text-xs font-medium rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${
                 activeSubTab === "details"
-                  ? "bg-white text-slate-900 shadow-xs font-semibold"
-                  : "text-slate-600 hover:text-slate-900"
+                  ? "bg-white text-slate-900 shadow-xs font-semibold hover:bg-white"
+                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/50"
               }`}
             >
               <span>比对明细</span>
@@ -239,15 +277,17 @@ export function ExpressToolbar(props: ExpressToolbarProps) {
               >
                 {totalFilteredCount}
               </Badge>
-            </button>
+            </Button>
 
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               onClick={() => onSubTabChange("discrepancies")}
               className={`h-[26px] px-2.5 text-xs font-medium rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${
                 activeSubTab === "discrepancies"
-                  ? "bg-white text-slate-900 shadow-xs font-semibold"
-                  : "text-slate-600 hover:text-slate-900"
+                  ? "bg-white text-slate-900 shadow-xs font-semibold hover:bg-white"
+                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/50"
               }`}
             >
               <span>异常核对</span>
@@ -259,7 +299,7 @@ export function ExpressToolbar(props: ExpressToolbarProps) {
                   {discrepancyCount}
                 </Badge>
               )}
-            </button>
+            </Button>
           </div>
 
           {/* Details tab specific filters */}
@@ -302,32 +342,36 @@ export function ExpressToolbar(props: ExpressToolbarProps) {
 
               {/* View Mode Toggle: standard vs jnt */}
               <div className="flex items-center bg-slate-200/60 p-0.5 rounded-lg border border-slate-200/40">
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   onClick={() => onViewModeChange("standard")}
                   className={`h-[26px] px-2 text-[11px] font-medium rounded-md transition-all cursor-pointer flex items-center gap-1 ${
                     viewMode === "standard"
-                      ? "bg-white text-slate-900 shadow-xs font-semibold"
-                      : "text-slate-600 hover:text-slate-900"
+                      ? "bg-white text-slate-900 shadow-xs font-semibold hover:bg-white"
+                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/50"
                   }`}
                   title="简洁模式：单号、客户、收件人、运费、操作费、状态"
                 >
                   <TableIcon className="w-3 h-3" />
                   <span>简洁视图</span>
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   onClick={() => onViewModeChange("jnt")}
                   className={`h-[26px] px-2 text-[11px] font-medium rounded-md transition-all cursor-pointer flex items-center gap-1 ${
                     viewMode === "jnt"
-                      ? "bg-brand-600 text-white shadow-xs font-semibold"
-                      : "text-slate-600 hover:text-slate-900"
+                      ? "bg-brand-600 text-white shadow-xs font-semibold hover:bg-brand-600"
+                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/50"
                   }`}
                   title="J&T对账单完整格式：包含网点、管理方式、经营模式、付款周期、产品类型等全部字段"
                 >
                   <SlidersHorizontal className="w-3 h-3" />
                   <span>J&T完整模式</span>
-                </button>
+                </Button>
               </div>
             </>
           )}

@@ -15,6 +15,7 @@ import { calcAttendanceDetails, formatCurrency, formatDuration, COUNTRY_FLAGS, C
 import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
 import { RecipeDocumentView } from "./RecipeDocumentView";
+import { createLeaveRequest, deleteLeaveRequest } from "../lib/attendanceApi";
 
 function getDistanceInMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371e3; // metres
@@ -1143,10 +1144,12 @@ export function EmployeeApp({
       KH: locale === "zh-CN" ? "柬埔寨" : locale === "zh-TW" ? "柬埔寨" : locale === "th" ? "กัมพูชา" : locale === "id" ? "Kamboja" : "Cambodia",
       PH: locale === "zh-CN" ? "菲律宾" : locale === "zh-TW" ? "菲律賓" : locale === "th" ? "ฟิลิปปินส์" : locale === "id" ? "Filipina" : "Philippines",
       ID: locale === "zh-CN" ? "印度尼西亚" : locale === "zh-TW" ? "印度尼西亞" : locale === "th" ? "อินโดนีเซีย" : locale === "id" ? "Indonesia" : "Indonesia",
+      MY: locale === "zh-CN" ? "马来西亚" : locale === "zh-TW" ? "馬來西亞" : locale === "th" ? "มาเลเซีย" : locale === "id" ? "Malaysia" : "Malaysia",
       LA: locale === "zh-CN" ? "老挝" : locale === "zh-TW" ? "老撾" : locale === "th" ? "ลาว" : locale === "id" ? "Laos" : "Laos",
       "菲律宾籍": locale === "zh-CN" ? "菲律宾" : locale === "zh-TW" ? "菲律賓" : "Philippines",
       "印度尼西亚籍": locale === "zh-CN" ? "印度尼西亚" : locale === "zh-TW" ? "印度尼西亞" : "Indonesia",
       "印尼籍": locale === "zh-CN" ? "印度尼西亚" : locale === "zh-TW" ? "印度尼西亞" : "Indonesia",
+      "马来西亚籍": locale === "zh-CN" ? "马来西亚" : locale === "zh-TW" ? "馬來西亞" : "Malaysia",
       "越南籍": locale === "zh-CN" ? "越南" : locale === "zh-TW" ? "越南" : "Vietnam",
       "中国籍": locale === "zh-CN" ? "中国" : locale === "zh-TW" ? "中國" : "China",
       "泰国籍": locale === "zh-CN" ? "泰国" : locale === "zh-TW" ? "泰國" : "Thailand",
@@ -1266,6 +1269,8 @@ export function EmployeeApp({
       onUpdateLeaveRequests(updated);
     }
   };
+  const [isSubmittingLeave, setIsSubmittingLeave] = useState(false);
+  const [deletingLeaveId, setDeletingLeaveId] = useState<string | null>(null);
   const [simulatedDate, setSimulatedDate] = useState<string>(() => {
     const today = new Date();
     return today.toISOString().split("T")[0];
@@ -2362,7 +2367,7 @@ export function EmployeeApp({
   };
 
   // Leave Application Action
-  const handleApplyLeave = () => {
+  const handleApplyLeave = async () => {
     if (currentUser?.status === '离职') {
       addToast("⚠️ 您已办理离职，该账号已进入只读归档状态，无法提交请假申请。如有疑问请联系HR。");
       return;
@@ -2371,46 +2376,52 @@ export function EmployeeApp({
       addToast("请选择完整的请假时间！");
       return;
     }
+    if (leaveStart > leaveEnd) {
+      addToast("开始日期不能晚于结束日期！");
+      return;
+    }
     if (!currentUser) return;
 
-    if (editingLeaveId) {
-      const updated = leaveRequests.map(l => {
-        if (l.id === editingLeaveId) {
-          return {
-            ...l,
-            type: leaveType,
-            days: parseFloat(leaveDays) || 1,
-            startDate: leaveStart,
-            endDate: leaveEnd,
-            reason: leaveReason || "未填写事由",
-            status: "pending" as const
-          };
+    setIsSubmittingLeave(true);
+    try {
+      if (editingLeaveId) {
+        // 若为重新编辑，先尝试清理旧单再重提，或更新本地状态
+        try {
+          await deleteLeaveRequest(editingLeaveId);
+        } catch {
+          // 容错处理
         }
-        return l;
-      });
-      setLeaveRequests(updated);
-      addToast(`🎉 请假申请已成功修改，等待管理员审批。`);
-      setEditingLeaveId(null);
-    } else {
-      const newLeave = {
-        id: `leave-${Date.now()}`,
+      }
+
+      const created = await createLeaveRequest({
         empId: currentUser.id,
         type: leaveType,
-        days: parseFloat(leaveDays) || 1,
         startDate: leaveStart,
         endDate: leaveEnd,
-        reason: leaveReason || "未填写事由",
-        status: "pending" as const
-      };
-      const updated = [newLeave, ...leaveRequests];
-      setLeaveRequests(updated);
-      addToast(`🎉 请假申请已提交，等待管理员审批。您可以在下方“请假申请历史”中查看实时状态。`);
-    }
+        reason: leaveReason.trim() || "个人请假",
+        status: "pending"
+      });
 
-    setShowLeaveForm(false);
-    setLeaveReason("");
-    setLeaveStart("");
-    setLeaveEnd("");
+      const restList = editingLeaveId 
+        ? leaveRequests.filter(l => l.id !== editingLeaveId) 
+        : leaveRequests;
+      const updated = [created, ...restList];
+      setLeaveRequests(updated);
+
+      addToast(editingLeaveId 
+        ? "🎉 请假申请已重新提交，等待管理员审批。" 
+        : "🎉 请假申请已提交，等待管理员审批。您可以在下方“请假申请历史”中查看实时状态。");
+
+      setShowLeaveForm(false);
+      setLeaveReason("");
+      setLeaveStart("");
+      setLeaveEnd("");
+      setEditingLeaveId(null);
+    } catch (err: any) {
+      addToast(err.message || "提交请假申请失败，请稍后重试");
+    } finally {
+      setIsSubmittingLeave(false);
+    }
   };
 
   // SOP Reading Actions
@@ -4273,6 +4284,17 @@ export function EmployeeApp({
                             )}
                           </div>
 
+                          {/* 免打卡岗位友好提示 */}
+                          {currentUser?.requiresAttendance === false && (
+                            <div className="p-3 bg-sky-50 border border-sky-200/80 rounded-xl text-sky-800 text-xs flex items-center gap-2 mb-3 shadow-3xs animate-fade-in text-left">
+                              <span className="w-2 h-2 rounded-full bg-sky-500 shrink-0" />
+                              <div className="leading-tight">
+                                <span className="font-bold block text-[11px] text-sky-900">您当前角色为免打卡岗位</span>
+                                <span className="text-[10px] text-sky-700">无需每日上下班打卡，系统已自动按标准工时保障全勤。如有加班等特殊工时亦可自愿打卡记录。</span>
+                              </div>
+                            </div>
+                          )}
+
                           {/* Large Punch Action Button */}
                           <button
                             type="button"
@@ -4599,9 +4621,14 @@ export function EmployeeApp({
                               </div>
                               <button
                                 type="button"
+                                disabled={isSubmittingLeave}
                                 onClick={handleApplyLeave}
-                                className="w-full py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-black transition shadow-3xs"
+                                className={cn(
+                                  "w-full py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-black transition shadow-3xs flex items-center justify-center gap-1.5",
+                                  isSubmittingLeave && "opacity-70 cursor-not-allowed"
+                                )}
                               >
+                                {isSubmittingLeave && <Loader2 className="w-3 h-3 animate-spin" />}
                                 {editingLeaveId ? (locale === "zh-CN" || locale === "zh-TW" ? "保存修改" : "Save Changes") : t("leave_submit")}
                               </button>
                             </motion.div>
@@ -4838,16 +4865,29 @@ export function EmployeeApp({
                                           </button>
                                           <button
                                             type="button"
-                                            onClick={() => {
+                                            disabled={deletingLeaveId === req.id}
+                                            onClick={async () => {
                                               if (confirm(locale === "zh-CN" || locale === "zh-TW" ? "确定要取消此请假申请吗？" : "Are you sure you want to cancel this leave request?")) {
-                                                const updated = leaveRequests.filter(l => l.id !== req.id);
-                                                setLeaveRequests(updated);
-                                                addToast(locale === "zh-CN" || locale === "zh-TW" ? "🎉 请假申请已取消。" : "🎉 Leave request cancelled.");
+                                                setDeletingLeaveId(req.id);
+                                                try {
+                                                  await deleteLeaveRequest(req.id);
+                                                  const updated = leaveRequests.filter(l => l.id !== req.id);
+                                                  setLeaveRequests(updated);
+                                                  addToast(locale === "zh-CN" || locale === "zh-TW" ? "🎉 请假申请已取消。" : "🎉 Leave request cancelled.");
+                                                } catch (err: any) {
+                                                  addToast(err.message || "取消请假申请失败");
+                                                } finally {
+                                                  setDeletingLeaveId(null);
+                                                }
                                               }
                                             }}
                                             className="px-2.5 py-1 bg-white border border-slate-200 hover:border-rose-500 hover:text-rose-600 text-slate-600 rounded-lg text-[9px] font-black flex items-center gap-1 transition cursor-pointer shadow-3xs"
                                           >
-                                            <Trash2 className="w-2.5 h-2.5 text-rose-500" />
+                                            {deletingLeaveId === req.id ? (
+                                              <Loader2 className="w-2.5 h-2.5 animate-spin text-rose-500" />
+                                            ) : (
+                                              <Trash2 className="w-2.5 h-2.5 text-rose-500" />
+                                            )}
                                             取消申请
                                           </button>
                                         </div>
