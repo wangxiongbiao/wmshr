@@ -295,9 +295,9 @@ export function ExpressSummaryTab(props: ExpressSummaryTabProps) {
                                     <th className="py-2 px-3">收件人</th>
                                     <th className="py-2 px-3">电话</th>
                                     <th className="py-2 px-2 text-right">重量(kg)</th>
-                                    <th className="py-2 px-3 text-right">J&T运费</th>
-                                    <th className="py-2 px-3 text-right">操作费</th>
-                                    <th className="py-2 px-3 text-right">应付小计</th>
+                                    <th className="py-2 px-3 text-right">J&T运费({curSymbol})</th>
+                                    <th className="py-2 px-3 text-right">操作费({curSymbol})</th>
+                                    <th className="py-2 px-3 text-right">应付小计({curSymbol})</th>
                                     <th className="py-2 px-3 text-center">对账状态</th>
                                   </tr>
                                 </thead>
@@ -334,7 +334,7 @@ export function ExpressSummaryTab(props: ExpressSummaryTabProps) {
                                           {r.weight > 0 ? r.weight.toFixed(2) : "-"}
                                         </td>
                                         <td className="py-1.5 px-3 text-right font-semibold text-slate-800">
-                                          ฿{r.jntFee.toFixed(2)}
+                                          {curSymbol}{r.jntFee.toFixed(2)}
                                         </td>
                                         <td className="py-1.5 px-3 text-right text-slate-600">
                                           {r.surcharge > 0
@@ -342,7 +342,7 @@ export function ExpressSummaryTab(props: ExpressSummaryTabProps) {
                                             : "0.00"}
                                         </td>
                                         <td className="py-1.5 px-3 text-right font-bold text-slate-900">
-                                          ฿{r.totalFee.toFixed(2)}
+                                          {curSymbol}{r.totalFee.toFixed(2)}
                                         </td>
                                         <td className="py-1.5 px-3 text-center">
                                           <span

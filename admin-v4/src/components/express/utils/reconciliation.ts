@@ -390,6 +390,9 @@ export function computeCustomerSummary(
           rec.surcharge = 0;
           rec.totalFee = rec.jntFee;
         }
+      } else {
+        rec.surcharge = 0;
+        rec.totalFee = rec.jntFee;
       }
     });
 

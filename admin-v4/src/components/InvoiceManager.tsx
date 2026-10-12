@@ -49,6 +49,7 @@ import {
 import { printElement } from "./invoice/utils/printInvoice";
 import { MonthPicker } from "./invoice/components/MonthPicker";
 import { InvoiceDetailCard } from "./invoice/components/InvoiceDetailCard";
+import { InvoiceLanguageSelect, InvoiceDocLanguage } from "./invoice/components/InvoiceLanguageSelect";
 import { InvoiceFormWorkspace } from "./invoice/components/InvoiceFormWorkspace";
 import { Pagination } from "./Pagination";
 import { fetchInvoices, fetchInvoiceStats, createInvoice as apiCreateInvoice, updateInvoice as apiUpdateInvoice, deleteInvoice as apiDeleteInvoice } from "../lib/invoiceApi";
@@ -247,6 +248,9 @@ export function InvoiceManager({ customers, addToast, lang, warehouseCode = "TH"
   const handlePrintView = () => {
     printElement("invoice-view-card", `Invoice - ${viewInvoice?.invoiceNo || "PDF"}`);
   };
+
+  // Preview language state for detail view modal
+  const [viewInvoiceLang, setViewInvoiceLang] = useState<InvoiceDocLanguage>(() => (lang === "en" ? "en" : "zh-CN"));
 
   // --- RESTORED INVOICE CREATE & EDIT MODULE STATE & LOGIC FROM ORIGINAL ---
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -1303,6 +1307,11 @@ export function InvoiceManager({ customers, addToast, lang, warehouseCode = "TH"
                     </DialogTitle>
                     <DialogDescription className="sr-only">{getInvoiceTrans("invoice_details_preview", lang)}</DialogDescription>
                     <div className="flex items-center gap-2">
+                      <InvoiceLanguageSelect
+                        value={viewInvoiceLang}
+                        onChange={setViewInvoiceLang}
+                        uiLang={lang}
+                      />
                       <Button
                         type="button"
                         onClick={handlePrintView}
@@ -1327,13 +1336,13 @@ export function InvoiceManager({ customers, addToast, lang, warehouseCode = "TH"
                   <div className="p-4 md:p-8 overflow-y-auto flex-1 bg-slate-100 flex justify-center items-start">
                     <div className="w-full max-w-3xl space-y-3">
                       <div className="flex items-center justify-between no-print px-1 text-slate-500 text-[10px] font-extrabold uppercase tracking-wider">
-                        <span>{getInvoiceTrans("preview_title_live", lang)}</span>
+                        <span>{getInvoiceTrans("preview_title_live", viewInvoiceLang)}</span>
                         <span className="text-emerald-600 flex items-center gap-1 font-semibold">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse" />
-                          {viewInvoice.status === "paid" ? (lang === "en" ? "Settled & Archived" : "已结清归档") : viewInvoice.status === "pending" ? (lang === "en" ? "Pending Payment" : "待客户付款") : (lang === "en" ? "Official Invoice" : "正式账单凭证")}
+                          {viewInvoice.status === "paid" ? (viewInvoiceLang === "en" ? "Settled & Archived" : "已结清归档") : viewInvoice.status === "pending" ? (viewInvoiceLang === "en" ? "Pending Payment" : "待客户付款") : (viewInvoiceLang === "en" ? "Official Invoice" : "正式账单凭证")}
                         </span>
                       </div>
-                      <InvoiceDetailCard invoice={viewInvoice} lang={lang} />
+                      <InvoiceDetailCard invoice={viewInvoice} lang={viewInvoiceLang} />
                     </div>
                   </div>
                 </>

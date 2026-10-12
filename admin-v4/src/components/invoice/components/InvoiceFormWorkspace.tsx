@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React, { useRef, useState } from "react";
 import {
   ArrowLeft, Check, Download, FileSignature, Plus, Upload, Trash2, Move,
   ChevronDown, Search, X, Loader2
@@ -11,6 +11,7 @@ import { Invoice, InvoiceItem, Customer, Language } from "../types";
 import { getInvoiceTrans, getCurrencyDisplayName } from "../constants";
 import { printElement } from "../utils/printInvoice";
 import { InvoiceLivePreview } from "./InvoiceLivePreview";
+import { InvoiceLanguageSelect, InvoiceDocLanguage } from "./InvoiceLanguageSelect";
 
 interface InvoiceFormWorkspaceProps {
   isFormOpen: boolean;
@@ -209,6 +210,8 @@ export const InvoiceFormWorkspace: React.FC<InvoiceFormWorkspaceProps> = ({
   setMobileEditorTab,
 }) => {
   const custDropdownRef = useRef<HTMLDivElement>(null);
+  // Document language for live preview & print export (independent from system UI lang)
+  const [docLang, setDocLang] = useState<InvoiceDocLanguage>(() => (lang === "en" ? "en" : "zh-CN"));
   const [isCustDropdownOpen, setIsCustDropdownOpen] = React.useState(false);
   const [custSearchQuery, setCustSearchQuery] = React.useState("");
 
@@ -268,6 +271,15 @@ export const InvoiceFormWorkspace: React.FC<InvoiceFormWorkspaceProps> = ({
             {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
             <span>{getInvoiceTrans("save_and_ledger", lang)}</span>
           </Button>
+
+          {/* Invoice Document Language Switcher (Desktop) */}
+          <div className="hidden md:flex items-center">
+            <InvoiceLanguageSelect
+              value={docLang}
+              onChange={setDocLang}
+              uiLang={lang}
+            />
+          </div>
 
           {/* Print from preview inside modal */}
           <Button
@@ -1202,7 +1214,16 @@ export const InvoiceFormWorkspace: React.FC<InvoiceFormWorkspaceProps> = ({
           {/* Scroll Sticky Helper wrapper to contain the paper nicely */}
           <div className="w-full max-w-3xl space-y-4 sticky top-0">
             <div className="flex items-center justify-between no-print px-1 text-slate-500 text-[10px] font-extrabold uppercase tracking-wider">
-              <span>{getInvoiceTrans("preview_title_live", lang)}</span>
+              <div className="flex items-center gap-2">
+                <span>{getInvoiceTrans("preview_title_live", docLang)}</span>
+                <div className="md:hidden">
+                  <InvoiceLanguageSelect
+                    value={docLang}
+                    onChange={setDocLang}
+                    uiLang={lang}
+                  />
+                </div>
+              </div>
               <span className="text-emerald-600 animate-pulse flex items-center gap-1">{getInvoiceTrans("preview_sync_tip", lang)}</span>
             </div>
 
@@ -1245,7 +1266,7 @@ export const InvoiceFormWorkspace: React.FC<InvoiceFormWorkspaceProps> = ({
               isDraggingStamp={isDraggingStamp}
               handleSigStart={handleSigStart}
               handleStampStart={handleStampStart}
-              lang={lang}
+              lang={docLang}
             />
           </div>
         </div>

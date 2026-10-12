@@ -118,7 +118,7 @@ export const InvoiceLivePreview: React.FC<InvoiceLivePreviewProps> = ({
                 </div>
               ) : null}
               <h2 className="text-sm sm:text-base font-extrabold text-indigo-950 tracking-tight leading-tight truncate">
-                {formSellerName || "物流供应链有限公司"}
+                {formSellerName || (lang === "en" ? "Supply Chain Logistics Co., Ltd." : "物流供应链有限公司")}
               </h2>
             </div>
             <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-[11px] text-slate-700 leading-snug">
