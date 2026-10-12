@@ -147,6 +147,7 @@ const recHalfDay = {
   id: "rec-half",
   inTime: "08:00",
   outTime: "12:00", // 4 hours valid (before 12:00-13:00 lunch break), 0 ot
+  earlyOvertimeApproved: true,
   type: "normal"
 };
 
@@ -346,3 +347,64 @@ const resEncodedHoliday = calculateDailyMetrics({
 });
 assert.equal(resEncodedHoliday.otPay, 2 * 50 * 3.0, "Encoded holiday should yield 3.0x overtime multiplier");
 console.log("Holiday encode/decode & 3.0x OT calculation verified successfully!");
+
+console.log("12. Testing punch-in time truncation (earlier than startShift truncated to startShift)...");
+// 标准班次 08:30 ~ 17:30，午休 12:00 ~ 13:00 (扣1h)，标准8h
+// 员工 07:45 打卡，17:30 下班
+const recEarlyPunch = {
+  id: "rec-early",
+  inTime: "07:45",
+  outTime: "17:30",
+  type: "normal"
+};
+const resEarlyTruncated = calculateDailyMetrics({
+  emp: emp1,
+  rec: recEarlyPunch,
+  date: "2026-09-08",
+  config
+});
+// 截断至 08:30：17:30 - 08:30 = 9h，扣除午休 1h，有效工时 8h，加班 0h
+assert.equal(resEarlyTruncated.valid, 8, "Early punch without approval must be truncated to startShift (8.0h)");
+assert.equal(resEarlyTruncated.ot, 0, "Early punch without approval should have 0 ot");
+
+// 开启提前加班审批后，不截断
+const recEarlyApproved = {
+  id: "rec-early-approved",
+  inTime: "07:45",
+  outTime: "17:30",
+  earlyOvertimeApproved: true,
+  type: "normal"
+};
+const resEarlyWithApproval = calculateDailyMetrics({
+  emp: emp1,
+  rec: recEarlyApproved,
+  date: "2026-09-08",
+  config
+});
+// 07:45 - 17:30 = 9.75h，扣除午休 1h，有效工时 8.75h，加班 0.75h
+assert.equal(resEarlyWithApproval.valid, 8.75, "Early punch with approval must count full hours (8.75h)");
+assert.equal(resEarlyWithApproval.ot, 0.75, "Early punch with approval must count 0.75h ot");
+console.log("Early punch-in truncation & approval bypass verified successfully!");
+
+console.log("13. Testing holiday auto-exemption for regular attendance employees without punch-in...");
+// 普通员工（requiresAttendance: true）在节假日无打卡记录，应自动标记为 holiday（法定假日），而不是 absent（缺勤）
+const resHolidayAutoExempt = calculateDailyMetrics({
+  emp: { ...emp1, requiresAttendance: true },
+  rec: null,
+  date: "2026-09-15", // In holidayDates
+  config
+});
+assert.equal(resHolidayAutoExempt.status, "holiday", "Regular employee on holiday without punch must be marked as 'holiday'");
+assert.equal(resHolidayAutoExempt.valid, 0, "Holiday should have 0 work hours");
+assert.equal(resHolidayAutoExempt.ot, 0, "Holiday should have 0 ot hours");
+
+// 普通员工在非节假日（工作日）无打卡记录，仍应正常判定为 absent（缺勤）
+const resWorkdayAbsent = calculateDailyMetrics({
+  emp: { ...emp1, requiresAttendance: true },
+  rec: null,
+  date: "2026-09-16", // Normal workday, not in holidayDates
+  config
+});
+assert.equal(resWorkdayAbsent.status, "absent", "Regular employee on normal workday without punch must be marked as 'absent'");
+console.log("Holiday auto-exemption for regular employees verified successfully!");
+

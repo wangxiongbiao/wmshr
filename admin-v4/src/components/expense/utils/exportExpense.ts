@@ -46,7 +46,7 @@ export async function exportSalaryToExcel({
       ot += d.ot;
       otPay += calcOvertimePay(emp, rec.date, d.ot, config, holidays).amount;
 
-      const isAbsentOrLeave = emp.status === '休假' || rec.type === 'absent' || rec.type === 'leave';
+      const isAbsentOrLeave = emp.status === '休假' || (emp.status as any) === 'on_leave' || rec.type === 'absent' || rec.type === 'leave' || rec.type === 'sick_leave' || rec.type === 'rest' || rec.type === 'holiday';
       if (!isAbsentOrLeave) {
         workingDays += 1;
         mealAllowance += Number(emp.mealAllowanceDaily || 0);
@@ -148,7 +148,7 @@ export function exportSalaryToCsv({
       ot += d.ot;
       otPay += calcOvertimePay(emp, rec.date, d.ot, config, holidays).amount;
 
-      const isAbsentOrLeave = emp.status === '休假' || rec.type === 'absent' || rec.type === 'leave';
+      const isAbsentOrLeave = emp.status === '休假' || (emp.status as any) === 'on_leave' || rec.type === 'absent' || rec.type === 'leave' || rec.type === 'sick_leave' || rec.type === 'rest' || rec.type === 'holiday';
       if (!isAbsentOrLeave) {
         workingDays += 1;
         const mealVal = emp.mealAllowanceDaily !== undefined && emp.mealAllowanceDaily !== null ? Number(emp.mealAllowanceDaily) : 0;

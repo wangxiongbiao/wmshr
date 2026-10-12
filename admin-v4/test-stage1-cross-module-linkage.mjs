@@ -230,6 +230,103 @@ console.log("\n▶ 场景五：动态角色打卡规则切换联动测试");
   recordResult("场景五：动态角色打卡规则切换联动测试", true, "角色取消打卡勾选后，状态实时从 absent ➔ exempt_present，工时与薪资自动恢复");
 }
 
+// =========================================================================
+// 场景六：节假日排班自动豁免联动测试
+// =========================================================================
+console.log("\n▶ 场景六：节假日排班自动豁免联动测试");
+{
+  const emp = mapEmployeeRow({
+    id: 106,
+    employee_no: "EMP-006",
+    name: "Nok (需打卡·节假日)",
+    role: "打包员",
+    requires_attendance: true,
+    fixed_salary: 30000,
+    status: "active"
+  });
+  const holidayConfig = {
+    ...config,
+    holidayDates: ["2025-06-12::泼水节::TH"]
+  };
+
+  // 1. 节假日当天未打卡：自动豁免为 holiday（法定假日），而非 absent（旷工）
+  const resHoliday = calculateDailyMetrics({
+    emp,
+    rec: null,
+    date: "2025-06-12",
+    config: holidayConfig
+  });
+  assert.equal(resHoliday.status, "holiday", "法定节假日未打卡必须自动标记为 holiday（法定假日）");
+  assert.equal(resHoliday.valid, 0, "法定假日有效工时为 0");
+  assert.equal(resHoliday.ot, 0, "法定假日加班工时为 0");
+
+  // 2. 工作日未打卡：仍正常判定为 absent（旷工）
+  const resWorkday = calculateDailyMetrics({
+    emp,
+    rec: null,
+    date: "2025-06-11",
+    config: holidayConfig
+  });
+  assert.equal(resWorkday.status, "absent", "普通工作日未打卡仍必须严格判定为 absent");
+
+  recordResult("场景六：节假日排班自动豁免联动测试", true, "法定假日未打卡自动标记 holiday 豁免旷工，工作日未打卡维持 absent");
+}
+
+// =========================================================================
+// 场景七：工时起算截断与提前加班审批放行测试
+// =========================================================================
+console.log("\n▶ 场景七：工时起算截断与提前加班审批放行测试");
+{
+  const emp = mapEmployeeRow({
+    id: 107,
+    employee_no: "EMP-007",
+    name: "Dan (早到打卡测试)",
+    role: "操作工",
+    requires_attendance: true,
+    salary_type: "hourly",
+    hourly_rate: 100,
+    ot_rule_type: "multiplier",
+    ot_multiplier_workday: 1.5,
+    status: "active"
+  });
+
+  // 1. 员工 07:30 打卡（早于 startShift: 08:30），17:30 下班，午休 12:00-13:00 (扣1h)
+  // 未审批提前加班：截断至 08:30 起算，总工时 (17:30 - 08:30) - 1h = 8h，加班 0h
+  const recEarly = {
+    inTime: "07:30",
+    outTime: "17:30",
+    type: "normal"
+  };
+  const resTruncated = calculateDailyMetrics({
+    emp,
+    rec: recEarly,
+    date: "2025-06-11",
+    config
+  });
+  assert.equal(resTruncated.valid, 8, "早于 startShift 打卡且未审批时必须截断至 08:30 起算 (8h)");
+  assert.equal(resTruncated.ot, 0, "早到时间不得计为加班工时");
+
+  // 2. 带有提前加班审批标识：放行实际打卡时间 07:30 起算
+  // 总工时 (17:30 - 07:30) - 1h = 9h，加班 1h
+  const recApproved = {
+    inTime: "07:30",
+    outTime: "17:30",
+    earlyOvertimeApproved: true,
+    type: "normal"
+  };
+  const resApproved = calculateDailyMetrics({
+    emp,
+    rec: recApproved,
+    date: "2025-06-11",
+    config
+  });
+  assert.equal(resApproved.valid, 9, "开启提前加班审批后放行完整打卡工时 (9h)");
+  assert.equal(resApproved.ot, 1, "超出 8h 的早到工时计入 1h 加班");
+  assert.equal(resApproved.otPay, 1 * 100 * 1.5, "工作日加班费正常计发");
+
+  recordResult("场景七：工时起算截断与提前加班审批放行测试", true, "默认截断至 08:30 起算(8h/0ot)，审批放行后计全额(9h/1ot)");
+}
+
 console.log("\n===============================================================");
 console.log(`  🎉 阶段一联动测试矩阵全部通过！通过率: 100% (${results.length}/${results.length})`);
 console.log("===============================================================");

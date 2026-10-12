@@ -1,5 +1,5 @@
 import type { AppConfig, Employee, HolidayRecord, LeaveRequest } from "../../../types";
-import { calcAttendanceDetails, calcOvertimePay } from "../../../lib/utils";
+import { calcAttendanceDetails, calcOvertimePay, isHolidayDate } from "../../../lib/utils";
 import { ATTENDANCE_TYPE_NAMES, isNonWorkingAttendanceType } from "../constants";
 import type { FlatAttendanceRow, RowMetrics } from "../types";
 
@@ -9,10 +9,15 @@ export function getRowMetrics(
   holidays: HolidayRecord[],
   leaveRequests: LeaveRequest[] = []
 ): RowMetrics {
+  const isHoliday = isHolidayDate(row.date, config, holidays);
+
   if (row && "details" in row && row.details && typeof row.shiftPay === "number" && typeof row.totalPay === "number") {
-    const type = row.status || (row.rec ? row.rec.type : "absent");
+    let type = row.status || (row.rec ? row.rec.type : "absent");
     const isExempt = row.emp?.requiresAttendance === false;
-    const isAbsentOrLeave = isNonWorkingAttendanceType(type) || (!row.rec && !isExempt);
+    if (!row.rec && !isExempt && isHoliday && (type === "absent" || !type)) {
+      type = "holiday";
+    }
+    const isAbsentOrLeave = isNonWorkingAttendanceType(type) || (!row.rec && !isExempt && !isHoliday);
     return {
       details: row.details || { valid: 0, ot: 0 },
       shiftPay: Number(row.shiftPay) || 0,
@@ -29,6 +34,7 @@ export function getRowMetrics(
 
   const { emp, rec, date } = row;
   let details = { valid: 0, ot: 0 };
+  let type = "absent";
   let typeName = "缺勤";
   const isExempt = emp.requiresAttendance === false;
 
@@ -38,19 +44,32 @@ export function getRowMetrics(
   });
 
   if (emp.status === "休假") {
+    type = "leave";
     typeName = "假期";
   } else if (hasApprovedLeave) {
+    type = "leave";
     typeName = "请假";
   } else if (rec) {
+    type = rec.type || "normal";
     details = calcAttendanceDetails(rec, config);
     typeName = ATTENDANCE_TYPE_NAMES[rec.type] || "正常";
   } else if (isExempt) {
-    const stdH = Number(config.standardHours || 8);
-    details = { valid: stdH, ot: 0 };
-    typeName = "免打卡";
+    if (isHoliday) {
+      type = "holiday";
+      typeName = "法定假日";
+    } else {
+      type = "exempt_present";
+      const stdH = Number(config.standardHours || 8);
+      details = { valid: stdH, ot: 0 };
+      typeName = "免打卡";
+    }
+  } else if (isHoliday) {
+    // 普通打卡员工在法定节假日当天未打卡时，自动豁免标记为“法定假日”，而非直接判定为“缺勤”
+    type = "holiday";
+    typeName = "法定假日";
   }
 
-  const isAbsentOrLeave = emp.status === "休假" || hasApprovedLeave || (!rec && !isExempt) || (rec && isNonWorkingAttendanceType(rec.type));
+  const isAbsentOrLeave = emp.status === "休假" || hasApprovedLeave || isHoliday || (!rec && !isExempt) || (rec && isNonWorkingAttendanceType(type));
   const hasBaseWage = emp.baseMonthlyWage !== undefined && emp.baseMonthlyWage !== null && emp.baseMonthlyWage > 0;
   const hasDailyWage = emp.dailyWage !== undefined && emp.dailyWage !== null && emp.dailyWage > 0;
 
@@ -80,7 +99,6 @@ export function getRowMetrics(
   const dailyServiceFee = isAbsentOrLeave ? 0 : shiftPay * (commRate / 100);
 
   const totalPay = shiftPay + otPay + mealAllowance - dailySocialSecurity + dailyServiceFee;
-  const type = rec?.type || (isAbsentOrLeave ? "absent" : "normal");
 
   return {
     details,

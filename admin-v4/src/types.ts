@@ -31,7 +31,7 @@ export type Gender = 'male' | 'female';
 
 export type CountryCode = 'MM' | 'TH' | 'CN' | 'VN' | 'KH' | 'PH' | 'ID' | 'MY' | 'LA';
 
-export type AttendanceType = 'normal' | 'exempt_present' | 'rest' | 'late' | 'early' | 'absent' | 'leave' | 'sick_leave' | 'overtime' | 'manual_adjusted' | 'checked_in' | 'pending' | 'exception';
+export type AttendanceType = 'normal' | 'exempt_present' | 'rest' | 'holiday' | 'late' | 'early' | 'absent' | 'leave' | 'sick_leave' | 'overtime' | 'manual_adjusted' | 'checked_in' | 'pending' | 'exception';
 
 export type EmployeeStatus = '在职' | '试用' | '休假' | '离职';
 

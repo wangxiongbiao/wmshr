@@ -2,6 +2,7 @@ export const ATTENDANCE_TYPE_NAMES: Record<string, string> = {
   normal: "正常",
   exempt_present: "免打卡",
   rest: "休息",
+  holiday: "法定假日",
   late: "迟到",
   early: "早退",
   absent: "缺勤",
@@ -18,6 +19,7 @@ export const ATTENDANCE_TYPE_CLASSES: Record<string, string> = {
   normal: "bg-green-100 text-green-700",
   exempt_present: "bg-sky-100 text-sky-700",
   rest: "bg-slate-100 text-slate-600",
+  holiday: "bg-indigo-100 text-indigo-700",
   late: "bg-yellow-100 text-yellow-700",
   early: "bg-orange-100 text-orange-700",
   absent: "bg-red-100 text-red-700",
@@ -43,4 +45,4 @@ export const COUNTRY_NAMES: Record<string, string> = {
 };
 
 export const isNonWorkingAttendanceType = (t: string) =>
-  t === "absent" || t === "leave" || t === "sick_leave" || t === "pending";
+  t === "absent" || t === "leave" || t === "sick_leave" || t === "pending" || t === "rest" || t === "holiday";

@@ -139,6 +139,19 @@ export function parseTimeToHours(str: string): number {
   return parseInt(parts[0], 10) + parseInt(parts[1], 10) / 60;
 }
 
+export function isHolidayDate(
+  dateStr: string,
+  config?: AppConfig | null,
+  holidays: HolidayRecord[] = []
+): boolean {
+  if (!dateStr) return false;
+  const holidayDateSet = new Set([
+    ...((config as any)?.holidayDates || []).map((h: any) => typeof h === "string" ? h.split("::")[0].trim() : h?.date),
+    ...((holidays as any[]) || []).map((h: any) => typeof h === "string" ? h.split("::")[0].trim() : h?.date)
+  ].filter(Boolean));
+  return holidayDateSet.has(dateStr);
+}
+
 export function calcAttendanceDetails(rec: AttendanceRecord, config: AppConfig): AttendanceDetails {
   if (!rec.inTime || !rec.outTime || rec.type === 'absent' || rec.type === 'leave' || rec.type === 'sick_leave') {
     return { raw: 0, valid: 0, standard: config.standardHours, ot: 0 };
@@ -150,11 +163,20 @@ export function calcAttendanceDetails(rec: AttendanceRecord, config: AppConfig):
   if (end < start) end += 24;
   
   const raw = end - start;
+
+  // 工时起算截断：上班打卡早于 startShift 时，默认从 startShift 起算（除非开启提前加班审批）
+  const shiftStartH = config?.startShift ? parseTimeToHours(config.startShift) : null;
+  const isEarlyOtApproved = Boolean((rec as any)?.earlyOvertimeApproved || (rec as any)?.early_overtime_approved || (config as any)?.allowEarlyOvertime);
+  let effectiveStart = start;
+  if (!isEarlyOtApproved && shiftStartH !== null && start < shiftStartH) {
+    effectiveStart = Math.min(shiftStartH, end);
+  }
+
   const bStart = parseTimeToHours(config.breakStart);
   const bEnd = parseTimeToHours(config.breakEnd);
   
   let breakDeduction = 0;
-  const overlapStart = Math.max(start, bStart);
+  const overlapStart = Math.max(effectiveStart, bStart);
   let overlapEnd = Math.min(end, bEnd);
   
   if (bEnd < bStart) overlapEnd = Math.min(end, bEnd + 24);
@@ -163,7 +185,7 @@ export function calcAttendanceDetails(rec: AttendanceRecord, config: AppConfig):
     breakDeduction = overlapEnd - overlapStart;
   }
   
-  const valid = Math.max(0, raw - breakDeduction);
+  const valid = Math.max(0, (end - effectiveStart) - breakDeduction);
   const ot = Math.max(0, valid - config.standardHours);
   
   return { raw, valid, standard: config.standardHours, ot };
@@ -258,11 +280,7 @@ export function calcOvertimePay(
       );
 
   // Check if dateStr is in holidays list
-  const holidayDateSet = new Set([
-    ...((config as any)?.holidayDates || []).map((h: any) => typeof h === "string" ? h.split("::")[0].trim() : h?.date),
-    ...((holidays as any[]) || []).map((h: any) => typeof h === "string" ? h.split("::")[0].trim() : h?.date)
-  ].filter(Boolean));
-  const isHoliday = holidayDateSet.has(dateStr);
+  const isHoliday = isHolidayDate(dateStr, config, holidays);
   
   // Check if dateStr is Saturday or Sunday
   let isWeekend = false;

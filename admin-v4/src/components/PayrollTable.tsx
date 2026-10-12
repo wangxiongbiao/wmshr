@@ -322,7 +322,7 @@ export function PayrollTable({ employees, attendance, config, holidays, loading 
           otCount += 1;
         }
 
-        const isAbsentOrLeave = emp.status === '休假' || (emp.status as any) === 'on_leave' || rec.type === 'absent' || rec.type === 'leave' || rec.type === 'sick_leave';
+        const isAbsentOrLeave = emp.status === '休假' || (emp.status as any) === 'on_leave' || rec.type === 'absent' || rec.type === 'leave' || rec.type === 'sick_leave' || rec.type === 'rest' || rec.type === 'holiday';
         if (!isAbsentOrLeave) {
           workingDays += 1;
           

@@ -343,7 +343,9 @@ export function AttendanceAdjustmentModal({
   record, 
   employees, 
   existingRecords = [],
-  lang = "zh-CN" 
+  lang = "zh-CN",
+  defaultStartShift = "08:30",
+  defaultEndShift = "17:30"
 }: { 
   isOpen: boolean, 
   onClose: () => void, 
@@ -351,10 +353,12 @@ export function AttendanceAdjustmentModal({
   record: AttendanceRecord | null,
   employees: Employee[],
   existingRecords?: AttendanceRecord[],
-  lang?: Language
+  lang?: Language,
+  defaultStartShift?: string,
+  defaultEndShift?: string
 }) {
   const [formData, setFormData] = useState<Partial<AttendanceRecord>>({
-    date: '', type: 'normal', inTime: '08:30', outTime: '17:30', note: ''
+    date: '', type: 'normal', inTime: defaultStartShift, outTime: defaultEndShift, note: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [autoFilledForDate, setAutoFilledForDate] = useState<string | null>(null);
@@ -378,8 +382,8 @@ export function AttendanceAdjustmentModal({
           next.inTime = "";
           next.outTime = "";
         } else if (!prev.inTime && !prev.outTime) {
-          next.inTime = "08:30";
-          next.outTime = "17:30";
+          next.inTime = defaultStartShift;
+          next.outTime = defaultEndShift;
         }
       }
       return next;

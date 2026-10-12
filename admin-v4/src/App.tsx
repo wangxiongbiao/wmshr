@@ -448,8 +448,8 @@ export default function App() {
           const res = await createAttendanceRecord({
             employeeId: empId,
             date,
-            inTime: isAbsentOrLeave ? (data.inTime || undefined) : (data.inTime || "08:30"),
-            outTime: isAbsentOrLeave ? (data.outTime || undefined) : (data.outTime || "17:30"),
+            inTime: isAbsentOrLeave ? (data.inTime || undefined) : (data.inTime || config.startShift || "08:30"),
+            outTime: isAbsentOrLeave ? (data.outTime || undefined) : (data.outTime || config.endShift || "17:30"),
             type: data.type || "normal",
             note: data.note || "",
             isAdjustment: Boolean(isAdjustment || editingRecord.id.startsWith("new-"))
@@ -473,8 +473,8 @@ export default function App() {
           const numId = Number(editingRecord.id);
           if (!isNaN(numId)) {
             await updateAttendanceRecord(numId, {
-              inTime: isAbsentOrLeave ? (data.inTime || undefined) : (data.inTime || "08:30"),
-              outTime: isAbsentOrLeave ? (data.outTime || undefined) : (data.outTime || "17:30"),
+              inTime: isAbsentOrLeave ? (data.inTime || undefined) : (data.inTime || config.startShift || "08:30"),
+              outTime: isAbsentOrLeave ? (data.outTime || undefined) : (data.outTime || config.endShift || "17:30"),
               type: data.type || "normal",
               note: data.note || ""
             });
@@ -648,8 +648,8 @@ export default function App() {
                   id: `new-${empId}-${date}`,
                   empId: empId,
                   date: date,
-                  inTime: isLeave ? "08:30" : "08:30",
-                  outTime: isLeave ? "17:30" : "17:30",
+                  inTime: isLeave ? (config.startShift || "08:30") : (config.startShift || "08:30"),
+                  outTime: isLeave ? (config.endShift || "17:30") : (config.endShift || "17:30"),
                   type: isLeave ? "leave" : "normal",
                   note: ""
                 };
@@ -665,8 +665,8 @@ export default function App() {
                 id: `new-manual`,
                 empId: defaultEmpId,
                 date: defaultDate,
-                inTime: "08:30",
-                outTime: "17:30",
+                inTime: config.startShift || "08:30",
+                outTime: config.endShift || "17:30",
                 type: "normal",
                 note: ""
               };
@@ -941,6 +941,8 @@ export default function App() {
         employees={employeesWithSettlementCurrency}
         existingRecords={attendance}
         lang={lang}
+        defaultStartShift={config.startShift}
+        defaultEndShift={config.endShift}
       />
 
       {toastViewport}

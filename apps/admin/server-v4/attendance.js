@@ -139,22 +139,23 @@ export function calculateDailyMetrics({ emp, rec, date, config, holidays = [] })
   if (isEmpLeave) {
     type = "leave";
   } else if (!rec) {
+    const rawHolidayList = Array.isArray(config.holidayDates) && config.holidayDates.length > 0
+      ? config.holidayDates
+      : (Array.isArray(holidays) ? holidays : []);
+    const holidayDatesSet = new Set(
+      rawHolidayList
+        .map(h => {
+          if (typeof h === "string") return h.split("::")[0].trim();
+          return h?.date;
+        })
+        .filter(Boolean)
+    );
+    const isHoliday = date ? holidayDatesSet.has(date) : false;
+
     if (!requiresAttendance) {
       // 免打卡员工未打卡：判断是否为周末或法定节假日
       const dayOfWeek = date ? new Date(`${date}T00:00:00Z`).getUTCDay() : 1;
       const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
-      const rawHolidayList = Array.isArray(config.holidayDates) && config.holidayDates.length > 0
-        ? config.holidayDates
-        : (Array.isArray(holidays) ? holidays : []);
-      const holidayDatesSet = new Set(
-        rawHolidayList
-          .map(h => {
-            if (typeof h === "string") return h.split("::")[0].trim();
-            return h?.date;
-          })
-          .filter(Boolean)
-      );
-      const isHoliday = date ? holidayDatesSet.has(date) : false;
 
       if (isWeekend || isHoliday) {
         type = "rest";
@@ -169,7 +170,12 @@ export function calculateDailyMetrics({ emp, rec, date, config, holidays = [] })
         };
       }
     } else {
-      type = "absent";
+      // 普通打卡员工在法定节假日当天未打卡时，自动豁免标记为“holiday”（法定假日），而非直接判定为“absent”（缺勤）
+      if (isHoliday) {
+        type = "holiday";
+      } else {
+        type = "absent";
+      }
     }
   } else {
     type = rec.type || "normal";
@@ -178,15 +184,30 @@ export function calculateDailyMetrics({ emp, rec, date, config, holidays = [] })
       const outH = parseTimeToHours(rec.outTime);
       const breakStartH = parseTimeToHours(config.breakStart || "12:00");
       const breakEndH = parseTimeToHours(config.breakEnd || "13:00");
+      const shiftStartH = config.startShift ? parseTimeToHours(config.startShift) : null;
+      const isEarlyOtApproved = Boolean(
+        rec.earlyOvertimeApproved ||
+        rec.early_overtime_approved ||
+        config.allowEarlyOvertime ||
+        config.allow_early_overtime
+      );
 
       if (inH !== null && outH !== null) {
         let diff = outH - inH;
         if (diff < 0) diff += 24;
+
+        // 工时起算截断：上班打卡早于 startShift 时，默认从 startShift 起算（除非开启提前加班审批）
+        let effectiveInH = inH;
+        const normalizedOutH = outH < inH ? outH + 24 : outH;
+        if (!isEarlyOtApproved && shiftStartH !== null && inH < shiftStartH) {
+          effectiveInH = Math.min(shiftStartH, normalizedOutH);
+        }
+
         let breakDeduction = 0;
         if (breakStartH !== null && breakEndH !== null) {
-          breakDeduction = calculateOverlapHours(inH, outH < inH ? outH + 24 : outH, breakStartH, breakEndH);
+          breakDeduction = calculateOverlapHours(effectiveInH, normalizedOutH, breakStartH, breakEndH);
         }
-        let valid = Math.max(0, diff - breakDeduction);
+        let valid = Math.max(0, (normalizedOutH - effectiveInH) - breakDeduction);
         const standardHours = Number(config.standardHours || 8);
         if (!requiresAttendance) {
           valid = Math.max(standardHours, valid);
@@ -212,7 +233,7 @@ export function calculateDailyMetrics({ emp, rec, date, config, holidays = [] })
     }
   }
 
-  const isAbsentOrLeave = isEmpLeave || type === "absent" || type === "leave" || type === "sick_leave" || type === "rest";
+  const isAbsentOrLeave = isEmpLeave || type === "absent" || type === "leave" || type === "sick_leave" || type === "rest" || type === "holiday";
   if (isAbsentOrLeave) {
     details.valid = 0;
     details.ot = 0;
@@ -1557,7 +1578,7 @@ export function createAttendanceRouter({ express, supabase }) {
             const shiftPay = Number(calcRow.work_pay || 0);
             const otPay = Number(calcRow.overtime_pay || 0);
             const mealAllowance = Number(calcRow.meal_allowance_amount || 0);
-            const isAbsentOrLeave = calcRow.status === "absent" || calcRow.status === "leave" || calcRow.status === "sick_leave";
+            const isAbsentOrLeave = calcRow.status === "absent" || calcRow.status === "leave" || calcRow.status === "sick_leave" || calcRow.status === "rest" || calcRow.status === "holiday";
             const dailySocialSecurity = isAbsentOrLeave ? 0 : (empDto.socialSecurity ? Math.round((empDto.socialSecurity / 30) * 100) / 100 : 0);
             const isDispatch = empDto.sourceType === "劳务派遣";
             const commRate = isDispatch ? (Number(empDto.dispatchCommissionRate) || 0) : 0;
