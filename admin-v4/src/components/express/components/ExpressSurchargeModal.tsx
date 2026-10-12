@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Coins, Plus, Trash2, Search, Check, Loader2, X } from "lucide-react";
+import { Coins, Plus, Trash2, Search, Check, Loader2, X, ArrowRightLeft } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -9,24 +9,38 @@ import {
 } from "../../ui/dialog";
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "../../ui/select";
 import { Customer } from "../../../types";
 import { CustomerSurcharge } from "../types";
-import { getCustomerCurrency } from "../constants";
+import {
+  getCustomerCurrency,
+  CURRENCY_OPTIONS,
+  getCurrencyInfo,
+  convertCurrency
+} from "../constants";
 
 interface ExpressSurchargeModalProps {
   isOpen: boolean;
   onClose: () => void;
   surcharges: Record<string, CustomerSurcharge>;
-  editingSurcharge?: { customerName: string; type: "piece" | "flat"; amount: number };
+  editingSurcharge?: { customerName: string; type: "piece" | "flat"; amount: number; currency?: string };
   onSaveSurcharge: (item: {
     customerName: string;
     originalCustomerName?: string;
     type: "piece" | "flat";
     amount: number;
+    currency?: string;
   }) => void;
   onDeleteSurcharge: (customerName: string) => void;
   customers: Customer[];
   uniqueCustomerNames: string[];
+  defaultWarehouseCurrency?: string;
 }
 
 export function ExpressSurchargeModal(props: ExpressSurchargeModalProps) {
@@ -38,18 +52,19 @@ export function ExpressSurchargeModal(props: ExpressSurchargeModalProps) {
     onSaveSurcharge,
     onDeleteSurcharge,
     customers,
-    uniqueCustomerNames
+    uniqueCustomerNames,
+    defaultWarehouseCurrency = "THB"
   } = props;
 
   const [selectedCustomer, setSelectedCustomer] = useState<string>("");
   const [customCustomerInput, setCustomCustomerInput] = useState<string>("");
   const [surchargeType, setSurchargeType] = useState<"piece" | "flat">("piece");
   const [amountStr, setAmountStr] = useState<string>("5");
+  const [selectedCurrency, setSelectedCurrency] = useState<string>(defaultWarehouseCurrency);
   const [customerSearch, setCustomerSearch] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   const effectiveCustomerName = customCustomerInput.trim() || selectedCustomer;
-  const curInfo = getCustomerCurrency(effectiveCustomerName, customers);
 
   // Filter existing customers by search
   const filteredCustomers = useMemo(() => {
@@ -58,17 +73,31 @@ export function ExpressSurchargeModal(props: ExpressSurchargeModalProps) {
     return uniqueCustomerNames.filter((c) => c.toLowerCase().includes(q));
   }, [uniqueCustomerNames, customerSearch]);
 
-  // When opening or selecting a customer, load existing config if any
+  // 选择已有客户时回显
   const handleSelectCustomer = (name: string) => {
     setSelectedCustomer(name);
     setCustomCustomerInput("");
     if (surcharges[name]) {
       setSurchargeType(surcharges[name].type);
       setAmountStr(String(surcharges[name].amount));
+      setSelectedCurrency(surcharges[name].currency || defaultWarehouseCurrency);
     } else {
+      const custDefCur = getCustomerCurrency(name, customers).code || defaultWarehouseCurrency;
       setSurchargeType("piece");
       setAmountStr("5");
+      setSelectedCurrency(custDefCur);
     }
+  };
+
+  // 货币切换时执行金额按汇率换算（让用户直观看到折算结果，也可自由修改）
+  const handleCurrencyChange = (newCur: string) => {
+    if (newCur === selectedCurrency) return;
+    const currentVal = parseFloat(amountStr);
+    if (!isNaN(currentVal) && currentVal > 0) {
+      const converted = convertCurrency(currentVal, selectedCurrency, newCur);
+      setAmountStr(String(converted));
+    }
+    setSelectedCurrency(newCur);
   };
 
   useEffect(() => {
@@ -79,16 +108,19 @@ export function ExpressSurchargeModal(props: ExpressSurchargeModalProps) {
         setCustomCustomerInput("");
         setSurchargeType(editingSurcharge.type);
         setAmountStr(String(editingSurcharge.amount));
+        const savedCur = editingSurcharge.currency || surcharges[editingSurcharge.customerName]?.currency;
+        setSelectedCurrency(savedCur || defaultWarehouseCurrency);
       } else {
-        // 新增模式：保持干净状态，绝不自动预选任何客户
+        // 新增模式
         setSelectedCustomer("");
         setCustomCustomerInput("");
         setSurchargeType("piece");
         setAmountStr("5");
+        setSelectedCurrency(defaultWarehouseCurrency);
         setCustomerSearch("");
       }
     }
-  }, [isOpen, editingSurcharge]);
+  }, [isOpen, editingSurcharge, surcharges, defaultWarehouseCurrency]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -100,19 +132,22 @@ export function ExpressSurchargeModal(props: ExpressSurchargeModalProps) {
         customerName: effectiveCustomerName,
         originalCustomerName: editingSurcharge?.customerName,
         type: surchargeType,
-        amount: Math.max(0, parsedAmount)
+        amount: Math.max(0, parsedAmount),
+        currency: selectedCurrency
       });
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const curInfo = getCurrencyInfo(selectedCurrency);
+
   return (
     <Dialog
       open={isOpen}
       onOpenChange={(open) => {
         if (!open) {
-          if (isSubmitting) return; // 提交期间锁定遮罩与 Esc，防止误触导致请求悬空
+          if (isSubmitting) return;
           onClose();
         }
       }}
@@ -125,10 +160,10 @@ export function ExpressSurchargeModal(props: ExpressSurchargeModalProps) {
             </div>
             <div>
               <DialogTitle className="text-base font-bold text-slate-900">
-                设置客户操作费规则
+                {editingSurcharge?.customerName ? `编辑客户操作费 - ${editingSurcharge.customerName}` : "设置客户操作费规则"}
               </DialogTitle>
               <p className="text-xs text-slate-500 mt-0.5">
-                为发货客户配置专属操作费（按件收费或固定月度打包费），对账时自动计入应收款
+                设置该客户加收操作费的计费方式、结算货币与金额，对账时仅对操作费进行币种结算与换算
               </p>
             </div>
           </div>
@@ -171,6 +206,7 @@ export function ExpressSurchargeModal(props: ExpressSurchargeModalProps) {
                 filteredCustomers.map((cust) => {
                   const isSelected = selectedCustomer === cust && !customCustomerInput;
                   const hasRule = !!surcharges[cust];
+                  const ruleCur = surcharges[cust]?.currency ? getCurrencyInfo(surcharges[cust].currency!).symbol : "฿";
 
                   return (
                     <div
@@ -186,7 +222,7 @@ export function ExpressSurchargeModal(props: ExpressSurchargeModalProps) {
                       <div className="flex items-center gap-1.5 shrink-0">
                         {hasRule && (
                           <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-mono">
-                            已设 {surcharges[cust].type === "piece" ? `${surcharges[cust].amount}฿/件` : `${surcharges[cust].amount}฿/月`}
+                            已设 {surcharges[cust].type === "piece" ? `${surcharges[cust].amount}${ruleCur}/件` : `${surcharges[cust].amount}${ruleCur}/月`}
                           </span>
                         )}
                         {isSelected && <Check className="w-3.5 h-3.5 text-brand-600" />}
@@ -259,10 +295,38 @@ export function ExpressSurchargeModal(props: ExpressSurchargeModalProps) {
             </div>
           </div>
 
-          {/* Step 3: Amount */}
+          {/* Step 3: Surcharge Currency Selection */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-bold text-slate-700">
+                3. 操作费结算货币 <span className="text-rose-500">*</span>
+              </label>
+              <span className="text-[11px] text-slate-400">
+                切换货币自动按标准汇率折算金额
+              </span>
+            </div>
+            <Select value={selectedCurrency} onValueChange={handleCurrencyChange}>
+              <SelectTrigger className="h-9 text-xs bg-white border-slate-200 font-medium">
+                <SelectValue placeholder="选择结算货币" />
+              </SelectTrigger>
+              <SelectContent className="max-h-56">
+                {CURRENCY_OPTIONS.map((c) => (
+                  <SelectItem key={c.code} value={c.code} className="text-xs cursor-pointer">
+                    <span className="flex items-center gap-2">
+                      <span>{c.flag}</span>
+                      <span className="font-bold text-slate-800">{c.countryName}</span>
+                      <span className="text-slate-400 font-mono">({c.code} - {c.symbol})</span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Step 4: Amount */}
           <div className="space-y-1.5">
             <label className="block text-xs font-bold text-slate-700">
-              3. 加收金额 ({curInfo.code}) <span className="text-rose-500">*</span>
+              4. 加收金额 ({curInfo.code}) <span className="text-rose-500">*</span>
             </label>
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 font-bold text-xs">
@@ -291,31 +355,34 @@ export function ExpressSurchargeModal(props: ExpressSurchargeModalProps) {
                 当前已配置的客户操作费列表：
               </span>
               <div className="max-h-24 overflow-y-auto space-y-1">
-                {Object.values(surcharges).map((sur) => (
-                  <div
-                    key={sur.customerName}
-                    className="flex items-center justify-between p-1.5 px-2 bg-slate-50 rounded border border-slate-100 text-xs"
-                  >
-                    <span className="font-medium text-slate-700 truncate max-w-[240px]">
-                      {sur.customerName}
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-brand-700 font-semibold text-[11px]">
-                        {sur.type === "piece" ? `${sur.amount}฿/件` : `${sur.amount}฿/月`}
+                {Object.values(surcharges).map((sur) => {
+                  const itemCur = sur.currency ? getCurrencyInfo(sur.currency).symbol : "฿";
+                  return (
+                    <div
+                      key={sur.customerName}
+                      className="flex items-center justify-between p-1.5 px-2 bg-slate-50 rounded border border-slate-100 text-xs"
+                    >
+                      <span className="font-medium text-slate-700 truncate max-w-[240px]">
+                        {sur.customerName}
                       </span>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => onDeleteSurcharge(sur.customerName)}
-                        className="h-5 w-5 text-slate-400 hover:text-rose-600 p-0 cursor-pointer"
-                        title="删除该规则"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-brand-700 font-semibold text-[11px]">
+                          {sur.type === "piece" ? `${sur.amount}${itemCur}/件` : `${sur.amount}${itemCur}/月`}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => onDeleteSurcharge(sur.customerName)}
+                          className="h-5 w-5 text-slate-400 hover:text-rose-600 p-0 cursor-pointer"
+                          title="删除该规则"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

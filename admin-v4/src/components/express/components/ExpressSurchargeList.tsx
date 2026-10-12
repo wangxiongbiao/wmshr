@@ -23,7 +23,14 @@ import { Input } from "../../ui/input";
 import { Badge } from "../../ui/badge";
 import { Customer } from "../../../types";
 import { CustomerSurcharge } from "../types";
-import { getCustomerCurrency } from "../constants";
+import { getCustomerCurrency, CURRENCY_OPTIONS, getCurrencyInfo, convertCurrency } from "../constants";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "../../ui/select";
 
 interface ExpressSurchargeListProps {
   isOpen: boolean;
@@ -31,11 +38,13 @@ interface ExpressSurchargeListProps {
   surcharges: Record<string, CustomerSurcharge>;
   customers: Customer[];
   uniqueCustomerNames?: string[];
+  defaultWarehouseCurrency?: string;
   onSaveSurcharge: (item: {
     customerName: string;
     originalCustomerName?: string;
     type: "piece" | "flat";
     amount: number;
+    currency?: string;
   }) => Promise<boolean | void> | void;
   onDeleteSurcharge: (name: string) => void;
 }
@@ -47,6 +56,7 @@ export function ExpressSurchargeList(props: ExpressSurchargeListProps) {
     surcharges,
     customers,
     uniqueCustomerNames = [],
+    defaultWarehouseCurrency = "THB",
     onSaveSurcharge,
     onDeleteSurcharge
   } = props;
@@ -60,6 +70,7 @@ export function ExpressSurchargeList(props: ExpressSurchargeListProps) {
   const [customCustomerInput, setCustomCustomerInput] = useState<string>("");
   const [surchargeType, setSurchargeType] = useState<"piece" | "flat">("piece");
   const [amountStr, setAmountStr] = useState<string>("5");
+  const [selectedCurrency, setSelectedCurrency] = useState<string>(defaultWarehouseCurrency);
   const [customerSearch, setCustomerSearch] = useState<string>("");
   const [editingOriginalName, setEditingOriginalName] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -102,6 +113,7 @@ export function ExpressSurchargeList(props: ExpressSurchargeListProps) {
     setCustomCustomerInput("");
     setSurchargeType("piece");
     setAmountStr("5");
+    setSelectedCurrency(defaultWarehouseCurrency);
     setCustomerSearch("");
     setViewMode("form");
   };
@@ -113,6 +125,7 @@ export function ExpressSurchargeList(props: ExpressSurchargeListProps) {
     setCustomCustomerInput("");
     setSurchargeType(sur.type);
     setAmountStr(String(sur.amount));
+    setSelectedCurrency(sur.currency || defaultWarehouseCurrency);
     setCustomerSearch("");
     setViewMode("form");
   };
@@ -124,7 +137,21 @@ export function ExpressSurchargeList(props: ExpressSurchargeListProps) {
     if (surcharges[name]) {
       setSurchargeType(surcharges[name].type);
       setAmountStr(String(surcharges[name].amount));
+      setSelectedCurrency(surcharges[name].currency || defaultWarehouseCurrency);
+    } else {
+      const custDefCur = getCustomerCurrency(name, customers).code || defaultWarehouseCurrency;
+      setSelectedCurrency(custDefCur);
     }
+  };
+
+  const handleCurrencyChange = (newCur: string) => {
+    if (newCur === selectedCurrency) return;
+    const currentVal = parseFloat(amountStr);
+    if (!isNaN(currentVal) && currentVal > 0) {
+      const converted = convertCurrency(currentVal, selectedCurrency, newCur);
+      setAmountStr(String(converted));
+    }
+    setSelectedCurrency(newCur);
   };
 
   // Handle Form Submit
@@ -139,7 +166,8 @@ export function ExpressSurchargeList(props: ExpressSurchargeListProps) {
         customerName: effectiveCustomerName,
         originalCustomerName: editingOriginalName || undefined,
         type: surchargeType,
-        amount: Math.max(0, parsedAmount)
+        amount: Math.max(0, parsedAmount),
+        currency: selectedCurrency
       });
       // Return back to list view on success
       setViewMode("list");
@@ -264,7 +292,7 @@ export function ExpressSurchargeList(props: ExpressSurchargeListProps) {
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                   {filteredSurchargeList.map((sur) => {
-                    const itemCurInfo = getCustomerCurrency(sur.customerName, customers);
+                    const ruleCurInfo = sur.currency ? getCurrencyInfo(sur.currency) : getCustomerCurrency(sur.customerName, customers);
                     const isPiece = sur.type === "piece";
 
                     return (
@@ -290,7 +318,7 @@ export function ExpressSurchargeList(props: ExpressSurchargeListProps) {
                               {isPiece ? "按单件收费" : "固定打包费"}
                             </span>
                             <span className="text-slate-900 font-mono font-bold text-xs">
-                              {itemCurInfo.symbol}
+                              {ruleCurInfo.symbol}
                               {sur.amount.toFixed(2)}
                               <span className="text-[10px] text-slate-400 font-normal ml-0.5">
                                 {isPiece ? "/件" : "/月"}
@@ -474,7 +502,7 @@ export function ExpressSurchargeList(props: ExpressSurchargeListProps) {
                     <span className="text-slate-400">当前已选:</span>
                     <strong className="text-brand-700 font-bold">{effectiveCustomerName}</strong>
                     <span className="text-[11px] text-slate-400 ml-auto font-mono">
-                      结算币种: {curInfo.code} ({curInfo.symbol})
+                      操作费币种: {selectedCurrency} ({getCurrencyInfo(selectedCurrency).symbol})
                     </span>
                   </div>
                 )}
@@ -520,14 +548,42 @@ export function ExpressSurchargeList(props: ExpressSurchargeListProps) {
                 </div>
               </div>
 
-              {/* Step 3: Amount */}
+              {/* Step 3: Surcharge Currency Selection */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-slate-700">
+                    3. 操作费结算货币 <span className="text-rose-500">*</span>
+                  </label>
+                  <span className="text-[11px] text-slate-400">
+                    切换货币自动按汇率换算金额
+                  </span>
+                </div>
+                <Select value={selectedCurrency} onValueChange={handleCurrencyChange}>
+                  <SelectTrigger className="h-9 text-xs bg-white border-slate-200 font-medium">
+                    <SelectValue placeholder="选择结算货币" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-56">
+                    {CURRENCY_OPTIONS.map((c) => (
+                      <SelectItem key={c.code} value={c.code} className="text-xs cursor-pointer">
+                        <span className="flex items-center gap-2">
+                          <span>{c.flag}</span>
+                          <span className="font-bold text-slate-800">{c.countryName}</span>
+                          <span className="text-slate-400 font-mono">({c.code} - {c.symbol})</span>
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Step 4: Amount */}
               <div className="space-y-1.5">
                 <label className="block text-xs font-bold text-slate-700">
-                  3. 加收金额 ({curInfo.code}) <span className="text-rose-500">*</span>
+                  4. 加收金额 ({getCurrencyInfo(selectedCurrency).code}) <span className="text-rose-500">*</span>
                 </label>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 font-bold text-xs">
-                    {curInfo.symbol}
+                    {getCurrencyInfo(selectedCurrency).symbol}
                   </span>
                   <Input
                     type="number"
@@ -540,7 +596,7 @@ export function ExpressSurchargeList(props: ExpressSurchargeListProps) {
                     placeholder={surchargeType === "piece" ? "5.00" : "100.00"}
                   />
                   <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-mono">
-                    {surchargeType === "piece" ? `${curInfo.symbol} / 件` : `${curInfo.symbol} / 月`}
+                    {surchargeType === "piece" ? `${getCurrencyInfo(selectedCurrency).symbol} / 件` : `${getCurrencyInfo(selectedCurrency).symbol} / 月`}
                   </span>
                 </div>
               </div>

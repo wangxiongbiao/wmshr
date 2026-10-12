@@ -29,25 +29,22 @@ export function formatFeeWithCurrency(
 export function exportFullCsv(
   reconciledData: ReconciledItem[],
   customers?: Customer[],
-  addToast?: (msg: string, kind?: "success" | "error" | "info") => void,
-  targetCurrency: string = "THB"
+  addToast?: (msg: string, kind?: "success" | "error" | "info") => void
 ): void {
   if (!reconciledData || reconciledData.length === 0) {
     addToast?.("暂无核算数据可导出", "error");
     return;
   }
 
-  const curInfo = getCurrencyInfo(targetCurrency);
-  const curSymbol = curInfo.symbol;
-
   let csvContent = "\uFEFF"; // UTF-8 BOM
-  csvContent += `快递单号,客户名称,收件人,收件人电话,重量(kg),JNT快递运费(${curSymbol}),客户额外操作费(${curSymbol}),客户最终应付(${curSymbol}),核对状态\n`;
+  csvContent += "快递单号,客户名称,收件人,收件人电话,重量(kg),JNT快递运费(฿),客户额外操作费,客户最终应付,核对状态\n";
 
   reconciledData.forEach((r) => {
     const statusText =
       r.status === "matched" ? "匹配成功" : r.status === "system_only" ? "系统单JNT未对账" : "JNT有账系统无单";
-    const surchargeText = r.surcharge > 0 ? `${curSymbol}${r.surcharge.toFixed(2)}` : "0.00";
-    const totalFeeText = `${curSymbol}${r.totalFee.toFixed(2)}`;
+    const surSymbol = r.surchargeCurrencySymbol || "฿";
+    const surchargeText = r.surcharge > 0 ? `${surSymbol}${r.surcharge.toFixed(2)}` : "0.00";
+    const totalFeeText = formatFeeWithCurrency(r.jntFee, r.surcharge, surSymbol);
 
     csvContent += `"${r.waybillNo}","${r.customerName}","${r.recipientName}","${r.recipientPhone}",${
       r.weight > 0 ? r.weight.toFixed(2) : "-"
@@ -118,9 +115,9 @@ export function exportCustomerBillCsv(params: {
   customerSummary: CustomerSummaryItem[];
   customers: Customer[];
   addToast?: (msg: string, kind?: "success" | "error" | "info") => void;
-  targetCurrency?: string;
+  surchargeCurrency?: string;
 }): void {
-  const { customerName, customerSummary, customers, addToast, targetCurrency = "THB" } = params;
+  const { customerName, customerSummary, customers, addToast, surchargeCurrency } = params;
   const custSum = customerSummary.find((c) => c.customerName === customerName);
   if (!custSum) {
     addToast?.("找不到该客户的对账单数据", "error");
@@ -129,23 +126,25 @@ export function exportCustomerBillCsv(params: {
 
   let csvContent = "\uFEFF"; // UTF-8 BOM
 
-  const curInfo = getCurrencyInfo(targetCurrency);
-  const curSymbol = curInfo.symbol;
+  const surCurCode = surchargeCurrency || custSum.surchargeCurrency || "THB";
+  const surCurInfo = getCurrencyInfo(surCurCode);
+  const surSymbol = surCurInfo.symbol;
   const isFlat = custSum.surchargeType === "flat";
   const ruleText = isFlat
-    ? `固定 ${curSymbol}${custSum.surchargeAmount.toFixed(2)} / 月`
-    : `按件 ${curSymbol}${custSum.surchargeAmount.toFixed(2)} / 件`;
+    ? `固定 ${surSymbol}${custSum.surchargeAmount.toFixed(2)} / 月`
+    : `按件 ${surSymbol}${custSum.surchargeAmount.toFixed(2)} / 件`;
+
+  const finalPayableText = custSum.finalPayableDisplay || formatFeeWithCurrency(custSum.totalJntFee, custSum.totalSurcharge, surSymbol);
 
   csvContent += `客户对账结算清单,${customerName}\n`;
   csvContent += `导出时间,${new Date().toLocaleString()}\n`;
-  csvContent += `结算货币,${curInfo.countryName} (${curInfo.code} - ${curSymbol})\n`;
   csvContent += `发货总件数,${custSum.totalItems} 件\n`;
   csvContent += `已核对件数,${custSum.matchedItems} 件\n`;
-  csvContent += `基础快递运费,${curSymbol}${custSum.totalJntFee.toFixed(2)}\n`;
-  csvContent += `额外操作费,${curSymbol}${custSum.totalSurcharge.toFixed(2)} (${ruleText})\n`;
-  csvContent += `最终应付总额,${curSymbol}${custSum.finalTotalPayable.toFixed(2)}\n\n`;
+  csvContent += `基础快递运费,฿${custSum.totalJntFee.toFixed(2)}\n`;
+  csvContent += `额外操作费,${surSymbol}${custSum.totalSurcharge.toFixed(2)} (${ruleText})\n`;
+  csvContent += `最终应付总额,"${finalPayableText}"\n\n`;
 
-  csvContent += `序号,运单号,对应系统订单号,收件人,电话,重量(kg),JNT快递运费(${curSymbol}),操作费(${curSymbol}),单项小计(${curSymbol}),对账状态\n`;
+  csvContent += `序号,运单号,对应系统订单号,收件人,电话,重量(kg),JNT快递运费(฿),操作费(${surSymbol}),单项小计,对账状态\n`;
 
   custSum.records.forEach((r, idx) => {
     const orderNo = getOrderNoFromRecord(r);
@@ -155,10 +154,10 @@ export function exportCustomerBillCsv(params: {
     const surchargeText = isFlat
       ? `月度打包费 (${ruleText})`
       : r.surcharge > 0
-      ? `${curSymbol}${r.surcharge.toFixed(2)}`
+      ? `${surSymbol}${r.surcharge.toFixed(2)}`
       : "0.00";
 
-    const lineTotalText = `${curSymbol}${r.totalFee.toFixed(2)}`;
+    const lineTotalText = formatFeeWithCurrency(r.jntFee, r.surcharge, surSymbol);
 
     csvContent += `${idx + 1},"${r.waybillNo}","${orderNo}","${r.recipientName}","${r.recipientPhone}",${
       r.weight > 0 ? r.weight.toFixed(2) : "-"

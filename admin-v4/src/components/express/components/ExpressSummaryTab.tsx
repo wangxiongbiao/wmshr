@@ -18,6 +18,7 @@ import { Customer } from "../../../types";
 import { CustomerSummaryItem, ReconciledItem } from "../types";
 import { getCustomerCurrency, getCurrencyInfo, STATUS_CONFIG } from "../constants";
 import { getOrderNoFromRecord } from "../utils/reconciliation";
+import { formatFeeWithCurrency } from "../utils/exportCsv";
 
 interface ExpressSummaryTabProps {
   customerSummary: CustomerSummaryItem[];
@@ -31,7 +32,7 @@ interface ExpressSummaryTabProps {
   systemAltKey: string;
   jntAltKey: string;
   onExportCustomerBill: (customerName: string) => void;
-  onOpenCustomerCurrencyModal?: (customerName: string) => void;
+  onOpenEditSurcharge?: (customerName: string) => void;
 }
 
 export function ExpressSummaryTab(props: ExpressSummaryTabProps) {
@@ -45,7 +46,7 @@ export function ExpressSummaryTab(props: ExpressSummaryTabProps) {
     systemAltKey,
     jntAltKey,
     onExportCustomerBill,
-    onOpenCustomerCurrencyModal
+    onOpenEditSurcharge
   } = props;
 
   if (customerSummary.length === 0) {
@@ -67,8 +68,8 @@ export function ExpressSummaryTab(props: ExpressSummaryTabProps) {
         <Info className="w-4 h-4 shrink-0 text-amber-600 mt-0.5" />
         <div>
           <span className="font-bold">对账单自动计算逻辑：</span>
-          系统根据每一位客户的运单数量结合操作费规则，累加 J&T
-          实际快递账单，默认统一按当前仓库国家的货币结算。点击操作栏的「编辑货币」可单独设置该客户的结算货币，「导出结算单」可生成该客户独立的对账 Excel/CSV 表。
+          J&T基础快递运费固定按极兔承运商成本（฿）结算；操作费支持按客户独立设置结算币种与金额。
+          点击操作栏的「编辑操作费」可修改该客户操作费的加收方式、结算货币与金额。
         </div>
       </div>
 
@@ -82,17 +83,17 @@ export function ExpressSummaryTab(props: ExpressSummaryTabProps) {
                 <th className="py-3 px-4 font-bold">发货客户名称</th>
                 <th className="py-3 px-3 text-center">发货单量</th>
                 <th className="py-3 px-3 text-center">核对情况</th>
-                <th className="py-3 px-4 text-right">基础运费</th>
+                <th className="py-3 px-4 text-right">基础运费(฿)</th>
                 <th className="py-3 px-4 text-right">操作费合计</th>
                 <th className="py-3 px-4 text-right font-black">客户最终应付</th>
-                <th className="py-3 px-4 text-center w-40">操作</th>
+                <th className="py-3 px-4 text-center w-44">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {customerSummary.map((sum) => {
                 const isExpanded = !!expandedCustomers[sum.customerName];
-                const curSymbol = sum.currencySymbol || "฿";
-                const curCode = sum.currency || "THB";
+                const surSymbol = sum.surchargeCurrencySymbol || "฿";
+                const surCode = sum.surchargeCurrency || "THB";
 
                 const matchPct =
                   sum.totalItems > 0
@@ -180,43 +181,45 @@ export function ExpressSummaryTab(props: ExpressSummaryTabProps) {
                       </td>
 
                       <td className="py-3.5 px-4 text-right font-mono text-slate-800 font-semibold">
-                        {curSymbol}{sum.totalJntFee.toFixed(2)}
+                        ฿{sum.totalJntFee.toFixed(2)}
                       </td>
 
                       <td className="py-3.5 px-4 text-right">
                         <div className="font-mono text-slate-800 font-semibold">
-                          {curSymbol}
+                          {surSymbol}
                           {sum.totalSurcharge.toFixed(2)}
                         </div>
                         <div className="text-[10px] text-slate-400 font-medium">
                           {sum.surchargeType === "piece"
-                            ? `按件 ${curSymbol}${sum.surchargeAmount.toFixed(2)}/件`
-                            : `固定 ${curSymbol}${sum.surchargeAmount.toFixed(2)}/月`}
+                            ? `按件 ${surSymbol}${sum.surchargeAmount.toFixed(2)}/件`
+                            : `固定 ${surSymbol}${sum.surchargeAmount.toFixed(2)}/月`}
                         </div>
                       </td>
 
                       <td className="py-3.5 px-4 text-right">
                         <div className="font-mono font-bold text-brand-700 text-sm">
-                          {curSymbol}{sum.finalTotalPayable.toFixed(2)}
+                          {sum.finalPayableDisplay || `฿${sum.finalTotalPayable.toFixed(2)}`}
                         </div>
-                        <div className="text-[10px] text-slate-400 font-mono">
-                          {curCode}
-                        </div>
+                        {surCode !== "THB" && (
+                          <div className="text-[10px] text-slate-400 font-mono">
+                            含操作费 ({surCode})
+                          </div>
+                        )}
                       </td>
 
                       <td className="py-3.5 px-4 text-center">
                         <div className="flex items-center justify-center gap-1.5">
-                          {onOpenCustomerCurrencyModal && (
+                          {onOpenEditSurcharge && (
                             <Button
                               type="button"
                               variant="outline"
                               size="sm"
-                              onClick={() => onOpenCustomerCurrencyModal(sum.customerName)}
+                              onClick={() => onOpenEditSurcharge(sum.customerName)}
                               className="h-7 px-2 text-[11px] font-medium text-slate-700 hover:text-brand-700 bg-white border-slate-200 gap-1 cursor-pointer"
-                              title="编辑该客户结算货币"
+                              title="编辑该客户操作费规则与结算货币"
                             >
                               <Pencil className="w-3 h-3 text-brand-600" />
-                              <span>编辑</span>
+                              <span>编辑操作费</span>
                             </Button>
                           )}
                           <Button
@@ -295,9 +298,9 @@ export function ExpressSummaryTab(props: ExpressSummaryTabProps) {
                                     <th className="py-2 px-3">收件人</th>
                                     <th className="py-2 px-3">电话</th>
                                     <th className="py-2 px-2 text-right">重量(kg)</th>
-                                    <th className="py-2 px-3 text-right">J&T运费({curSymbol})</th>
-                                    <th className="py-2 px-3 text-right">操作费({curSymbol})</th>
-                                    <th className="py-2 px-3 text-right">应付小计({curSymbol})</th>
+                                    <th className="py-2 px-3 text-right">J&T运费(฿)</th>
+                                    <th className="py-2 px-3 text-right">操作费({surSymbol})</th>
+                                    <th className="py-2 px-3 text-right">应付小计</th>
                                     <th className="py-2 px-3 text-center">对账状态</th>
                                   </tr>
                                 </thead>
@@ -334,15 +337,15 @@ export function ExpressSummaryTab(props: ExpressSummaryTabProps) {
                                           {r.weight > 0 ? r.weight.toFixed(2) : "-"}
                                         </td>
                                         <td className="py-1.5 px-3 text-right font-semibold text-slate-800">
-                                          {curSymbol}{r.jntFee.toFixed(2)}
+                                          ฿{r.jntFee.toFixed(2)}
                                         </td>
                                         <td className="py-1.5 px-3 text-right text-slate-600">
                                           {r.surcharge > 0
-                                            ? `${curSymbol}${r.surcharge.toFixed(2)}`
+                                            ? `${surSymbol}${r.surcharge.toFixed(2)}`
                                             : "0.00"}
                                         </td>
                                         <td className="py-1.5 px-3 text-right font-bold text-slate-900">
-                                          {curSymbol}{r.totalFee.toFixed(2)}
+                                          {formatFeeWithCurrency(r.jntFee, r.surcharge, surSymbol)}
                                         </td>
                                         <td className="py-1.5 px-3 text-center">
                                           <span

@@ -63,6 +63,8 @@ export interface ReconciledItem {
   status: "matched" | "system_only" | "jnt_only";
   rawJntFee?: number;
   rawSurcharge?: number;
+  surchargeCurrency?: string;
+  surchargeCurrencySymbol?: string;
   entryTime?: string;
   signTime?: string;
   branchName?: string;
@@ -88,6 +90,7 @@ export interface CustomerSurcharge {
   customerName: string;
   type: "piece" | "flat"; // piece: 按单件收费, flat: 固定打包费
   amount: number;
+  currency?: string; // 操作费币种，未指定时默认客户结算币种或当前仓库货币
 }
 
 export interface ExpressImportLog {
@@ -134,9 +137,12 @@ export interface CustomerSummaryItem {
   surchargeType: "piece" | "flat";
   totalSurcharge: number;
   finalTotalPayable: number;
+  finalPayableDisplay?: string;
   records: ReconciledItem[];
   currency?: string;
   currencySymbol?: string;
+  surchargeCurrency?: string;
+  surchargeCurrencySymbol?: string;
 }
 
 export interface ReconciliationStats {

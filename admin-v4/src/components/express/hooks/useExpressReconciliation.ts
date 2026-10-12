@@ -206,18 +206,31 @@ export function useExpressReconciliation(params: {
     setIsSurchargeListOpen((prev) => !prev);
   }, []);
 
-  const openSurchargeModalWithData = useCallback((initialData?: CustomerSurcharge) => {
-    if (initialData) {
+  const openSurchargeModalWithData = useCallback((initialData?: CustomerSurcharge | string) => {
+    if (typeof initialData === "string") {
+      const existing = surcharges[initialData];
+      if (existing) {
+        setEditingSurcharge({
+          customerName: existing.customerName,
+          type: existing.type,
+          amount: existing.amount,
+          currency: existing.currency
+        });
+      } else {
+        setEditingSurcharge({ customerName: initialData, type: "piece", amount: 5 });
+      }
+    } else if (initialData) {
       setEditingSurcharge({
         customerName: initialData.customerName,
         type: initialData.type,
-        amount: initialData.amount
+        amount: initialData.amount,
+        currency: initialData.currency
       });
     } else {
       setEditingSurcharge({ customerName: "", type: "piece", amount: 5 });
     }
     setIsSurchargeModalOpen(true);
-  }, []);
+  }, [surcharges]);
 
   const handleSaveSurcharge = useCallback(
     (item: {
@@ -225,6 +238,7 @@ export function useExpressReconciliation(params: {
       originalCustomerName?: string;
       type: "piece" | "flat";
       amount: number;
+      currency?: string;
     }) => {
       const cleanName = item.customerName.trim();
       if (!cleanName) {
@@ -239,7 +253,8 @@ export function useExpressReconciliation(params: {
         next[cleanName] = {
           customerName: cleanName,
           type: item.type,
-          amount: Math.max(0, item.amount)
+          amount: Math.max(0, item.amount),
+          currency: item.currency || next[cleanName]?.currency
         };
         saveExpressSurcharges(next);
         return next;
@@ -642,8 +657,8 @@ export function useExpressReconciliation(params: {
   }, [addToast]);
 
   const handleExportFullCsv = useCallback(() => {
-    exportFullCsv(reconciledData, customers, addToast, defaultWarehouseCurrency);
-  }, [reconciledData, customers, addToast, defaultWarehouseCurrency]);
+    exportFullCsv(reconciledData, customers, addToast);
+  }, [reconciledData, customers, addToast]);
 
   const handleExportDiscrepancyCsv = useCallback(() => {
     exportDiscrepancyCsv(discrepancyRecords, customers, addToast, defaultWarehouseCurrency);
@@ -651,8 +666,9 @@ export function useExpressReconciliation(params: {
 
   const handleExportCustomerBillCsv = useCallback(
     (customerName: string) => {
-      const custCur = (customerCurrencies && customerCurrencies[customerName]) || defaultWarehouseCurrency;
-      exportCustomerBillCsv({ customerName, customerSummary, customers, addToast, targetCurrency: custCur });
+      const targetSum = customerSummary.find((c) => c.customerName === customerName);
+      const surCur = targetSum?.surchargeCurrency || (customerCurrencies && customerCurrencies[customerName]) || defaultWarehouseCurrency;
+      exportCustomerBillCsv({ customerName, customerSummary, customers, addToast, surchargeCurrency: surCur });
     },
     [customerSummary, customers, addToast, customerCurrencies, defaultWarehouseCurrency]
   );

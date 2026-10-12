@@ -12,7 +12,6 @@ import { ExpressDetailsTab } from "./express/components/ExpressDetailsTab";
 import { ExpressDiscrepancyTab } from "./express/components/ExpressDiscrepancyTab";
 import { ExpressSurchargeModal } from "./express/components/ExpressSurchargeModal";
 import { ExpressImportLogsModal } from "./express/components/ExpressImportLogsModal";
-import { ExpressCurrencyModal } from "./express/components/ExpressCurrencyModal";
 
 // Re-export types and utilities for full backwards compatibility
 export * from "./express/types";
@@ -139,7 +138,7 @@ export function ExpressManager({
           systemAltKey={recon.systemAltKey}
           jntAltKey={recon.jntAltKey}
           onExportCustomerBill={recon.handleExportCustomerBillCsv}
-          onOpenCustomerCurrencyModal={recon.openCustomerCurrencyModal}
+          onOpenEditSurcharge={recon.openSurchargeModalWithData}
         />
       )}
 
@@ -172,6 +171,7 @@ export function ExpressManager({
         onDeleteSurcharge={recon.handleDeleteSurcharge}
         customers={customers}
         uniqueCustomerNames={recon.uniqueCustomerNames}
+        defaultWarehouseCurrency={recon.defaultWarehouseCurrency}
       />
 
       {/* 客户操作费设置列表弹窗 (Dialog 模态弹窗) */}
@@ -181,6 +181,7 @@ export function ExpressManager({
         surcharges={recon.surcharges}
         customers={customers}
         uniqueCustomerNames={recon.uniqueCustomerNames}
+        defaultWarehouseCurrency={recon.defaultWarehouseCurrency}
         onSaveSurcharge={recon.handleSaveSurcharge}
         onDeleteSurcharge={recon.handleDeleteSurcharge}
       />
@@ -193,19 +194,6 @@ export function ExpressManager({
         activeLogSnapshotId={recon.activeLogSnapshot?.id}
         onRestore={recon.handleRestoreImportLog}
         onDelete={recon.handleDeleteImportLog}
-      />
-
-      {/* 转换客户结算货币弹窗 (列表行级编辑独立折算，未单独指定则默认仓库国家货币) */}
-      <ExpressCurrencyModal
-        isOpen={recon.isCurrencyModalOpen}
-        onClose={() => recon.setIsCurrencyModalOpen(false)}
-        customerName={recon.editingCustomerForCurrency || undefined}
-        currentCurrency={
-          (recon.editingCustomerForCurrency && recon.customerCurrencies[recon.editingCustomerForCurrency]) ||
-          recon.defaultWarehouseCurrency
-        }
-        defaultCurrency={recon.defaultWarehouseCurrency}
-        onSaveCurrency={recon.handleSaveCustomerCurrency}
       />
     </div>
   );

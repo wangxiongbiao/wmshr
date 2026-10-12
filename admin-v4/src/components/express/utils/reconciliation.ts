@@ -346,13 +346,16 @@ export function computeCustomerSummary(
     sum.totalItems += 1;
     sum.totalWeight += item.weight || 0;
 
+    // 基础快递运费始终严格保持泰铢（THB ฿）成本
+    const jntFeeValue = item.rawJntFee !== undefined ? item.rawJntFee : item.jntFee;
+
     if (item.status === "matched") {
       sum.matchedItems += 1;
-      sum.totalJntFee += item.jntFee;
+      sum.totalJntFee += jntFeeValue;
     } else if (item.status === "system_only") {
       sum.systemOnlyItems += 1;
     } else if (item.status === "jnt_only") {
-      sum.totalJntFee += item.jntFee;
+      sum.totalJntFee += jntFeeValue;
     }
   });
 
@@ -364,13 +367,23 @@ export function computeCustomerSummary(
     const surchargeType: "piece" | "flat" = surchargeConfig?.type || "piece";
     const surchargeAmount = surchargeConfig?.amount || 0;
 
-    const effectiveCur = (customerCurrencies && name && customerCurrencies[name])
-      ? customerCurrencies[name]
-      : (defaultWarehouseCurrency || "THB");
+    // 确定操作费的目标币种：
+    // 优先级 1: 规则内显式配置的 currency
+    // 优先级 2: customerCurrencies 动态映射
+    // 优先级 3: 客户档案自身结算币种
+    // 优先级 4: 当前仓库国家默认货币 (THB)
+    const custArchiveCur = getCustomerCurrency(name, customers).code;
+    const effectiveCur = surchargeConfig?.currency
+      || (customerCurrencies && name && customerCurrencies[name])
+      || custArchiveCur
+      || defaultWarehouseCurrency
+      || "THB";
     const curInfo = getCurrencyInfo(effectiveCur);
 
-    const custCur = getCustomerCurrency(name, customers).code;
-    const convertedAmount = convertCurrency(surchargeAmount, custCur, effectiveCur);
+    // 金额换算：如果用户配置时带了原币或者从客户档案原币折算为所选币种
+    const convertedAmount = surchargeConfig?.currency
+      ? surchargeAmount
+      : convertCurrency(surchargeAmount, custArchiveCur, effectiveCur);
 
     if (surchargeConfig) {
       if (surchargeConfig.type === "piece") {
@@ -380,18 +393,36 @@ export function computeCustomerSummary(
       }
     }
 
-    // Overwrite each item's surcharge in the subrecords for consistency
+    // 格式化最终应付文案：同币种合并，异币种清晰分列（如 ฿365.00 + ¥7.25）
+    const isSameCur = curInfo.symbol === "฿";
+    const finalDisplay = isSameCur
+      ? `฿${(sum.totalJntFee + finalSurcharge).toFixed(2)}`
+      : sum.totalJntFee === 0
+      ? `${curInfo.symbol}${finalSurcharge.toFixed(2)}`
+      : finalSurcharge === 0
+      ? `฿${sum.totalJntFee.toFixed(2)}`
+      : `฿${sum.totalJntFee.toFixed(2)} + ${curInfo.symbol}${finalSurcharge.toFixed(2)}`;
+
+    // 同步更新展开子列表 records：运费固定 ฿，操作费按选定币种显示
     sum.records.forEach((rec) => {
+      const originalJnt = rec.rawJntFee !== undefined ? rec.rawJntFee : rec.jntFee;
+      rec.jntFee = originalJnt; // J&T运费固定为 ฿
+      rec.surchargeCurrency = effectiveCur;
+      rec.surchargeCurrencySymbol = curInfo.symbol;
+
       if (surchargeConfig) {
         if (surchargeConfig.type === "piece") {
           rec.surcharge = convertedAmount;
-          rec.totalFee = Math.round((rec.jntFee + rec.surcharge) * 100) / 100;
         } else {
           rec.surcharge = 0;
-          rec.totalFee = rec.jntFee;
         }
       } else {
         rec.surcharge = 0;
+      }
+
+      if (isSameCur) {
+        rec.totalFee = Math.round((rec.jntFee + rec.surcharge) * 100) / 100;
+      } else {
         rec.totalFee = rec.jntFee;
       }
     });
@@ -406,10 +437,13 @@ export function computeCustomerSummary(
       surchargeAmount: convertedAmount,
       surchargeType,
       totalSurcharge: finalSurcharge,
-      finalTotalPayable: Math.round((sum.totalJntFee + finalSurcharge) * 100) / 100,
+      finalTotalPayable: isSameCur ? (sum.totalJntFee + finalSurcharge) : sum.totalJntFee,
+      finalPayableDisplay: finalDisplay,
       records: sum.records,
-      currency: effectiveCur,
-      currencySymbol: curInfo.symbol
+      currency: "THB",
+      currencySymbol: "฿",
+      surchargeCurrency: effectiveCur,
+      surchargeCurrencySymbol: curInfo.symbol
     });
   });
 
