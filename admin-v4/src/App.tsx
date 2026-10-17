@@ -23,7 +23,7 @@ import { OrderManager } from "./components/OrderManager";
 import { InvoiceManager } from "./components/InvoiceManager";
 import { ExpressManager } from "./components/ExpressManager";
 import { Login, CONTINENTS } from "./components/Login";
-import { TabId, Employee, AttendanceRecord, AppConfig, GoodsRecord, Customer, Product, CustomerOrder, HolidayRecord, LeaveRequest, AdminUser } from "./types";
+import { TabId, Employee, AttendanceRecord, AppConfig, GoodsRecord, Customer, Product, HolidayRecord, LeaveRequest, AdminUser } from "./types";
 import { createEmployee, fetchEmployeePermissions, fetchEmployees, resignEmployee, deleteEmployee, resetEmployeePassword, updateEmployee } from "./lib/employeeApi";
 import { createAttendanceRecord, updateAttendanceRecord, updateAttendanceConfig, fetchAttendanceConfig, fetchAttendanceRecords, fetchLeaveRequests, fetchHolidays, updateHolidays } from "./lib/attendanceApi";
 import { INITIAL_CONFIG, INITIAL_EMPLOYEES, INITIAL_ATTENDANCE } from "./constants";
@@ -33,6 +33,9 @@ import { getCurrencyForCountry } from "./lib/utils";
 import { getTranslation, Language } from "./lib/i18n";
 import { parseAdminRoute, buildAdminRoute, DEFAULT_ADMIN_TAB } from "./lib/adminRoute";
 import { frontendStore } from "./lib/frontendStore";
+import { customerApi } from "./lib/customerApi";
+import { productApi } from "./lib/productApi";
+import { ApiError } from "./lib/apiRequest";
 import { isGooglePopupCallback, parseOAuthHash, GOOGLE_AUTH_MESSAGE_TYPE, publishGoogleAuthResult } from "./lib/googleAuth";
 
 export default function App() {
@@ -247,9 +250,8 @@ export default function App() {
   const [config, setConfig] = useState<AppConfig>(() => frontendStore.getConfig());
   const [holidays, setHolidays] = useState<HolidayRecord[]>(() => frontendStore.getHolidays());
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>(() => frontendStore.getLeaveRequests());
-  const [customers, setCustomers] = useState<Customer[]>(() => frontendStore.getCustomers());
-  const [products, setProducts] = useState<Product[]>(() => frontendStore.getProducts());
-  const [orders, setOrders] = useState<CustomerOrder[]>(() => frontendStore.getOrders());
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
 
   const [selectedAttIds, setSelectedAttIds] = useState<Set<string>>(new Set());
 
@@ -333,6 +335,23 @@ export default function App() {
     if (adminUser) void reloadEmployees();
   }, [adminUser]);
 
+  // 客户与商品以服务端为准；无对应查看权限（403）时静默保持为空
+  const loadCommerceList = async <T,>(load: () => Promise<T[]>, apply: (list: T[]) => void, label: string) => {
+    try {
+      apply(await load());
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 403) return;
+      addToast(`${label}加载失败：${error instanceof Error ? error.message : "未知错误"}`, "error");
+    }
+  };
+  const reloadProducts = () => loadCommerceList(productApi.list, setProducts, "商品");
+
+  useEffect(() => {
+    if (!adminUser) return;
+    void loadCommerceList(customerApi.list, setCustomers, "客户");
+    void reloadProducts();
+  }, [adminUser]);
+
   const lastTabSwitchRef = useRef<number>(0);
   const prevTabRef = useRef<TabId>(activeTab);
 
@@ -370,20 +389,6 @@ export default function App() {
     }));
   }, [employees, config.currency]);
 
-  const handleUpdateCustomers = (newList: Customer[]) => {
-    setCustomers(newList);
-    frontendStore.saveCustomers(newList);
-  };
-
-  const handleUpdateProducts = (newList: Product[]) => {
-    setProducts(newList);
-    frontendStore.saveProducts(newList);
-  };
-
-  const handleUpdateOrders = (newList: CustomerOrder[]) => {
-    setOrders(newList);
-    frontendStore.saveOrders(newList);
-  };
 
   // 弹窗状态
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
@@ -756,7 +761,7 @@ export default function App() {
         return (
           <CustomerManager
             customers={customers}
-            onUpdateCustomers={handleUpdateCustomers}
+            onUpdateCustomers={setCustomers}
             addToast={addToast}
             lang={lang}
           />
@@ -765,7 +770,7 @@ export default function App() {
         return (
           <ProductManager
             products={products}
-            onUpdateProducts={handleUpdateProducts}
+            onUpdateProducts={setProducts}
             customers={customers}
             goodsList={goods}
             addToast={addToast}
@@ -774,12 +779,10 @@ export default function App() {
       case "orders":
         return (
           <OrderManager
-            orders={orders}
-            onUpdateOrders={handleUpdateOrders}
-            products={products}
-            onUpdateProducts={handleUpdateProducts}
             customers={customers}
             addToast={addToast}
+            products={products}
+            onInventoryChanged={reloadProducts}
           />
         );
       case "employee_app":

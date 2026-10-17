@@ -17,6 +17,11 @@ import { createPayrollRouter } from "./payroll.js";
 import { createExpenseRouter } from "./expenses.js";
 import { createSopRouter } from "./sop.js";
 import { createResourceRouter } from "./resources.js";
+import { createCustomerRouter } from "./customers.js";
+import { createProductRouter } from "./products.js";
+import { createOrderRouter } from "./orders.js";
+import { createShopeeRouter } from "./shopee-routes.js";
+import { createShopeeClient, loadShopeeConfig } from "./shopee.js";
 
 dotenv.config();
 dotenv.config({ path: fileURLToPath(new URL("../.env", import.meta.url)), override: false });
@@ -207,6 +212,24 @@ const payrollRouter = createPayrollRouter({ express, supabase, directDbPool, ide
 const expenseRouter = createExpenseRouter({ express, supabase, directDbPool });
 const sopRouter = createSopRouter({ express, supabase, directDbPool });
 
+// --- 客户 / 商品 / 订单 / Shopee：依赖 directDbPool 的事务能力 ---
+const shopeeConfig = loadShopeeConfig();
+const commerceRouter = express.Router();
+const shopeeRoutes = createShopeeRouter({
+  express,
+  directDbPool,
+  shopee: createShopeeClient(shopeeConfig),
+  encKey: shopeeConfig?.encKey,
+  authSecret: AUTH_SECRET,
+  frontendBase: shopeeConfig?.redirectBase,
+});
+commerceRouter.use((_req, res, next) => (directDbPool ? next() : res.status(503).json({ error: "数据库直连未配置（DATABASE_URL）" })));
+commerceRouter.use(createCustomerRouter({ express, directDbPool }));
+commerceRouter.use(createProductRouter({ express, directDbPool }));
+commerceRouter.use(createOrderRouter({ express, directDbPool }));
+commerceRouter.use(shopeeRoutes.router);
+app.get("/api/v4/shopee/auth/callback", shopeeRoutes.handleCallback);
+
 app.use("/api/v4/admin", requireV4Auth);
 app.post("/api/v4/admin/employees/:id/reset-password", auth.handleResetEmployeePassword);
 app.use("/api/v4/admin", employeeRouter);
@@ -216,6 +239,7 @@ app.use("/api/v4/admin", invoiceRouter);
 app.use("/api/v4/admin", payrollRouter);
 app.use("/api/v4/admin", expenseRouter);
 app.use("/api/v4/admin", sopRouter);
+app.use("/api/v4/admin", commerceRouter);
 
 app.use("/api/admin", requireV4Auth);
 app.post("/api/admin/employees/:id/reset-password", auth.handleResetEmployeePassword);

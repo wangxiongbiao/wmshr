@@ -1,15 +1,16 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { 
   Plus, Search, Edit, Trash2, Shield, Eye, Settings, Check, X,
   ExternalLink, ToggleLeft, ToggleRight, DollarSign, Award, ShoppingBag, Globe, Info
 } from "lucide-react";
-import { Customer, ShopBinding } from "../types";
+import { Customer } from "../types";
 import { getTranslation, Language } from "../lib/i18n";
+import { customerApi } from "../lib/customerApi";
 
 interface CustomerManagerProps {
   customers: Customer[];
   onUpdateCustomers: (customers: Customer[]) => void;
-  addToast: (msg: string) => void;
+  addToast: (msg: string, kind?: "success" | "error" | "info") => void;
   lang?: Language;
 }
 
@@ -46,15 +47,44 @@ export function CustomerManager({ customers, onUpdateCustomers, addToast, lang =
   // Cancel authorization confirmation state
   const [shopToUnbind, setShopToUnbind] = useState<{ shopId: string; shopName: string } | null>(null);
   
-  // Authorization simulation state
-  const [isAuthorizing, setIsAuthorizing] = useState(false);
-  const [authStep, setAuthStep] = useState(0);
-  const [authStatusText, setAuthStatusText] = useState("");
-  
-  // Create / Edit Bound Store Form
-  const [newStorePlatform, setNewStorePlatform] = useState<"TikTok" | "Shopee">("Shopee");
-  const [newStoreName, setNewStoreName] = useState("");
-  const [newStoreId, setNewStoreId] = useState("");
+  // 写操作进行中：防连击并禁用提交按钮
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+
+  /** 执行写操作：串行防连击，失败时提示服务端错误 */
+  const runAction = async (task: () => Promise<void>) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      await task();
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : (lang === "en" ? "Operation failed" : "操作失败，请稍后重试"), "error");
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  };
+
+  /** 用服务端返回的最新客户替换列表与弹窗中的快照 */
+  const applySavedCustomer = (saved: Customer) => {
+    onUpdateCustomers(customers.map(c => (c.id === saved.id ? saved : c)));
+    setActiveCustomer(prev => (prev?.id === saved.id ? saved : prev));
+    setLedgerCustomer(prev => (prev?.id === saved.id ? saved : prev));
+    setViewingCustomer(prev => (prev?.id === saved.id ? saved : prev));
+  };
+
+  // Shopee 授权回调会带结果参数重定向回本页：提示结果后清除参数
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const result = params.get("shopee_auth");
+    if (!result) return;
+    addToast(params.get("message") || (result === "success" ? "店铺授权成功" : "店铺授权失败"), result === "success" ? "success" : "error");
+    params.delete("shopee_auth");
+    params.delete("message");
+    const query = params.toString();
+    window.history.replaceState(null, "", window.location.pathname + (query ? `?${query}` : ""));
+  }, []);
 
   // Credit/Ledger transaction log systems
   const [isLedgerOpen, setIsLedgerOpen] = useState(false);
@@ -85,44 +115,20 @@ export function CustomerManager({ customers, onUpdateCustomers, addToast, lang =
       return;
     }
 
-    const logAmt = txAmount;
-    let nextAvailable = ledgerCustomer.availableLimit;
-    if (txType === "recharge") {
-      nextAvailable += logAmt;
-    } else {
-      nextAvailable -= logAmt;
-    }
-
-    const newLogEntry = {
-      id: `tx-${Date.now()}`,
-      type: txType,
-      amount: logAmt,
-      balanceAfter: nextAvailable,
-      createdAt: new Date().toISOString().replace("T", " ").substring(0, 19),
-      note: txNote.trim(),
-      operator: txOperator.trim() || (lang === "en" ? "System Cashier" : "系统出纳员")
-    };
-
-    const updated = customers.map(c => {
-      if (c.id === ledgerCustomer.id) {
-        const logs = c.creditLogs || [];
-        const nextCustomer: Customer = {
-          ...c,
-          availableLimit: nextAvailable,
-          creditLogs: [newLogEntry, ...logs]
-        };
-        setLedgerCustomer(nextCustomer);
-        return nextCustomer;
-      }
-      return c;
+    const customerCode = ledgerCustomer.id;
+    void runAction(async () => {
+      applySavedCustomer(await customerApi.addCreditLog(customerCode, {
+        type: txType,
+        amount: txAmount,
+        note: txNote.trim(),
+        operator: txOperator.trim(),
+      }));
+      setTxAmount(0);
+      setTxNote("");
+      addToast(lang === "en"
+        ? `[Account Entry] ${txType === "recharge" ? "Recharge Credited" : "Expense Deducted"} ¥${txAmount.toLocaleString()} posted successfully.`
+        : `【账款入账】${txType === "recharge" ? "充值加额" : "消耗核销"} ¥${txAmount.toLocaleString()} 已入账`);
     });
-
-    onUpdateCustomers(updated);
-    setTxAmount(0);
-    setTxNote("");
-    addToast(lang === "en" 
-      ? `[Account Entry] ${txType === "recharge" ? "Recharge Credited" : "Expense Deducted"} ¥${logAmt.toLocaleString()} posted successfully.` 
-      : `【账款入账】${txType === "recharge" ? "充值加额" : "消耗核销"} ¥${logAmt.toLocaleString()} 已入账`);
   };
 
   // Filtered lists
@@ -183,6 +189,19 @@ export function CustomerManager({ customers, onUpdateCustomers, addToast, lang =
       return;
     }
 
+    const fields = {
+      name: nameInput.trim(),
+      contact: contactInput.trim(),
+      currency: currencyInput,
+      availableLimit: availableLimitInput,
+      creditLimit: creditLimitInput,
+      billingTemplate: billingTemplateInput,
+      address: addressInput.trim() || undefined,
+      taxNo: taxNoInput.trim() || undefined,
+      bankAccount: bankAccountInput.trim() || undefined,
+      bankName: bankNameInput.trim() || undefined
+    };
+
     if (!editingCustomer) {
       // Check duplicated ID
       if (customers.some(c => c.id === idInput.trim())) {
@@ -190,47 +209,21 @@ export function CustomerManager({ customers, onUpdateCustomers, addToast, lang =
         return;
       }
 
-      const newCustomer: Customer = {
-        id: idInput.trim(),
-        name: nameInput.trim(),
-        contact: contactInput.trim(),
-        currency: currencyInput,
-        availableLimit: availableLimitInput,
-        creditLimit: creditLimitInput,
-        billingTemplate: billingTemplateInput,
-        status: "enabled",
-        shops: [],
-        address: addressInput.trim() || undefined,
-        taxNo: taxNoInput.trim() || undefined,
-        bankAccount: bankAccountInput.trim() || undefined,
-        bankName: bankNameInput.trim() || undefined
-      };
-
-      onUpdateCustomers([...customers, newCustomer]);
-      addToast(lang === "en" ? `Customer "${newCustomer.name}" added successfully!` : `新增客户 "${newCustomer.name}" 成功！`);
-    } else {
-      const updated = customers.map(c => {
-        if (c.id === editingCustomer.id) {
-          return {
-            ...c,
-            name: nameInput.trim(),
-            contact: contactInput.trim(),
-            currency: currencyInput,
-            availableLimit: availableLimitInput,
-            creditLimit: creditLimitInput,
-            billingTemplate: billingTemplateInput,
-            address: addressInput.trim() || undefined,
-            taxNo: taxNoInput.trim() || undefined,
-            bankAccount: bankAccountInput.trim() || undefined,
-            bankName: bankNameInput.trim() || undefined
-          };
-        }
-        return c;
+      const code = idInput.trim();
+      void runAction(async () => {
+        const created = await customerApi.create({ id: code, ...fields });
+        onUpdateCustomers([...customers, created]);
+        addToast(lang === "en" ? `Customer "${created.name}" added successfully!` : `新增客户 "${created.name}" 成功！`);
+        setIsFormOpen(false);
       });
-      onUpdateCustomers(updated);
-      addToast(lang === "en" ? "Customer profile changes saved successfully!" : `编辑客户信息已保存`);
+    } else {
+      const code = editingCustomer.id;
+      void runAction(async () => {
+        applySavedCustomer(await customerApi.update(code, fields));
+        addToast(lang === "en" ? "Customer profile changes saved successfully!" : `编辑客户信息已保存`);
+        setIsFormOpen(false);
+      });
     }
-    setIsFormOpen(false);
   };
 
   const handleDeleteCustomer = (id: string, name: string) => {
@@ -238,147 +231,61 @@ export function CustomerManager({ customers, onUpdateCustomers, addToast, lang =
       ? `Are you sure you want to delete customer "${name}"? This action cannot be undone.` 
       : `确定要删除客户 "${name}" 吗？该操作无法撤销。`;
     if (confirm(confirmMessage)) {
-      onUpdateCustomers(customers.filter(c => c.id !== id));
-      addToast(lang === "en" ? `Customer "${name}" deleted successfully` : `已成功删除客户: ${name}`);
+      void runAction(async () => {
+        await customerApi.remove(id);
+        onUpdateCustomers(customers.filter(c => c.id !== id));
+        addToast(lang === "en" ? `Customer "${name}" deleted successfully` : `已成功删除客户: ${name}`);
+      });
     }
   };
 
   const toggleCustomerStatus = (id: string, currentStatus: "enabled" | "disabled") => {
     const nextStatus = currentStatus === "enabled" ? "disabled" : "enabled";
-    onUpdateCustomers(customers.map(c => {
-      if (c.id === id) {
-        return { ...c, status: nextStatus };
-      }
-      return c;
-    }));
-    const statusText = nextStatus === "enabled" 
-      ? (lang === "en" ? "[Enabled]" : "【启用】") 
-      : (lang === "en" ? "[Disabled]" : "【禁用】");
-    addToast(lang === "en" 
-      ? `Customer status updated to: ${statusText}` 
-      : `客户状态已变更为: ${statusText}`);
+    void runAction(async () => {
+      applySavedCustomer(await customerApi.setStatus(id, nextStatus));
+      const statusText = nextStatus === "enabled"
+        ? (lang === "en" ? "[Enabled]" : "【启用】")
+        : (lang === "en" ? "[Disabled]" : "【禁用】");
+      addToast(lang === "en"
+        ? `Customer status updated to: ${statusText}`
+        : `客户状态已变更为: ${statusText}`);
+    });
   };
 
   // Open Bound Stores Panel
   const openBindingsModal = (cust: Customer) => {
     setActiveCustomer(cust);
-    setNewStorePlatform("Shopee");
-    setNewStoreName("");
-    setNewStoreId("");
-    setIsAuthorizing(false);
-    setAuthStep(0);
-    setAuthStatusText("");
     setIsBindingsOpen(true);
   };
 
-  // Bind a store with realistic API authorization flow simulation
-  const handleAddStore = (e: React.FormEvent) => {
-    e.preventDefault();
+  /** 跳转 Shopee 授权页；授权完成后由后端回调重定向回本页 */
+  const startShopeeAuthorization = () => {
     if (!activeCustomer) return;
-    if (!newStoreName.trim() || !newStoreId.trim()) {
-      addToast(lang === "en" ? "Please enter custom store name and Shop ID" : "请输入店铺名称与店铺专属ID");
-      return;
-    }
-
-    // Start simulation steps
-    setIsAuthorizing(true);
-    setAuthStep(1);
-    setAuthStatusText(lang === "en"
-      ? `Redirecting and initializing secure connection with ${newStorePlatform} open platform...`
-      : `正在跳转并初始化对 ${newStorePlatform} 开放平台的安全鉴权对接...`);
-
-    setTimeout(() => {
-      setAuthStep(2);
-      setAuthStatusText(lang === "en"
-        ? `Requesting ${newStorePlatform} OAuth2 gateway, exchanging security keys for AccessToken...`
-        : `正在请求 ${newStorePlatform} OAuth2 授权网关，安全握手获取 AccessToken 凭证...`);
-
-      setTimeout(() => {
-        setAuthStep(3);
-        setAuthStatusText(lang === "en"
-          ? `Verifying merchant shop ID: ${newStoreId} and retrieving shop metadata...`
-          : `正在验证商户店铺专属ID: ${newStoreId} 并拉取远程网店基础元数据...`);
-
-        setTimeout(() => {
-          setAuthStep(4);
-          setAuthStatusText(lang === "en"
-            ? `API handshake verified! Mounting store to customer [${activeCustomer.name}]...`
-            : `API核验通过！正在同步绑定至客户 [${activeCustomer.name}] 档案中...`);
-
-          setTimeout(() => {
-            const newBinding: ShopBinding = {
-              id: `shop-${Date.now()}`,
-              platform: newStorePlatform,
-              shopName: newStoreName.trim(),
-              shopId: newStoreId.trim(),
-              status: "enabled",
-              authorizedAt: new Date().toISOString().split("T")[0]
-            };
-
-            const updated = customers.map(c => {
-              if (c.id === activeCustomer.id) {
-                const shops = [...(c.shops || []), newBinding];
-                // Keep active customer in sync for render
-                setActiveCustomer({ ...c, shops });
-                return { ...c, shops };
-              }
-              return c;
-            });
-
-            onUpdateCustomers(updated);
-            setNewStoreName("");
-            setNewStoreId("");
-            setIsAuthorizing(false);
-            setAuthStep(0);
-            setAuthStatusText("");
-            addToast(lang === "en" 
-              ? `Successfully bound store: ${newBinding.shopName} (${newBinding.platform})` 
-              : `成功绑定授权店铺: ${newBinding.shopName} (${newBinding.platform})`);
-          }, 800);
-        }, 1000);
-      }, 1000);
-    }, 1000);
+    const customerCode = activeCustomer.id;
+    void runAction(async () => {
+      window.location.assign(await customerApi.shopeeAuthUrl(customerCode));
+    });
   };
 
-  // Unbind/Delete store
   const handleRemoveStore = (shopIdToDel: string, shopName: string) => {
     setShopToUnbind({ shopId: shopIdToDel, shopName });
   };
 
   const confirmRemoveStore = () => {
-    if (!activeCustomer || !shopToUnbind) return;
+    if (!shopToUnbind) return;
     const { shopId, shopName } = shopToUnbind;
-    const updated = customers.map(c => {
-      if (c.id === activeCustomer.id) {
-        const shops = c.shops.filter(s => s.id !== shopId);
-        setActiveCustomer({ ...c, shops });
-        return { ...c, shops };
-      }
-      return c;
+    void runAction(async () => {
+      applySavedCustomer(await customerApi.unbindShop(shopId));
+      addToast(lang === "en" ? `Store [${shopName}] authorization has been removed` : `店铺 [${shopName}] 授权已成功解除`);
+      setShopToUnbind(null);
     });
-    onUpdateCustomers(updated);
-    addToast(lang === "en" ? `Store [${shopName}] authorization has been removed` : `店铺 [${shopName}] 授权已成功解除`);
-    setShopToUnbind(null);
   };
 
-  const toggleStoreStatus = (shopIdToToggle: string) => {
-    if (!activeCustomer) return;
-    const updated = customers.map(c => {
-      if (c.id === activeCustomer.id) {
-        const shops = c.shops.map(s => {
-          if (s.id === shopIdToToggle) {
-            const nextStat = s.status === "enabled" ? "disabled" : "enabled";
-            return { ...s, status: nextStat as "enabled" | "disabled" };
-          }
-          return s;
-        });
-        setActiveCustomer({ ...c, shops });
-        return { ...c, shops };
-      }
-      return c;
+  const toggleStoreStatus = (shopRecordId: string, currentStatus: "enabled" | "disabled") => {
+    void runAction(async () => {
+      applySavedCustomer(await customerApi.setShopStatus(shopRecordId, currentStatus === "enabled" ? "disabled" : "enabled"));
+      addToast(lang === "en" ? "Store authorization status updated successfully" : "网店授权连接状态已被成功更改");
     });
-    onUpdateCustomers(updated);
-    addToast(lang === "en" ? "Store authorization status updated successfully" : "网店授权连接状态已被成功更改");
   };
 
   return (
@@ -835,6 +742,7 @@ export function CustomerManager({ customers, onUpdateCustomers, addToast, lang =
                 </button>
                 <button
                   type="submit"
+                  disabled={busy}
                   className="px-7 py-2.5 bg-brand-600 hover:bg-brand-700 text-white font-extrabold rounded-xl transition text-sm cursor-pointer"
                 >
                   {getTranslation("cust_btn_save", lang)}
@@ -870,116 +778,31 @@ export function CustomerManager({ customers, onUpdateCustomers, addToast, lang =
             {/* List and form */}
             <div className="p-6 flex-1 overflow-y-auto space-y-6">
               
-              {/* Form to Bind New store or Loading progress */}
-              {isAuthorizing ? (
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-8 flex flex-col items-center justify-center space-y-5 animate-in fade-in duration-300">
-                  <div className="relative w-16 h-16 flex items-center justify-center">
-                    {/* Animated spin outer */}
-                    <div className="absolute inset-0 rounded-full border-4 border-slate-200 border-t-brand-600 animate-spin"></div>
-                    {/* Platform logo badge inside */}
-                    <span className="text-[10px] font-black text-brand-600 uppercase tracking-widest">
-                      {newStorePlatform}
-                    </span>
-                  </div>
-                  
-                  <div className="text-center space-y-2.5 max-w-md">
-                    <h4 className="text-sm font-bold text-slate-800">
-                      {lang === "en" 
-                        ? `Requesting ${newStorePlatform} open API authorization gateway...`
-                        : `正在请求 ${newStorePlatform} 开放授权接口...`}
-                    </h4>
-                    <div className="flex flex-col items-center gap-2">
-                      <div className="flex items-center gap-2 bg-white px-3.5 py-1.5 rounded-full shadow-3xs border border-slate-100">
-                        <span className="flex h-2 w-2 relative">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-brand-500"></span>
-                        </span>
-                        <p className="text-xs font-semibold text-slate-600">
-                          {authStatusText}
-                        </p>
-                      </div>
-                      
-                      {/* Step bullet indicators */}
-                      <div className="flex gap-2 pt-2">
-                        <div className="flex flex-col items-center gap-1">
-                          <span className={`h-1.5 w-12 rounded-full transition-colors duration-300 ${authStep >= 1 ? "bg-brand-500" : "bg-slate-200"}`} />
-                          <span className="text-[9px] font-bold text-slate-400">{lang === "en" ? "Setup Channel" : "建立通道"}</span>
-                        </div>
-                        <div className="flex flex-col items-center gap-1">
-                          <span className={`h-1.5 w-12 rounded-full transition-colors duration-300 ${authStep >= 2 ? "bg-brand-500" : "bg-slate-200"}`} />
-                          <span className="text-[9px] font-bold text-slate-400">{lang === "en" ? "OAuth Handshake" : "OAuth握手"}</span>
-                        </div>
-                        <div className="flex flex-col items-center gap-1">
-                          <span className={`h-1.5 w-12 rounded-full transition-colors duration-300 ${authStep >= 3 ? "bg-brand-500" : "bg-slate-200"}`} />
-                          <span className="text-[9px] font-bold text-slate-400">{lang === "en" ? "Fetch Store" : "拉取店铺"}</span>
-                        </div>
-                        <div className="flex flex-col items-center gap-1">
-                          <span className={`h-1.5 w-12 rounded-full transition-colors duration-300 ${authStep >= 4 ? "bg-brand-500" : "bg-slate-200"}`} />
-                          <span className="text-[9px] font-bold text-slate-400">{lang === "en" ? "Verify Mount" : "挂载核验"}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <form onSubmit={handleAddStore} className="bg-slate-50 border border-slate-150/60 rounded-xl p-5 space-y-4">
-                  <span className="block font-extrabold text-xs text-slate-500 uppercase tracking-widest mb-1">
-                    💡 {getTranslation("cust_modal_new_channel", lang)}
+              {/* 发起平台授权 */}
+              <div className="bg-slate-50 border border-slate-150/60 rounded-xl p-5 space-y-3">
+                <span className="block font-extrabold text-xs text-slate-500 uppercase tracking-widest">
+                  💡 {getTranslation("cust_modal_new_channel", lang)}
+                </span>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  {lang === "en"
+                    ? "You will be redirected to Shopee. Sign in with the seller account and approve the authorization; the store is bound to this customer automatically."
+                    : "将跳转到 Shopee 授权页，使用卖家账号登录并同意授权后，店铺会自动绑定到该客户并返回本页。"}
+                </p>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <span className="text-[11px] text-slate-400">
+                    {lang === "en" ? "TikTok Shop integration is not available yet." : "TikTok Shop 暂未接入。"}
                   </span>
-                  
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div>
-                      <label className="block font-bold text-slate-500 mb-1.5 text-xs">{lang === "en" ? "Platform" : "电商平台"}</label>
-                      <select
-                        value={newStorePlatform}
-                        onChange={(e) => setNewStorePlatform(e.target.value as any)}
-                        className="w-full px-3 py-2 border border-slate-200 rounded-lg outline-none text-sm font-semibold bg-white"
-                      >
-                        <option value="Shopee">Shopee Mall</option>
-                        <option value="TikTok">TikTok Shop</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block font-bold text-slate-500 mb-1.5 text-xs">{lang === "en" ? "Custom Store Name" : "网店自定义描述名称"}</label>
-                      <input
-                        type="text"
-                        value={newStoreName}
-                        onChange={(e) => setNewStoreName(e.target.value)}
-                        placeholder={lang === "en" 
-                          ? (newStorePlatform === "Shopee" ? "e.g., Shopee Southeast Asia Shop" : "e.g., TikTok K-Beauty Store") 
-                          : (newStorePlatform === "Shopee" ? "例如：虾皮东南亚特产屋" : "例如：TikTok韩国美妆海外一号店")}
-                        className="w-full px-3 py-2 border border-slate-200 rounded-lg outline-none text-sm font-semibold"
-                        required
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block font-bold text-slate-500 mb-1.5 text-xs">{lang === "en" ? "Store Unique Shop ID" : "电商平台店铺独有ID (Shop ID)"}</label>
-                      <input
-                        type="text"
-                        value={newStoreId}
-                        onChange={(e) => setNewStoreId(e.target.value)}
-                        placeholder={lang === "en" 
-                          ? (newStorePlatform === "Shopee" ? "e.g., sp-748301" : "e.g., tk-shop-849503") 
-                          : (newStorePlatform === "Shopee" ? "例: sp-748301" : "例: tk-shop-849503")}
-                        className="w-full px-3 py-2 border border-slate-200 rounded-lg outline-none text-sm font-semibold font-mono"
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end pt-1">
-                    <button
-                      type="submit"
-                      className="px-6 py-2 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-lg text-sm transition cursor-pointer flex items-center gap-1 shrink-0 shadow-xs"
-                    >
-                      <Plus className="w-4 h-4" />
-                      <span>{getTranslation("cust_modal_start_auth", lang)}</span>
-                    </button>
-                  </div>
-                </form>
-              )}
+                  <button
+                    type="button"
+                    onClick={startShopeeAuthorization}
+                    disabled={busy}
+                    className="px-6 py-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-lg text-sm transition cursor-pointer flex items-center gap-1 shrink-0 shadow-xs"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    <span>{lang === "en" ? "Authorize Shopee Store" : "前往 Shopee 授权店铺"}</span>
+                  </button>
+                </div>
+              </div>
 
               {/* List of Bound stores */}
               <div className="space-y-2">
@@ -1023,22 +846,35 @@ export function CustomerManager({ customers, onUpdateCustomers, addToast, lang =
                         </div>
 
                         <div className="flex items-center gap-3">
+                          {shop.status === "revoked" ? (
+                            <button
+                              type="button"
+                              onClick={startShopeeAuthorization}
+                              disabled={busy}
+                              className="px-2 py-0.5 rounded-full text-[9px] font-bold cursor-pointer transition bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-150"
+                            >
+                              {lang === "en" ? "Authorization expired · Re-authorize" : "授权已失效 · 重新授权"}
+                            </button>
+                          ) : (
                           <button
                             type="button"
-                            onClick={() => toggleStoreStatus(shop.id)}
+                            disabled={busy}
+                            onClick={() => toggleStoreStatus(shop.id, shop.status as "enabled" | "disabled")}
                             className={`px-2 py-0.5 rounded-full text-[9px] font-bold cursor-pointer transition ${
                               shop.status === "enabled"
                                 ? "bg-emerald-550 text-emerald-600 hover:bg-emerald-100 border border-emerald-150"
                                 : "bg-slate-100 text-slate-500 hover:bg-slate-200 border border-slate-150"
                             }`}
                           >
-                            {shop.status === "enabled" 
-                              ? (lang === "en" ? "● Active" : "● 已开启") 
+                            {shop.status === "enabled"
+                              ? (lang === "en" ? "● Active" : "● 已开启")
                               : (lang === "en" ? "○ Suspended" : "○ 已暂挂")}
                           </button>
+                          )}
                           
                           <button
                             type="button"
+                            disabled={busy}
                             onClick={() => handleRemoveStore(shop.id, shop.shopName)}
                             className="p-1 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition cursor-pointer"
                             title={lang === "en" ? "Unbind this store" : "解除此店铺绑定"}
@@ -1227,6 +1063,7 @@ export function CustomerManager({ customers, onUpdateCustomers, addToast, lang =
                   {/* Submit button */}
                   <button
                     type="submit"
+                    disabled={busy}
                     className="w-full py-2.5 bg-brand-600 hover:bg-brand-700 text-white font-extrabold rounded-xl transition text-xs cursor-pointer shadow-xs active:scale-95 flex items-center justify-center gap-1.5"
                   >
                     <Check className="w-3.5 h-3.5" />

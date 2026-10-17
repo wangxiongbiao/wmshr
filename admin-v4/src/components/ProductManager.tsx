@@ -1,20 +1,43 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { 
   Plus, Search, Edit, Trash2, Tag, Layers, RefreshCw, Check, X,
   BadgeAlert, BadgeCheck, AlertCircle, Calendar, ShieldAlert, ArrowDownLeft,
   ChevronDown, ChevronRight, QrCode, Printer, MapPin, ArrowLeft
 } from "lucide-react";
 import { Product, Customer, GoodsRecord } from "../types";
+import { productApi, ProductInput } from "../lib/productApi";
 
 interface ProductManagerProps {
   products: Product[];
   onUpdateProducts: (products: Product[]) => void;
   customers: Customer[];
   goodsList: GoodsRecord[]; // Source inbound list
-  addToast: (msg: string) => void;
+  addToast: (msg: string, kind?: "success" | "error" | "info") => void;
 }
 
 export function ProductManager({ products, onUpdateProducts, customers, goodsList, addToast }: ProductManagerProps) {
+  // 写操作进行中：防连击并禁用提交按钮
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+
+  /** 执行写操作：串行防连击，失败时提示服务端错误 */
+  const runAction = async (task: () => Promise<void>) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      await task();
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : "操作失败，请稍后重试", "error");
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  };
+
+  const applySavedProduct = (saved: Product) =>
+    onUpdateProducts(products.map(p => (p.recordId === saved.recordId ? saved : p)));
+
   // Navigation & secondary page tracking state
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [secSearchQuery, setSecSearchQuery] = useState("");
@@ -225,22 +248,15 @@ export function ProductManager({ products, onUpdateProducts, customers, goodsLis
     if (!locationProduct) return;
 
     const trimmedValue = locationValue.trim();
-    const updated = products.map(p => {
-      if (p.id === locationProduct.id && p.customerId === locationProduct.customerId) {
-        return {
-          ...p,
-          shelfLocation: trimmedValue || undefined
-        };
+    const target = locationProduct;
+    void runAction(async () => {
+      applySavedProduct(await productApi.setLocation(target.recordId, trimmedValue));
+      if (trimmedValue) {
+        addShelfLocationIfNew(trimmedValue);
       }
-      return p;
+      setIsLocationModalOpen(false);
+      addToast(`【库位成功配置】商品 Sku "${target.id}" 默认库房储位已设置为: ${trimmedValue || "未分配"}`);
     });
-
-    onUpdateProducts(updated);
-    if (trimmedValue) {
-      addShelfLocationIfNew(trimmedValue);
-    }
-    setIsLocationModalOpen(false);
-    addToast(`【库位成功配置】商品 Sku "${locationProduct.id}" 默认库房储位已设置为: ${trimmedValue || "未分配"}`);
   };
 
   // Sticker QR code preview system
@@ -407,60 +423,33 @@ export function ProductManager({ products, onUpdateProducts, customers, goodsLis
       return;
     }
 
-    let addedSkuCount = 0;
-    let updatedSkuCount = 0;
-
-    // Clone current product list
-    const updatedProducts = [...products];
-
-    completedGoods.forEach(goodsRecord => {
-      if (!goodsRecord.skus || goodsRecord.skus.length === 0) return;
-
-      // Map matching customer
-      const matchingCustomer = customers.find(c => c.name === goodsRecord.customerName) || customers[0];
-      const customerId = matchingCustomer ? matchingCustomer.id : ("CUST-TEMP-" + goodsRecord.customerName);
-      const customerName = goodsRecord.customerName;
-
-      goodsRecord.skus.forEach(skuItem => {
-        const skuId = skuItem.sku.trim();
-        const qtyToImport = skuItem.actualQty || skuItem.qty || 0;
-
-        if (!skuId || qtyToImport <= 0) return;
-
-        // Try to find if SKU already exists for this client
-        const existingIdx = updatedProducts.findIndex(p => p.id === skuId && p.customerId === customerId);
-
-        if (existingIdx !== -1) {
-          // Exists, let's sum up to keep inventory synchronized!
-          updatedProducts[existingIdx].inventory += qtyToImport;
-          updatedProducts[existingIdx].note = `[已自动叠加 WMS 入库单 SKU: ${goodsRecord.entryNo}] ${updatedProducts[existingIdx].note || ""}`;
-          updatedSkuCount++;
-        } else {
-          // Does not exist, create a new Product
-          const newProduct: Product = {
-            id: skuId,
-            name: skuItem.desc || goodsRecord.goodsName || `导入商品 SKU - ${skuId}`,
-            spec: skuItem.desc || "根据WMS入库单自推导出",
-            customerId: customerId,
-            customerName: customerName,
-            inventory: qtyToImport,
-            shelfLocation: goodsRecord.shippingMark || "A-区待分类",
-            note: `从 WMS入库单 ${goodsRecord.entryNo} 自动同步解析导入`,
-            lastStocktakeTime: new Date().toISOString().replace("T", " ").substring(0, 19)
-          };
-          updatedProducts.push(newProduct);
-          addedSkuCount++;
-        }
-      });
-    });
-
-    if (addedSkuCount === 0 && updatedSkuCount === 0) {
-      addToast("未检测到未处理的全新入库SKU数据，全部SKU已是最高状态");
+    const entries = completedGoods
+      .filter(g => g.skus && g.skus.length > 0)
+      .map(g => ({
+        entryNo: g.entryNo,
+        customerName: g.customerName,
+        shippingMark: g.shippingMark,
+        goodsName: g.goodsName,
+        skus: g.skus!.map(item => ({ sku: item.sku.trim(), desc: item.desc, qty: item.actualQty || item.qty || 0 })),
+      }));
+    if (entries.length === 0) {
+      addToast("已签收入库单中没有 SKU 明细，无法导入");
       return;
     }
 
-    onUpdateProducts(updatedProducts);
-    addToast(`【同步成功】共从WMS入库单成功创建 ${addedSkuCount} 款新SKU，累加更新 ${updatedSkuCount} 款已有SKU库存量！`);
+    void runAction(async () => {
+      const result = await productApi.importInbound(entries);
+      onUpdateProducts(await productApi.list());
+      const notes = [
+        result.alreadyImported.length > 0 ? `${result.alreadyImported.length} 张入库单此前已导入` : "",
+        result.unmatchedCustomers.length > 0 ? `${result.unmatchedCustomers.length} 张入库单的客户名称未匹配到客户档案（${result.unmatchedCustomers.join("、")}）` : "",
+      ].filter(Boolean).join("；");
+      if (result.created === 0 && result.updated === 0) {
+        addToast(notes ? `没有新的入库库存可导入：${notes}` : "没有新的入库库存可导入", "info");
+        return;
+      }
+      addToast(`【同步成功】新建 ${result.created} 款SKU，累加 ${result.updated} 款已有SKU库存${notes ? `。${notes}` : ""}`);
+    });
   };
 
   // Open Edit/Create form
@@ -511,27 +500,16 @@ export function ProductManager({ products, onUpdateProducts, customers, goodsLis
     if (!activeProduct) return;
 
     const previousQty = activeProduct.inventory;
-    const nowTimeStr = new Date().toISOString().replace("T", " ").substring(0, 19);
-
-    const updated = products.map(p => {
-      if (p.id === activeProduct.id && p.customerId === activeProduct.customerId) {
-        return {
-          ...p,
-          inventory: stocktakeQty,
-          shelfLocation: shelfLocationInput.trim() || undefined,
-          lastStocktakeQty: previousQty,
-          lastStocktakeTime: nowTimeStr,
-          note: stocktakeNote.trim() 
-            ? `[盘点备注 ${nowTimeStr}]: ${stocktakeNote.trim()} | ${p.note || ""}`
-            : p.note
-        };
-      }
-      return p;
+    const target = activeProduct;
+    void runAction(async () => {
+      applySavedProduct(await productApi.stocktake(target.recordId, {
+        qty: stocktakeQty,
+        shelfLocation: shelfLocationInput.trim(),
+        note: stocktakeNote.trim(),
+      }));
+      setIsStocktakeOpen(false);
+      addToast(`【盘点完成】商品 SKU "${target.id}" 库存已由 ${previousQty} 改正为 ${stocktakeQty}，已入档！`);
     });
-
-    onUpdateProducts(updated);
-    setIsStocktakeOpen(false);
-    addToast(`【盘点完成】商品 SKU "${activeProduct.id}" 库存已由 ${previousQty} 改正为 ${stocktakeQty}，已入档！`);
   };
 
   // Save/Create Product Item
@@ -555,68 +533,51 @@ export function ProductManager({ products, onUpdateProducts, customers, goodsLis
     const wt = parseFloat(weightInput);
     const vol = (!isNaN(l) && !isNaN(w) && !isNaN(h)) ? (l * w * h) : undefined;
 
-    if (!editingProduct) {
-      // Check duplicated ID
-      if (products.some(p => p.id === skuInput.trim() && p.customerId === productCustomerId)) {
-        addToast("该客户下已有此SKU，请勿重复定义");
-        return;
+    const input: ProductInput = {
+      id: skuInput.trim(),
+      name: nameInput.trim(),
+      spec: specInput.trim() || undefined,
+      customerId: productCustomerId,
+      inventory: initialInventory,
+      shelfLocation: shelfLocationForm.trim() || undefined,
+      note: productNote.trim() || undefined,
+      length: !isNaN(l) ? l : undefined,
+      width: !isNaN(w) ? w : undefined,
+      height: !isNaN(h) ? h : undefined,
+      weight: !isNaN(wt) ? wt : undefined,
+    };
+
+    if (!editingProduct && products.some(p => p.id === input.id && p.customerId === productCustomerId)) {
+      addToast("该客户下已有此SKU，请勿重复定义");
+      return;
+    }
+
+    const editing = editingProduct;
+    void runAction(async () => {
+      if (editing) {
+        applySavedProduct(await productApi.update(editing.recordId, input));
+        addToast(`商铺客商商品信息已保存`);
+      } else {
+        const created = await productApi.create(input);
+        onUpdateProducts([...products, created]);
+        addToast(`成功注册商品 SKU: ${created.id}`);
       }
-
-      const newProd: Product = {
-        id: skuInput.trim(),
-        name: nameInput.trim(),
-        spec: specInput.trim() || undefined,
-        customerId: productCustomerId,
-        customerName: selectedCust.name,
-        inventory: initialInventory,
-        shelfLocation: shelfLocationForm.trim() || undefined,
-        note: productNote.trim() || undefined,
-        lastStocktakeTime: new Date().toISOString().replace("T", " ").substring(0, 19),
-        length: !isNaN(l) ? l : undefined,
-        width: !isNaN(w) ? w : undefined,
-        height: !isNaN(h) ? h : undefined,
-        weight: !isNaN(wt) ? wt : undefined,
-        volume: vol
-      };
-
-      onUpdateProducts([...products, newProd]);
-      addToast(`成功注册商品 SKU: ${newProd.id}`);
-    } else {
-      const updated = products.map(p => {
-        if (p.id === editingProduct.id && p.customerId === editingProduct.customerId) {
-          return {
-            ...p,
-            name: nameInput.trim(),
-            spec: specInput.trim() || undefined,
-            customerId: productCustomerId,
-            customerName: selectedCust.name,
-            inventory: initialInventory,
-            shelfLocation: shelfLocationForm.trim() || undefined,
-            note: productNote.trim() || undefined,
-            length: !isNaN(l) ? l : undefined,
-            width: !isNaN(w) ? w : undefined,
-            height: !isNaN(h) ? h : undefined,
-            weight: !isNaN(wt) ? wt : undefined,
-            volume: vol
-          };
-        }
-        return p;
-      });
-      onUpdateProducts(updated);
-      addToast(`商铺客商商品信息已保存`);
-    }
-    const cleanLocForm = shelfLocationForm.trim();
-    if (cleanLocForm) {
-      addShelfLocationIfNew(cleanLocForm);
-    }
-    setIsFormOpen(false);
+      const cleanLocForm = shelfLocationForm.trim();
+      if (cleanLocForm) {
+        addShelfLocationIfNew(cleanLocForm);
+      }
+      setIsFormOpen(false);
+    });
   };
 
-  // Delete product
-  const handleDeleteProduct = (id: string, custId: string, name: string) => {
+  // Delete product  // Delete product
+  const handleDeleteProduct = (recordId: string, name: string) => {
     if (confirm(`确定要彻底删除该商户商品 "${name}" 的SKU目录吗？这可能会影响正在处理的订单。`)) {
-      onUpdateProducts(products.filter(p => !(p.id === id && p.customerId === custId)));
-      addToast(`商品目录档案已剥离: ${name}`);
+      void runAction(async () => {
+        await productApi.remove(recordId);
+        onUpdateProducts(products.filter(p => p.recordId !== recordId));
+        addToast(`商品目录档案已剥离: ${name}`);
+      });
     }
   };
 
@@ -1061,7 +1022,7 @@ export function ProductManager({ products, onUpdateProducts, customers, goodsLis
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    handleDeleteProduct(prod.id, prod.customerId, prod.name);
+                                    handleDeleteProduct(prod.recordId, prod.name);
                                   }}
                                   className="p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-605 rounded-lg transition cursor-pointer"
                                   title="从货架商品目录中移除"
@@ -1115,6 +1076,7 @@ export function ProductManager({ products, onUpdateProducts, customers, goodsLis
             <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 w-full md:w-auto shrink-0">
               <button
                 onClick={handleSyncInboundData}
+                disabled={busy}
                 title="一键抓取并累加WMS入库单已签收货物的SKU箱数，智能映射客商与库存"
                 className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 bg-indigo-50 border border-indigo-150 text-indigo-650 hover:bg-indigo-100 active:scale-95 text-xs font-bold rounded-lg cursor-pointer transition shadow-3xs"
               >
@@ -1374,6 +1336,7 @@ export function ProductManager({ products, onUpdateProducts, customers, goodsLis
                 </button>
                 <button
                   type="submit"
+                  disabled={busy}
                   className="px-7 py-2.5 bg-brand-600 hover:bg-brand-700 text-white font-extrabold rounded-xl transition text-sm cursor-pointer"
                 >
                   确认盘点正位
@@ -1619,6 +1582,7 @@ export function ProductManager({ products, onUpdateProducts, customers, goodsLis
                 </button>
                 <button
                   type="submit"
+                  disabled={busy}
                   className="px-7 py-2.5 bg-brand-600 hover:bg-brand-700 text-white font-extrabold rounded-xl transition text-sm cursor-pointer"
                 >
                   保存商品SKU
@@ -1717,6 +1681,7 @@ export function ProductManager({ products, onUpdateProducts, customers, goodsLis
                 </button>
                 <button
                   type="submit"
+                  disabled={busy}
                   className="px-7 py-2.5 bg-brand-600 hover:bg-brand-700 text-white font-extrabold rounded-xl transition text-xs flex items-center gap-1 cursor-pointer select-none"
                 >
                   <Check className="w-4 h-4" />

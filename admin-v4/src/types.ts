@@ -266,8 +266,9 @@ export interface ShopBinding {
   platform: 'TikTok' | 'Shopee';
   shopName: string;
   shopId: string;
-  status: 'enabled' | 'disabled';
+  status: 'enabled' | 'disabled' | 'revoked'; // revoked：授权已解除或失效，需重新授权
   authorizedAt: string;
+  lastSyncedAt?: string;
 }
 
 export interface CreditLogRecord {
@@ -298,6 +299,7 @@ export interface Customer {
 }
 
 export interface Product {
+  recordId: string;       // 服务端记录主键
   id: string;             // 商品ID / SKU
   name: string;           // 商品名称
   spec?: string;          // 规格属性
@@ -316,27 +318,40 @@ export interface Product {
   volume?: number;        // 单件总体积 (cm³)
 }
 
+export interface OrderItem {
+  platformItemId: string;
+  platformModelId: string;
+  platformSku: string;    // 平台规格 SKU（可能为空）
+  itemName: string;
+  modelName: string;
+  imageUrl: string;
+  qty: number;
+  unitPrice: number;
+  sku?: string;           // 配对后的本仓商品 SKU
+  productName?: string;
+  deductQty?: number;     // 配对后应扣减的本仓件数
+}
+
 export interface CustomerOrder {
   id: string;             // 订单ID (系统流水号)
-  orderNo: string;        // 客拉取平台订单号
+  orderNo: string;        // 平台订单号
   customerId: string;     // 关联客户ID
   customerName: string;   // 关联客户名称
   platform: 'TikTok' | 'Shopee'; // 平台
-  shopName: string;       // 绑定的店铺名称
-  shopId: string;         // 店铺ID
-  skuId: string;          // 商品SKU
-  skuName: string;        // 商品名称规格
-  qty: number;            // 订购数量
-  price: number;          // 单价
+  shopName: string;       // 店铺名称
+  shopId: string;         // 平台店铺ID
+  items: OrderItem[];
+  totalAmount: number;
   currency: string;       // 金额货币
   receiverName: string;   // 收件人姓名
   receiverPhone: string;  // 收件人电话
   receiverAddress: string;// 收货地址
-  shippingLabelUrl?: string; // 快递面单图片
-  status: 'retrieved' | 'pending_print' | 'printed' | 'shipped' | 'anomaly' | 'canceled'; // 拉取/待打单/已打单/已发货/异常/作废
-  createdAt: string;      // 订单拉取同步时间
+  status: 'pending_pair' | 'pending_print' | 'printed' | 'shipped' | 'anomaly' | 'canceled'; // 待配对/待打单/已打单/已发货/异常/作废
+  inventoryLocked: boolean; // 是否已扣减库存（作废时据此回补）
+  platformStatus: string; // 平台侧订单状态
+  createdAt: string;      // 平台下单时间
   carrier?: string;       // 物流承运商
-  trackingNo?: string;    // 真实快递单号
+  trackingNo?: string;    // 快递单号
   reason?: string;        // 异常标记说明/作废说明
 }
 
